@@ -731,12 +731,25 @@ impl Workspace {
     }
 
     /// Create a brand-new terminal tab (spawns a fresh shell/PTY), make it the
-    /// active tab, show the panel and give it focus. Labeled `PowerShell N` so
-    /// tabs stay distinguishably unique across opens/closes.
+    /// active tab, show the panel and give it focus. Labeled like Zed's
+    /// terminals (shell name + sequence number) so tabs stay distinguishable.
+    ///
+    /// Working directory priority (Zed-style):
+    /// 1. Active terminal's working directory (if a terminal is open)
+    /// 2. Project root directory
+    /// 3. User's home directory (fallback, handled by Terminal::new)
     pub(crate) fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let root = self.root.clone();
+        // Determine working directory: prefer active terminal's dir, then project root
+        let working_dir = self
+            .terminal_tabs
+            .get(self.active_terminal)
+            .and_then(|term| term.read(cx).working_dir.clone())
+            .or_else(|| self.root.clone());
+
         let id = self.next_terminal_id;
         self.next_terminal_id += 1;
+
+        // Label: "bash 1", "zsh 2", "PowerShell 3" (Zed-style)
         let label = if cfg!(windows) {
             format!("PowerShell {id}")
         } else {
@@ -745,13 +758,17 @@ impl Workspace {
                 "zsh"
             } else if shell.ends_with("fish") {
                 "fish"
+            } else if shell.ends_with("nu") {
+                "nu"
             } else {
                 "bash"
             };
             format!("{base} {id}")
         };
         let palette = self.theme().terminal_palette.clone();
-        let term = cx.new(|cx| crate::terminal::Terminal::new(root.as_deref(), label, palette, window, cx));
+        let term = cx.new(|cx| {
+            crate::terminal::Terminal::new(working_dir.as_deref(), label, palette, window, cx)
+        });
         self.terminal_tabs.push(term);
         self.active_terminal = self.terminal_tabs.len() - 1;
         self.show_terminal = true;
@@ -838,6 +855,95 @@ impl Workspace {
             self.terminal_tabs.len()
         );
         cx.notify();
+    }
+
+    /// Switch to the next terminal tab (wraps around). Zed-style terminal
+    /// navigation: Alt+Right or Ctrl+PageDown cycle through sessions.
+    pub(crate) fn next_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal_tabs.len() <= 1 {
+            return;
+        }
+        self.active_terminal = (self.active_terminal + 1) % self.terminal_tabs.len();
+        self.focus_active_terminal(window, cx);
+        self.status = format!("Terminal {} active", self.active_terminal + 1);
+        cx.notify();
+    }
+
+    /// Switch to the previous terminal tab (wraps around). Zed-style:
+    /// Alt+Left or Ctrl+PageUp.
+    pub(crate) fn prev_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal_tabs.len() <= 1 {
+            return;
+        }
+        self.active_terminal =
+            (self.active_terminal + self.terminal_tabs.len() - 1) % self.terminal_tabs.len();
+        self.focus_active_terminal(window, cx);
+        self.status = format!("Terminal {} active", self.active_terminal + 1);
+        cx.notify();
+    }
+
+    /// Close the active terminal tab. If it's the last one, hide the panel.
+    pub(crate) fn close_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal_tabs.is_empty() {
+            return;
+        }
+        let idx = self.active_terminal;
+        self.close_terminal(idx, window, cx);
+    }
+
+    /// Switch to a specific terminal tab by index (Alt+1..5 shortcuts).
+    pub(crate) fn switch_terminal_tab_to(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index < self.terminal_tabs.len() {
+            self.active_terminal = index;
+            self.focus_active_terminal(window, cx);
+            self.status = format!("Terminal {} active", index + 1);
+            cx.notify();
+        }
+    }
+
+    /// Clear the active terminal screen by sending the ANSI clear sequence.
+    /// Zed does this via its "terminal: clear" action.
+    ///
+    /// Sends:
+    /// - `\x1b[2J` — clear entire screen
+    /// - `\x1b[H` — move cursor to home position (top-left)
+    /// - `\x1b[3J` — clear scrollback buffer (Erase Scrollback)
+    pub(crate) fn clear_active_terminal(&mut self, cx: &mut Context<Self>) {
+        if let Some(term_entity) = self.terminal_tabs.get(self.active_terminal).cloned() {
+            let term = term_entity.read(cx);
+            // ANSI escape sequences to clear screen + scrollback + home cursor
+            let clear_seq = b"\x1b[2J\x1b[H\x1b[3J";
+            if term.send_bytes(clear_seq) {
+                self.status = "Terminal cleared".into();
+            } else {
+                self.status = "Failed to clear terminal".into();
+            }
+            cx.notify();
+        }
+    }
+
+    /// Check all terminal processes for exit and update their state.
+    /// Called periodically from the render loop (Zed-style process monitoring).
+    /// When a terminal's shell exits, its tab shows a red dot and the exit
+    /// status so the user knows it's dead without having to type into it.
+    pub(crate) fn poll_terminal_processes(&mut self, cx: &mut Context<Self>) {
+        let mut any_changed = false;
+        for term_entity in &self.terminal_tabs {
+            let changed = term_entity.update(cx, |term, _cx| {
+                term.check_process_exit()
+            });
+            if changed {
+                any_changed = true;
+            }
+        }
+        if any_changed {
+            cx.notify();
+        }
     }
 
     /// Focus the active tab's editor, falling back to the workspace focus

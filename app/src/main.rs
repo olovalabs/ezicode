@@ -88,6 +88,18 @@ fn main() {
                 KeyBinding::new("ctrl-`", ToggleTerminal, None),
                 KeyBinding::new("ctrl-j", ToggleTerminal, None),
                 KeyBinding::new("ctrl-shift-`", NewTerminal, None),
+                // Terminal navigation (Zed-style: Alt+arrows, Alt+1..5)
+                KeyBinding::new("alt-right", NextTerminal, None),
+                KeyBinding::new("alt-left", PrevTerminal, None),
+                KeyBinding::new("ctrl-shift-w", CloseTerminal, None),
+                // Quick terminal tab switching (Zed-style: Alt+1..5)
+                KeyBinding::new("alt-1", TerminalTab1, None),
+                KeyBinding::new("alt-2", TerminalTab2, None),
+                KeyBinding::new("alt-3", TerminalTab3, None),
+                KeyBinding::new("alt-4", TerminalTab4, None),
+                KeyBinding::new("alt-5", TerminalTab5, None),
+                // Clear terminal screen (sends ANSI clear + scrollback erase)
+                KeyBinding::new("ctrl-shift-k", ClearTerminal, None),
                 KeyBinding::new("ctrl-b", ToggleSidebar, None),
                 KeyBinding::new("ctrl-shift-e", ShowExplorer, None),
                 KeyBinding::new("ctrl-shift-f", ShowSearch, None),

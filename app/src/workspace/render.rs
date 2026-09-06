@@ -35,6 +35,13 @@ impl Render for Workspace {
             self.git_commit(window, cx);
         }
 
+        // Poll terminal processes for exit (Zed-style lifecycle monitoring).
+        // When a shell exits, its tab shows a red dot and the exit status
+        // without requiring the user to discover it by typing into a dead PTY.
+        if self.show_terminal && !self.terminal_tabs.is_empty() {
+            self.poll_terminal_processes(cx);
+        }
+
         let th = self.theme();
         let t = th.colors;
         let welcome = self.welcome_visible();
@@ -138,6 +145,34 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
                 this.new_terminal(window, cx);
+            }))
+            // Terminal navigation actions (Zed-style: Alt+arrows, Alt+1..5)
+            .on_action(cx.listener(|this, _: &NextTerminal, window, cx| {
+                this.next_terminal_tab(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PrevTerminal, window, cx| {
+                this.prev_terminal_tab(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseTerminal, window, cx| {
+                this.close_active_terminal(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalTab1, window, cx| {
+                this.switch_terminal_tab_to(0, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalTab2, window, cx| {
+                this.switch_terminal_tab_to(1, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalTab3, window, cx| {
+                this.switch_terminal_tab_to(2, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalTab4, window, cx| {
+                this.switch_terminal_tab_to(3, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &TerminalTab5, window, cx| {
+                this.switch_terminal_tab_to(4, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ClearTerminal, _window, cx| {
+                this.clear_active_terminal(cx);
             }))
             .on_action(cx.listener(|this, _: &NewFile, window, cx| this.new_file(window, cx)))
             .on_action(cx.listener(|this, _: &OpenFile, window, cx| {
