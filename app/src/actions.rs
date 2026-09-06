@@ -116,6 +116,18 @@ pub struct ExplorerDelete {
     pub path: PathBuf,
 }
 
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct ExplorerCut;
+
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct ExplorerCopy;
+
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct ExplorerPaste;
+
 // -- Source control (Git) payload actions ------------------------------------
 
 /// Stage one changed file (from the source-control panel).

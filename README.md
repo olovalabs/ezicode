@@ -102,7 +102,12 @@ are cached correctly, so repeatedly opening them does not trigger another scan.
 The explorer also supports auto-reveal for opened files, arrow-key navigation
 (Up/Down/Home/End), Left/Right folder navigation, Enter to open/toggle, and
 quick New File, New Folder, Refresh, and Collapse All actions in the project
-header. Right-click rows for the full file-operation menu.
+header. Right-click rows for the full file-operation menu. Files and folders
+can be created inline in any expanded directory, renamed with F2, deleted with
+Delete, copied/cut/pasted with Ctrl+C/Ctrl+X/Ctrl+V, and moved by dragging onto
+a folder (including the project root). Moves and folder renames update open
+tabs, diagnostics, and the selected path; invalid destinations, collisions, and
+moves into a descendant are rejected without touching the filesystem.
 
 ## File icons
 

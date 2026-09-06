@@ -209,6 +209,44 @@ pub fn display_name(p: &Path) -> String {
         .unwrap_or_else(|| p.display().to_string())
 }
 
+/// Validate a name entered in the explorer's create/rename editor.
+///
+/// The filesystem APIs accept absolute paths and `..` components, but the
+/// explorer must never let a filename field escape the workspace or silently
+/// address a sibling directory. Separators are intentionally rejected here;
+/// creating nested directories is done by choosing the destination folder (or
+/// by an explicit move), just like the native VS Code explorer.
+pub fn valid_entry_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !Path::new(name).is_absolute()
+        && !name.chars().any(|ch| ch == '\0' || ch.is_control())
+}
+
+/// Return whether `candidate` is the same path as, or inside, `parent`.
+///
+/// `Path::starts_with` is component-aware (unlike string prefix checks), so
+/// `src2` cannot accidentally be treated as a child of `src`.
+pub fn is_same_or_descendant(parent: &Path, candidate: &Path) -> bool {
+    candidate == parent || candidate.starts_with(parent)
+}
+
+/// Rewrite a path after moving `source` to `destination` while preserving
+/// descendants. This is used to keep open tabs and selections valid when a
+/// directory is moved as a unit.
+pub fn path_after_move(path: &Path, source: &Path, destination: &Path) -> Option<PathBuf> {
+    if path == source {
+        return Some(destination.to_path_buf());
+    }
+    path.strip_prefix(source)
+        .ok()
+        .map(|suffix| destination.join(suffix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,6 +281,29 @@ mod tests {
         assert!(merged[0].expanded);
         assert!(merged[0].children_loaded);
         assert_eq!(merged[0].children[0].name, "main.rs");
+    }
+
+    #[test]
+    fn entry_names_cannot_escape_the_workspace() {
+        assert!(valid_entry_name("main.rs"));
+        assert!(valid_entry_name(".env"));
+        assert!(!valid_entry_name(""));
+        assert!(!valid_entry_name("."));
+        assert!(!valid_entry_name(".."));
+        assert!(!valid_entry_name("../outside"));
+        assert!(!valid_entry_name("nested/file.rs"));
+        assert!(!valid_entry_name("nested\\\\file.rs"));
+    }
+
+    #[test]
+    fn move_rewrites_only_path_components() {
+        let source = Path::new("/project/src");
+        let destination = Path::new("/project/lib");
+        assert_eq!(
+            path_after_move(Path::new("/project/src/main.rs"), source, destination),
+            Some(PathBuf::from("/project/lib/main.rs"))
+        );
+        assert_eq!(path_after_move(Path::new("/project/src2/main.rs"), source, destination), None);
     }
 
     #[test]

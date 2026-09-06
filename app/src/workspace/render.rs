@@ -72,6 +72,7 @@ impl Render for Workspace {
         let selected_path = self.selected_path.as_ref();
         let explorer_section_expanded = self.explorer_section_expanded;
         let inline_creating = self.inline_creating.as_ref();
+        let inline_renaming = self.inline_renaming.as_ref();
         let root_display_shared = &self.root_display_shared;
         let status = self.status.as_str();
         let activity = self.activity;
@@ -209,11 +210,20 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, action: &ExplorerCopyRelativePath, _, cx| {
                 this.copy_relative_path(&action.path, cx);
             }))
-            .on_action(cx.listener(|this, action: &ExplorerRename, _, cx| {
-                this.rename_entry(&action.path, cx);
+            .on_action(cx.listener(|this, action: &ExplorerRename, window, cx| {
+                this.start_inline_rename(action.path.clone(), window, cx);
             }))
             .on_action(cx.listener(|this, action: &ExplorerDelete, _, cx| {
                 this.delete_entry(&action.path, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExplorerCut, _, cx| {
+                this.explorer_cut(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExplorerCopy, _, cx| {
+                this.explorer_copy(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ExplorerPaste, _, cx| {
+                this.explorer_paste(cx);
             }))
             // Tab action handlers
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
@@ -330,6 +340,7 @@ impl Render for Workspace {
                                             selected_path,
                                             explorer_section_expanded,
                                             inline_creating,
+                                            inline_renaming,
                                             root_display_shared,
                                             &t,
                                             cx,

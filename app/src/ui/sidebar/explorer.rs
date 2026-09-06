@@ -10,20 +10,23 @@ use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, px, rgba, svg, uniform_list, AnyElement, Context, FocusHandle, FontWeight,
-    IntoElement, SharedString, UniformListScrollHandle, Window,
+    IntoElement, MouseButton, Render, SharedString, UniformListScrollHandle, Window,
 };
 use gpui_component::{input::Input, menu::ContextMenuExt, tooltip::Tooltip, Sizable};
 
 use crate::actions::{
-    ExplorerCollapseAll, ExplorerCopyPath, ExplorerCopyRelativePath, ExplorerDelete,
-    ExplorerNewFile, ExplorerNewFolder, ExplorerRefresh, ExplorerRename, ExplorerRevealInFinder,
+    ExplorerCollapseAll, ExplorerCopy, ExplorerCopyPath, ExplorerCopyRelativePath, ExplorerCut,
+    ExplorerDelete, ExplorerNewFile, ExplorerNewFolder, ExplorerPaste, ExplorerRefresh,
+    ExplorerRename, ExplorerRevealInFinder,
     OpenFolder,
 };
 use crate::file_icons;
 use crate::fs_tree::VisibleTreeRow;
 use crate::theme::Colors;
 use crate::ui::common::icon_img;
-use crate::workspace::{CreatingKind, InlineCreating, Workspace};
+use crate::workspace::{
+    CreatingKind, ExplorerDrag, InlineCreating, InlineRenaming, Workspace,
+};
 
 const INDENT_STEP: f32 = 14.0;
 const BASE_PAD: f32 = 12.0;
@@ -39,6 +42,7 @@ pub(crate) fn render_tree(
     selected_path: Option<&PathBuf>,
     section_expanded: bool,
     inline_creating: Option<&InlineCreating>,
+    inline_renaming: Option<&InlineRenaming>,
     folder: &SharedString,
     t: &Colors,
     cx: &mut Context<Workspace>,
@@ -70,6 +74,8 @@ pub(crate) fn render_tree(
     // frames. Toolbar clicks resolve the current root at click time, avoiding
     // three more PathBuf clones on every workspace repaint.
     let r_context = root_path.map(|path| path.to_path_buf());
+    let drop_root = r_context.clone();
+    let drop_color = t.element_selected;
 
     let header = div()
         .id("exp-root-header")
@@ -82,6 +88,17 @@ pub(crate) fn render_tree(
         .hover(|s| s.bg(rgba(t.ghost_hover)))
         .on_click(cx.listener(|this, _, _, cx| {
             this.toggle_explorer_section(cx);
+        }))
+        // The project header is the drop target for moving an item back to
+        // the workspace root. This is important when the root is collapsed or
+        // when there are no visible child rows to drop onto.
+        .drag_over::<ExplorerDrag>(move |this, _, _, _| {
+            this.bg(rgba(drop_color))
+        })
+        .on_drop(cx.listener(move |this, drag: &ExplorerDrag, _window, cx| {
+            if let Some(root) = drop_root.clone() {
+                this.move_entry(&drag.path, &root, cx);
+            }
         }))
         .context_menu(move |menu, _window, _cx| {
             let p1 = r_context.clone();
@@ -184,6 +201,7 @@ pub(crate) fn render_tree(
         let selected_path = selected_path.cloned();
         let row_data = Arc::clone(&rows);
         let creating = inline_creating.cloned();
+        let renaming = inline_renaming.cloned();
         let inline_pos = creating.as_ref().map(|creating| {
             rows.iter()
                 .enumerate()
@@ -207,6 +225,7 @@ pub(crate) fn render_tree(
             let open = open.clone();
             let selected_path = selected_path.clone();
             let creating = creating.clone();
+            let renaming = renaming.clone();
             workspace.update(app, |_, cx| {
                 range
                     .map(|idx| {
@@ -229,6 +248,7 @@ pub(crate) fn render_tree(
                             &row_data[row_idx],
                             open.as_ref(),
                             selected_path.as_ref(),
+                            renaming.as_ref(),
                             colors,
                             cx,
                         )
@@ -361,14 +381,113 @@ fn inline_create_row(
     row.child(content)
 }
 
+fn inline_rename_row(
+    idx: usize,
+    row_data: &VisibleTreeRow,
+    renaming: &InlineRenaming,
+    t: &Colors,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    let pad = BASE_PAD + row_data.depth as f32 * INDENT_STEP;
+    let icon_path = if row_data.is_dir {
+        file_icons::folder_icon_for(&row_data.path, row_data.expanded)
+    } else {
+        file_icons::icon_for(&row_data.path)
+    };
+    let chev = if row_data.is_dir {
+        let path = if row_data.expanded {
+            "ui_icons/chevron-down_tint.svg"
+        } else {
+            "ui_icons/chevron-right_tint.svg"
+        };
+        div()
+            .w(px(14.0))
+            .h(px(14.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .flex_none()
+            .child(svg().path(path).w(px(10.0)).h(px(10.0)).text_color(rgba(t.icon_muted)))
+    } else {
+        div().w(px(14.0)).h(px(14.0)).flex_none()
+    };
+
+    let mut row = div()
+        .id(("tree-row-rename", idx))
+        .w_full()
+        .h(px(ROW_HEIGHT))
+        .relative()
+        .flex()
+        .flex_row()
+        .items_center()
+        .bg(rgba(t.element_selected))
+        .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+            if event.keystroke.key == "escape" {
+                this.cancel_inline_rename(cx);
+            } else if event.keystroke.key == "enter" {
+                this.confirm_inline_rename(cx);
+            }
+        }));
+    for d in 0..row_data.depth {
+        let guide_x = BASE_PAD + d as f32 * INDENT_STEP + 3.0;
+        row = row.child(
+            div()
+                .absolute()
+                .left(px(guide_x))
+                .top(px(0.0))
+                .bottom(px(0.0))
+                .w(px(1.0))
+                .bg(rgba(0xffffff1e)),
+        );
+    }
+    row.child(
+        div()
+            .w_full()
+            .h_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .pl(px(pad))
+            .pr(px(8.0))
+            .child(chev)
+            .child(div().w(px(4.0)).flex_none())
+            .child(icon_img(icon_path, ICON_SIZE))
+            .child(div().w(px(6.0)).flex_none())
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(22.0))
+                    .flex()
+                    .items_center()
+                    .bg(rgba(t.background))
+                    .border_1()
+                    .border_color(rgba(t.border_focused))
+                    .rounded(px(4.0))
+                    .px(px(2.0))
+                    .child(
+                        Input::new(&renaming.input)
+                            .xsmall()
+                            .text_size(px(13.5))
+                            .appearance(false)
+                            .bordered(false),
+                    ),
+            ),
+    )
+    .into_any_element()
+}
+
 fn tree_row(
     idx: usize,
     row_data: &VisibleTreeRow,
     open: Option<&PathBuf>,
     selected_path: Option<&PathBuf>,
+    renaming: Option<&InlineRenaming>,
     t: Colors,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
+    if let Some(renaming) = renaming.filter(|rename| rename.path == row_data.path) {
+        return inline_rename_row(idx, row_data, renaming, &t, cx);
+    }
     let is_open = open.is_some_and(|p| p == &row_data.path);
     let is_selected = selected_path.is_some_and(|p| p == &row_data.path) || is_open;
     let path = row_data.path.clone();
@@ -467,12 +586,44 @@ fn tree_row(
         .child(content)
         .on_click(cx.listener(move |this, _, window, cx| {
             window.focus(&this.explorer_focus_handle);
+            this.selected_path = Some(path_click.clone());
             if is_dir {
                 this.toggle_dir(&path_click, cx);
             } else {
                 this.open_file(path_click.clone(), window, cx);
             }
-        }));
+        }))
+        // GPUI starts the drag after the normal click threshold, so a simple
+        // click still selects/opens the row. The payload is a path rather than
+        // a rendered row, which keeps it valid while the virtual list recycles
+        // elements during a drag.
+        .on_drag(ExplorerDrag { path: path.clone() }, |drag, _, _, cx| {
+            cx.stop_propagation();
+            cx.new(|_| drag.clone())
+        });
+
+    if is_dir {
+        let drop_path = path.clone();
+        let drop_color = t.element_selected;
+        row = row
+            .drag_over::<ExplorerDrag>(move |this, _, _, _| {
+                this.bg(rgba(drop_color))
+            })
+            .on_drop(cx.listener(move |this, drag: &ExplorerDrag, _window, cx| {
+                this.move_entry(&drag.path, &drop_path, cx);
+            }));
+    }
+
+    // VS Code selects the row that was right-clicked before opening its
+    // context menu, which makes New/Rename/Delete target the obvious item.
+    let context_select_path = path.clone();
+    row = row.on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |this, _, _, cx| {
+            this.selected_path = Some(context_select_path.clone());
+            cx.notify();
+        }),
+    );
 
     // Right-click context menu (Zed / VS Code File Explorer Context Menu)
     let path_c1 = path.clone();
@@ -491,6 +642,10 @@ fn tree_row(
         let p_new2 = parent_for_new.clone();
         menu.menu("New File…", Box::new(ExplorerNewFile { parent: p_new1 }))
             .menu("New Folder…", Box::new(ExplorerNewFolder { parent: p_new2 }))
+            .when(is_dir, |m| m.menu("Paste", Box::new(ExplorerPaste)))
+            .separator()
+            .menu("Cut", Box::new(ExplorerCut))
+            .menu("Copy", Box::new(ExplorerCopy))
             .separator()
             .menu(
                 "Reveal in File Explorer",
@@ -510,4 +665,36 @@ fn tree_row(
             .menu("Delete", Box::new(ExplorerDelete { path: path_c5.clone() }))
     })
     .into_any_element()
+}
+
+impl Render for ExplorerDrag {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let is_dir = self.path.is_dir();
+        let icon_path = if is_dir {
+            file_icons::folder_icon_for(&self.path, false)
+        } else {
+            file_icons::icon_for(&self.path)
+        };
+        let name = self
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .px(px(8.0))
+            .py(px(4.0))
+            .rounded(px(4.0))
+            .bg(rgba(0x252526f0))
+            .border_1()
+            .border_color(rgba(0x454545ff))
+            .text_size(px(13.0))
+            .text_color(rgba(0xccccccff))
+            .child(icon_img(icon_path, ICON_SIZE))
+            .child(div().w(px(6.0)).flex_none())
+            .child(SharedString::from(name.to_string()))
+    }
 }
