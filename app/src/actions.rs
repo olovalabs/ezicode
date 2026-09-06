@@ -38,7 +38,17 @@ actions!(
         GitStageAll,
         GitUnstageAll,
         GitDiscardAll,
-        GitCommit
+        GitCommit,
+        // Terminal-specific actions (Zed-style)
+        NextTerminal,
+        PrevTerminal,
+        CloseTerminal,
+        ClearTerminal,
+        TerminalTab1,
+        TerminalTab2,
+        TerminalTab3,
+        TerminalTab4,
+        TerminalTab5
     ]
 );
 
@@ -141,4 +151,11 @@ pub struct GitOpenDiff {
 #[action(no_json)]
 pub struct GitOpenFile {
     pub path: PathBuf,
+}
+
+/// Switch to a specific terminal tab by index (Alt+1..5 style shortcuts).
+#[derive(Clone, Copy, Debug, Default, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct SwitchTerminalTab {
+    pub index: usize,
 }
