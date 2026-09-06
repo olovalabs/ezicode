@@ -17,8 +17,8 @@ use gpui_component::input::{InputEvent, InputState, TabSize};
 use notify::Watcher as _;
 
 use crate::fs_tree::{
-    collapse_all, display_name, flatten_visible, load_dir, merge_loaded_dir, TreeNode,
-    VisibleTreeRow,
+    collapse_all, display_name, flatten_visible, is_same_or_descendant, load_dir,
+    merge_loaded_dir, path_after_move, valid_entry_name, TreeNode, VisibleTreeRow,
 };
 use crate::git::{self, GitChange, RepoStatus};
 use crate::lang;
@@ -92,6 +92,27 @@ pub(crate) struct InlineCreating {
     pub(crate) input: Entity<InputState>,
 }
 
+/// The inline editor used by F2 / Rename. Keeping it in the workspace rather
+/// than opening a native save dialog makes rename work for both files and
+/// folders and preserves the tree focus/selection just like VS Code.
+#[derive(Clone)]
+pub(crate) struct InlineRenaming {
+    pub(crate) path: PathBuf,
+    pub(crate) input: Entity<InputState>,
+}
+
+/// Payload carried by GPUI while an explorer row is being dragged.
+#[derive(Clone, Debug)]
+pub(crate) struct ExplorerDrag {
+    pub(crate) path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ExplorerClipboard {
+    pub(crate) path: PathBuf,
+    pub(crate) cut: bool,
+}
+
 pub(crate) struct Workspace {
     /// None until the user opens a folder (VS Code-style start state).
     pub(crate) root: Option<PathBuf>,
@@ -112,6 +133,10 @@ pub(crate) struct Workspace {
     pub(crate) git_changes_expanded: bool,
     pub(crate) split_diff: bool,
     pub(crate) inline_creating: Option<InlineCreating>,
+    pub(crate) inline_renaming: Option<InlineRenaming>,
+    /// Internal explorer clipboard used by Ctrl+C/X/V. It intentionally stores
+    /// paths, not file contents, so large files and folders stay cheap.
+    pub(crate) explorer_clipboard: Option<ExplorerClipboard>,
     /// A file to open once the next render cycle runs.
     pub(crate) pending_open: Option<PathBuf>,
     pub(crate) status: String,
@@ -374,6 +399,8 @@ impl Workspace {
             git_changes_expanded: true,
             split_diff: true,
             inline_creating: None,
+            inline_renaming: None,
+            explorer_clipboard: None,
             pending_open: None,
             status: "Welcome — open a folder or create a file to begin".into(),
             activity: Activity::Explorer,
@@ -539,6 +566,8 @@ impl Workspace {
         self.rebuild_explorer_rows();
         self.selected_path = None;
         self.inline_creating = None;
+        self.inline_renaming = None;
+        self.explorer_clipboard = None;
         self.status = format!("Loading folder {}…", self.root_display);
         let scan_root = path.clone();
         cx.spawn(async move |this, cx| {
@@ -1376,14 +1405,52 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let key = event.keystroke.key.as_str();
-        let rows = Arc::clone(&self.explorer_rows);
-        if rows.is_empty() {
+        // The input entity owns text editing while an inline editor is active.
+        // Do not let the list interpret Enter, arrows, or Delete underneath it.
+        if self.inline_creating.is_some() || self.inline_renaming.is_some() {
             return;
         }
+
+        if event.keystroke.modifiers.control {
+            match (key, event.keystroke.modifiers.shift) {
+                ("c", false) => self.explorer_copy(cx),
+                ("x", false) => self.explorer_cut(cx),
+                ("v", false) => self.explorer_paste(cx),
+                ("n", true) => {
+                    let selected_folder = self
+                        .selected_path
+                        .clone()
+                        .filter(|path| path.is_dir());
+                    self.start_inline_create(CreatingKind::Folder, selected_folder, window, cx);
+                },
+                _ => return,
+            }
+            cx.stop_propagation();
+            return;
+        }
+
+        let rows = Arc::clone(&self.explorer_rows);
         let current = self
             .selected_path
             .as_ref()
             .and_then(|selected| rows.iter().position(|row| &row.path == selected));
+        if rows.is_empty() {
+            return;
+        }
+        if matches!(key, "f2") {
+            if let Some(path) = self.selected_path.clone() {
+                self.start_inline_rename(path, window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if matches!(key, "delete" | "backspace") {
+            if let Some(path) = self.selected_path.clone() {
+                self.delete_entry(&path, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
         let current_ix = current.unwrap_or(0);
 
         match key {
@@ -1446,6 +1513,42 @@ impl Workspace {
         cx.notify();
     }
 
+    fn path_in_workspace(&self, path: &Path) -> bool {
+        self.root
+            .as_deref()
+            .is_some_and(|root| is_same_or_descendant(root, path))
+    }
+
+    /// Expand all loaded ancestors of a directory. If an ancestor has not
+    /// been opened yet, load its first level now so a new item has a visible
+    /// insertion point. Directory scans are shallow and are only performed for
+    /// the path the user is actively editing.
+    fn ensure_directory_visible(&mut self, dir: &Path) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        if dir == root {
+            return;
+        }
+
+        fn expand(nodes: &mut [TreeNode], target: &Path) {
+            for node in nodes {
+                if target.starts_with(&node.path) {
+                    if node.is_dir {
+                        node.expanded = true;
+                        if !node.children_loaded {
+                            node.children = load_dir(&node.path);
+                            node.children_loaded = true;
+                        }
+                        expand(&mut node.children, target);
+                    }
+                    return;
+                }
+            }
+        }
+        expand(&mut self.tree, dir);
+    }
+
     pub(crate) fn start_inline_create_at_root(
         &mut self,
         kind: CreatingKind,
@@ -1463,6 +1566,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Starting another edit commits neither operation. This mirrors the
+        // explorer's one-inline-editor rule and avoids two recycled list rows
+        // sharing focus.
+        self.inline_creating = None;
+        self.inline_renaming = None;
+
         let target_dir = parent
             .or_else(|| {
                 self.selected_path.as_ref().map(|p| {
@@ -1474,30 +1583,23 @@ impl Workspace {
                 })
             })
             .or_else(|| self.root.clone());
-
         let Some(dir) = target_dir else {
             if kind == CreatingKind::File {
                 self.new_file(window, cx);
+            } else {
+                self.status = "Open a folder before creating a directory".into();
+                cx.notify();
             }
             return;
         };
-
-        // Expand parent directory so the new item is visible in the tree
-        if Some(&dir) != self.root.as_ref() {
-            fn expand_path(nodes: &mut [TreeNode], target: &Path) {
-                for n in nodes {
-                    if target.starts_with(&n.path) {
-                        n.expanded = true;
-                        if !n.children_loaded {
-                            n.children = load_dir(&n.path);
-                            n.children_loaded = true;
-                        }
-                        expand_path(&mut n.children, target);
-                    }
-                }
-            }
-            expand_path(&mut self.tree, &dir);
+        if !dir.is_dir() || !self.path_in_workspace(&dir) {
+            self.status = "The selected destination folder is unavailable".into();
+            cx.notify();
+            return;
         }
+
+        self.selected_path = Some(dir.clone());
+        self.ensure_directory_visible(&dir);
         self.explorer_section_expanded = true;
         self.rebuild_explorer_rows();
 
@@ -1506,15 +1608,10 @@ impl Workspace {
             state.focus(window, cx);
             state
         });
-
         cx.subscribe(&input, |this, _state, event: &InputEvent, cx| {
             match event {
-                InputEvent::PressEnter { .. } => {
-                    this.confirm_inline_create(cx);
-                }
-                InputEvent::Blur => {
-                    this.cancel_inline_create(cx);
-                }
+                InputEvent::PressEnter { .. } => this.confirm_inline_create(cx),
+                InputEvent::Blur => this.cancel_inline_create(cx),
                 _ => {}
             }
         })
@@ -1534,43 +1631,353 @@ impl Workspace {
         };
         let raw_name = creating.input.read(cx).value().to_string();
         let name = raw_name.trim();
-        if name.is_empty() {
+        let target_path = creating.parent_dir.join(name);
+        let name_is_valid = valid_entry_name(name);
+        let target_exists = target_path.exists();
+        let invalid = !name_is_valid
+            || !self.path_in_workspace(&target_path)
+            || target_exists;
+        if invalid {
+            self.status = if !name_is_valid || !self.path_in_workspace(&target_path) {
+                "Enter a valid name (without path separators)".into()
+            } else if target_exists {
+                format!("{} already exists", display_name(&target_path))
+            } else {
+                "Could not create that item here".into()
+            };
+            self.inline_creating = Some(creating);
             cx.notify();
             return;
         }
 
-        let target_path = creating.parent_dir.join(name);
-
-        match creating.kind {
-            CreatingKind::File => {
-                if let Some(parent) = target_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                if let Ok(()) = std::fs::write(&target_path, b"") {
-                    let parent_dir = creating.parent_dir.clone();
-                    self.reload_dir(&parent_dir, cx);
-                    self.selected_path = Some(target_path.clone());
+        let result = match creating.kind {
+            CreatingKind::File => std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target_path)
+                .map(|_| ()),
+            CreatingKind::Folder => std::fs::create_dir(&target_path),
+        };
+        match result {
+            Ok(()) => {
+                self.selected_path = Some(target_path.clone());
+                self.ensure_directory_visible(&creating.parent_dir);
+                self.rebuild_explorer_rows();
+                self.reload_dir(&creating.parent_dir, cx);
+                if creating.kind == CreatingKind::File {
                     self.pending_open = Some(target_path.clone());
-                    self.status = format!("Created {}", display_name(&target_path));
                 }
+                self.status = if creating.kind == CreatingKind::File {
+                    format!("Created {}", display_name(&target_path))
+                } else {
+                    format!("Created folder {}", display_name(&target_path))
+                };
             }
-            CreatingKind::Folder => {
-                if let Ok(()) = std::fs::create_dir_all(&target_path) {
-                    let parent_dir = creating.parent_dir.clone();
-                    self.reload_dir(&parent_dir, cx);
-                    self.selected_path = Some(target_path.clone());
-                    self.status = format!("Created folder {}", display_name(&target_path));
-                }
+            Err(error) => {
+                self.status = format!("Could not create {}: {error}", display_name(&target_path));
+                self.inline_creating = Some(creating);
             }
         }
         cx.notify();
     }
 
     pub(crate) fn cancel_inline_create(&mut self, cx: &mut Context<Self>) {
-        if self.inline_creating.is_some() {
-            self.inline_creating = None;
+        if self.inline_creating.take().is_some() {
             cx.notify();
         }
+    }
+
+    pub(crate) fn start_inline_rename(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.path_in_workspace(&path) || !path.exists() {
+            return;
+        }
+        self.inline_creating = None;
+        self.inline_renaming = None;
+        self.selected_path = Some(path.clone());
+        self.reveal_tree_path(&path);
+
+        let name = display_name(&path);
+        let input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).default_value(name);
+            state.select_all_text(cx);
+            state.focus(window, cx);
+            state
+        });
+        cx.subscribe(&input, |this, _state, event: &InputEvent, cx| {
+            match event {
+                InputEvent::PressEnter { .. } => this.confirm_inline_rename(cx),
+                InputEvent::Blur => this.cancel_inline_rename(cx),
+                _ => {}
+            }
+        })
+        .detach();
+        self.inline_renaming = Some(InlineRenaming { path, input });
+        cx.notify();
+    }
+
+    pub(crate) fn confirm_inline_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(renaming) = self.inline_renaming.take() else {
+            return;
+        };
+        let raw_name = renaming.input.read(cx).value().to_string();
+        let name = raw_name.trim();
+        let Some(parent) = renaming.path.parent() else {
+            return;
+        };
+        let destination = parent.join(name);
+        if !valid_entry_name(name) || !self.path_in_workspace(&destination) {
+            self.status = "Enter a valid name (without path separators)".into();
+            self.inline_renaming = Some(renaming);
+            cx.notify();
+            return;
+        }
+        if destination == renaming.path {
+            self.selected_path = Some(destination);
+            cx.notify();
+            return;
+        }
+        if destination.exists() {
+            self.status = format!("{} already exists", display_name(&destination));
+            self.inline_renaming = Some(renaming);
+            cx.notify();
+            return;
+        }
+
+        match std::fs::rename(&renaming.path, &destination) {
+            Ok(()) => {
+                self.update_paths_after_move(&renaming.path, &destination);
+                if renaming.path.parent() == destination.parent() {
+                    self.rewrite_tree_path(&renaming.path, &destination);
+                }
+                if let Some(old_parent) = renaming.path.parent().map(Path::to_path_buf) {
+                    self.reload_dir(&old_parent, cx);
+                }
+                self.status = format!("Renamed to {}", display_name(&destination));
+                self.git_poke();
+            }
+            Err(error) => {
+                self.status = format!("Could not rename: {error}");
+                self.inline_renaming = Some(renaming);
+            }
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_inline_rename(&mut self, cx: &mut Context<Self>) {
+        if self.inline_renaming.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn rewrite_tree_path(&mut self, source: &Path, destination: &Path) {
+        fn rewrite(nodes: &mut [TreeNode], source: &Path, destination: &Path) {
+            for node in nodes {
+                if let Some(updated) = path_after_move(&node.path, source, destination) {
+                    node.path = updated;
+                    node.name = display_name(&node.path);
+                    rewrite(&mut node.children, source, destination);
+                }
+            }
+        }
+        rewrite(&mut self.tree, source, destination);
+        self.rebuild_explorer_rows();
+    }
+
+    /// Update editor tabs, diagnostics and selection for a move or directory
+    /// rename. `path_after_move` is component-aware, so `src2/file` is not
+    /// rewritten when only `src` moved.
+    fn update_paths_after_move(&mut self, source: &Path, destination: &Path) {
+        let workspace_root = self.root.clone();
+        for tab in &mut self.tabs {
+            if let Some(path) = tab.path.as_ref() {
+                if let Some(updated) = path_after_move(path, source, destination) {
+                    tab.path = Some(updated);
+                }
+            }
+            if let Some(diff) = tab.diff.as_mut() {
+                if let Some(updated) = path_after_move(&diff.path, source, destination) {
+                    diff.path = updated;
+                    if let Some(root) = workspace_root.as_ref() {
+                        diff.rel = diff
+                            .path
+                            .strip_prefix(root)
+                            .unwrap_or(&diff.path)
+                            .to_string_lossy()
+                            .into_owned();
+                    }
+                }
+            }
+        }
+        let diagnostics = std::mem::take(&mut self.diagnostics_by_path);
+        self.diagnostics_by_path = diagnostics
+            .into_iter()
+            .map(|(path, value)| {
+                (path_after_move(&path, source, destination).unwrap_or(path), value)
+            })
+            .collect();
+        if let Some(path) = self.selected_path.as_ref() {
+            if let Some(updated) = path_after_move(path, source, destination) {
+                self.selected_path = Some(updated);
+            }
+        }
+        if let Some(path) = self.pending_open.as_ref() {
+            if let Some(updated) = path_after_move(path, source, destination) {
+                self.pending_open = Some(updated);
+            }
+        }
+    }
+
+    /// Move a dropped explorer entry into `destination_dir`.
+    pub(crate) fn move_entry(
+        &mut self,
+        source: &Path,
+        destination_dir: &Path,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let source = source.to_path_buf();
+        let destination_dir = destination_dir.to_path_buf();
+        if !self.path_in_workspace(&source)
+            || !self.path_in_workspace(&destination_dir)
+            || !destination_dir.is_dir()
+            || !source.exists()
+        {
+            self.status = "The drag source or destination is unavailable".into();
+            cx.notify();
+            return false;
+        }
+        if is_same_or_descendant(&source, &destination_dir) {
+            self.status = "A folder cannot be moved into itself".into();
+            cx.notify();
+            return false;
+        }
+        let Some(name) = source.file_name() else {
+            return false;
+        };
+        let destination = destination_dir.join(name);
+        if destination == source {
+            self.status = "The item is already in that folder".into();
+            cx.notify();
+            return false;
+        }
+        if destination.exists() {
+            self.status = format!("{} already exists there", display_name(&destination));
+            cx.notify();
+            return false;
+        }
+        let old_parent = source.parent().map(Path::to_path_buf);
+        let moved = match std::fs::rename(&source, &destination) {
+            Ok(()) => {
+                self.update_paths_after_move(&source, &destination);
+                self.selected_path = Some(destination.clone());
+                if let Some(parent) = old_parent {
+                    self.reload_dir(&parent, cx);
+                }
+                self.reload_dir(&destination_dir, cx);
+                self.status = format!("Moved {}", display_name(&destination));
+                self.git_poke();
+                true
+            }
+            Err(error) => {
+                self.status = format!("Could not move: {error}");
+                false
+            }
+        };
+        cx.notify();
+        moved
+    }
+
+    fn copy_entry_recursive(source: &Path, destination: &Path) -> std::io::Result<()> {
+        if source.is_dir() {
+            std::fs::create_dir(destination)?;
+            for entry in std::fs::read_dir(source)? {
+                let entry = entry?;
+                Self::copy_entry_recursive(&entry.path(), &destination.join(entry.file_name()))?;
+            }
+        } else {
+            std::fs::copy(source, destination)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn explorer_copy(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.selected_path.clone() else {
+            return;
+        };
+        self.explorer_clipboard = Some(ExplorerClipboard { path, cut: false });
+        self.status = "Copied explorer item".into();
+        cx.notify();
+    }
+
+    pub(crate) fn explorer_cut(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.selected_path.clone() else {
+            return;
+        };
+        self.explorer_clipboard = Some(ExplorerClipboard { path, cut: true });
+        self.status = "Cut explorer item".into();
+        cx.notify();
+    }
+
+    pub(crate) fn explorer_paste(&mut self, cx: &mut Context<Self>) {
+        let Some(clipboard) = self.explorer_clipboard.clone() else {
+            return;
+        };
+        let destination_dir = self
+            .selected_path
+            .as_ref()
+            .filter(|path| path.is_dir())
+            .cloned()
+            .or_else(|| {
+                self.selected_path
+                    .as_ref()
+                    .and_then(|path| path.parent().map(Path::to_path_buf))
+            })
+            .or_else(|| self.root.clone());
+        let Some(destination_dir) = destination_dir else {
+            return;
+        };
+        if clipboard.cut {
+            if self.move_entry(&clipboard.path, &destination_dir, cx) {
+                self.explorer_clipboard = None;
+            }
+            return;
+        }
+        if !self.path_in_workspace(&clipboard.path) || !clipboard.path.exists() {
+            self.status = "Cannot paste: the copied item is no longer available".into();
+            cx.notify();
+            return;
+        }
+        let Some(name) = clipboard.path.file_name() else {
+            return;
+        };
+        let destination = destination_dir.join(name);
+        if destination.exists() || is_same_or_descendant(&clipboard.path, &destination_dir) {
+            self.status = "Cannot paste: the destination already contains that item".into();
+            cx.notify();
+            return;
+        }
+        match Self::copy_entry_recursive(&clipboard.path, &destination) {
+            Ok(()) => {
+                self.reload_dir(&destination_dir, cx);
+                self.selected_path = Some(destination);
+                self.status = "Pasted explorer item".into();
+            }
+            Err(error) => {
+                // Do not leave a half-copied folder in the tree after a
+                // permissions or I/O failure.
+                if destination.is_dir() {
+                    let _ = std::fs::remove_dir_all(&destination);
+                } else {
+                    let _ = std::fs::remove_file(&destination);
+                }
+                self.status = format!("Could not paste: {error}");
+            }
+        }
+        cx.notify();
     }
 
     pub(crate) fn reveal_in_explorer(&mut self, path: &Path, cx: &mut Context<Self>) {
@@ -1598,6 +2005,7 @@ impl Workspace {
     }
 
     pub(crate) fn copy_path(&mut self, path: &Path, cx: &mut Context<Self>) {
+        self.selected_path = Some(path.to_path_buf());
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.to_string_lossy().to_string()));
         self.status = format!("Copied path: {}", path.display());
         cx.notify();
@@ -1609,69 +2017,73 @@ impl Workspace {
         } else {
             path
         };
+        self.selected_path = Some(path.to_path_buf());
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(rel.to_string_lossy().to_string()));
         self.status = format!("Copied relative path: {}", rel.display());
         cx.notify();
     }
 
     pub(crate) fn delete_entry(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if !self.path_in_workspace(path) || !path.exists() {
+            return;
+        }
         let is_dir = path.is_dir();
-        let res = if is_dir {
+        let result = if is_dir {
             std::fs::remove_dir_all(path)
         } else {
             std::fs::remove_file(path)
         };
-        if res.is_ok() {
-            // Close any tabs that have this file open
-            self.tabs.retain(|t| t.path.as_ref() != Some(&path.to_path_buf()));
-            // Adjust active_tab if needed
-            if self.active_tab >= self.tabs.len() {
-                self.active_tab = self.tabs.len().saturating_sub(1);
-            }
-            if self.selected_path.as_ref() == Some(&path.to_path_buf()) {
-                self.selected_path = None;
-            }
-            if let Some(parent) = path.parent().map(|path| path.to_path_buf()) {
-                self.reload_dir(&parent, cx);
-            }
-            self.git_poke();
-            self.status = format!("Deleted {}", display_name(path));
-        } else if let Err(e) = res {
-            self.status = format!("Failed to delete: {e}");
-        }
-        cx.notify();
-    }
-
-    pub(crate) fn rename_entry(&mut self, path: &Path, cx: &mut Context<Self>) {
-        if let Some(parent) = path.parent() {
-            let name = display_name(path);
-            if let Some(new_path) = rfd::FileDialog::new()
-                .set_directory(parent)
-                .set_file_name(&name)
-                .save_file()
-            {
-                if std::fs::rename(path, &new_path).is_ok() {
-                    // Update any tabs that have this file open
-                    for tab in &mut self.tabs {
-                        if tab.path.as_ref() == Some(&path.to_path_buf()) {
-                            tab.path = Some(new_path.clone());
-                        }
-                    }
-                    if self.selected_path.as_ref() == Some(&path.to_path_buf()) {
-                        self.selected_path = Some(new_path.clone());
-                    }
-                    if let Some(parent) = path.parent().map(|path| path.to_path_buf()) {
-                        self.reload_dir(&parent, cx);
-                    }
-                    if let Some(parent) = new_path.parent().map(|path| path.to_path_buf()) {
-                        if Some(parent.as_path()) != path.parent() {
-                            self.reload_dir(&parent, cx);
-                        }
-                    }
-                    self.git_poke();
-                    self.status = format!("Renamed to {}", display_name(&new_path));
+        match result {
+            Ok(()) => {
+                let active_editor_path = self
+                    .tabs
+                    .get(self.active_tab)
+                    .and_then(|tab| tab.path.clone());
+                let active_diff_path = self
+                    .tabs
+                    .get(self.active_tab)
+                    .and_then(|tab| tab.diff.as_ref().map(|diff| diff.path.clone()));
+                self.tabs.retain(|tab| {
+                    let editor_path_is_alive = tab
+                        .path
+                        .as_ref()
+                        .map_or(true, |tab_path| !is_same_or_descendant(path, tab_path));
+                    let diff_path_is_alive = tab
+                        .diff
+                        .as_ref()
+                        .map_or(true, |diff| !is_same_or_descendant(path, &diff.path));
+                    editor_path_is_alive && diff_path_is_alive
+                });
+                self.diagnostics_by_path
+                    .retain(|tab_path, _| !is_same_or_descendant(path, tab_path));
+                if self.selected_path.as_ref().is_some_and(|selected| is_same_or_descendant(path, selected)) {
+                    self.selected_path = path.parent().map(Path::to_path_buf);
                 }
+                if self.pending_open.as_ref().is_some_and(|pending| is_same_or_descendant(path, pending)) {
+                    self.pending_open = None;
+                }
+                self.active_tab = active_editor_path
+                    .as_ref()
+                    .and_then(|active| {
+                        self.tabs
+                            .iter()
+                            .position(|tab| tab.path.as_ref() == Some(active))
+                    })
+                    .or_else(|| {
+                        active_diff_path.as_ref().and_then(|active| {
+                            self.tabs.iter().position(|tab| {
+                                tab.diff.as_ref().is_some_and(|diff| &diff.path == active)
+                            })
+                        })
+                    })
+                    .unwrap_or_else(|| self.active_tab.min(self.tabs.len().saturating_sub(1)));
+                if let Some(parent) = path.parent().map(Path::to_path_buf) {
+                    self.reload_dir(&parent, cx);
+                }
+                self.git_poke();
+                self.status = format!("Deleted {}", display_name(path));
             }
+            Err(error) => self.status = format!("Failed to delete: {error}"),
         }
         cx.notify();
     }

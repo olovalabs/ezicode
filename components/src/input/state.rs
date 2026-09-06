@@ -783,6 +783,14 @@ impl InputState {
         self
     }
 
+    /// Select the complete input value. This is used by inline filename
+    /// editors so typing immediately replaces the old name, matching the
+    /// rename affordance in VS Code and Zed.
+    pub fn select_all_text(&mut self, cx: &mut Context<Self>) {
+        self.selected_range = (0..self.text.len()).into();
+        cx.notify();
+    }
+
     /// Return the value of the input field.
     pub fn value(&self) -> SharedString {
         SharedString::new(self.text.to_string())
