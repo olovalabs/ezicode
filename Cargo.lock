@@ -135,6 +135,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui-terminal",
+ "libc",
  "lsp-types",
  "notify",
  "portable-pty 0.8.1",
