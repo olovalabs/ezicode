@@ -15,8 +15,12 @@ opt-level = 2
 # ships the fixes.
 [patch.crates-io]
 gpui-component = { path = "components" }
+gpui-terminal = { path = "gpui-terminal" }
 
 # As a path dependency it would otherwise build at opt-level 0 and the whole
 # editor would feel sluggish — keep it optimized like the other deps.
 [profile.dev.package.gpui-component]
+opt-level = 2
+
+[profile.dev.package.gpui-terminal]
 opt-level = 2
