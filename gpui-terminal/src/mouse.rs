@@ -261,6 +261,79 @@ pub fn selection_type_from_clicks(click_count: usize) -> SelectionType {
 /// let bytes = mouse_button_report(MouseButton::Left, true, point, 0, mode);
 /// assert!(bytes.is_some());
 /// ```
+/// Format an SGR 1006 mouse report: `\x1b[<{button};{col};{row}{action}`
+fn sgr_mouse_report(point: AlacPoint, button: u8, pressed: bool) -> Vec<u8> {
+    let action = if pressed { 'M' } else { 'm' };
+    let col = point.column.0 + 1;
+    let row = point.line.0 + 1;
+    format!("\x1b[<{};{};{}{}", button, col, row, action).into_bytes()
+}
+
+/// Format a standard DEC 1000 / X10 mouse report: `\x1b[M{cb}{cx}{cy}`
+fn normal_mouse_report(point: AlacPoint, button: u8, utf8: bool) -> Option<Vec<u8>> {
+    let max_point = if utf8 { 2015 } else { 223 };
+
+    let col = point.column.0;
+    let row = point.line.0;
+    if row < 0 || (row as usize) >= max_point || col >= max_point {
+        return None;
+    }
+
+    let mut msg = vec![b'\x1b', b'[', b'M', 32 + button];
+
+    let mouse_pos_encode = |pos: usize| -> Vec<u8> {
+        let pos = 32 + 1 + pos;
+        let first = 0xC0 + pos / 64;
+        let second = 0x80 + (pos & 63);
+        vec![first as u8, second as u8]
+    };
+
+    if utf8 && col >= 95 {
+        msg.append(&mut mouse_pos_encode(col));
+    } else {
+        msg.push(32 + 1 + col as u8);
+    }
+
+    if utf8 && row >= 95 {
+        msg.append(&mut mouse_pos_encode(row as usize));
+    } else {
+        msg.push(32 + 1 + row as u8);
+    }
+
+    Some(msg)
+}
+
+/// Encode mouse event according to active terminal mode (SGR 1006, UTF-8 1005, or DEC 1000 X10).
+fn format_mouse_report(
+    point: AlacPoint,
+    button_value: u8,
+    pressed: bool,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    if point.line.0 < 0 {
+        return None;
+    }
+
+    if mode.contains(TermMode::SGR_MOUSE) {
+        Some(sgr_mouse_report(point, button_value, pressed))
+    } else if mode.contains(TermMode::UTF8_MOUSE) {
+        if pressed {
+            normal_mouse_report(point, button_value, true)
+        } else {
+            let modifiers = button_value & (4 | 8 | 16);
+            normal_mouse_report(point, 3 | modifiers, true)
+        }
+    } else {
+        // Standard DEC 1000 / X10 mode
+        if pressed {
+            normal_mouse_report(point, button_value, false)
+        } else {
+            let modifiers = button_value & (4 | 8 | 16);
+            normal_mouse_report(point, 3 | modifiers, false)
+        }
+    }
+}
+
 pub fn mouse_button_report(
     button: MouseButton,
     pressed: bool,
@@ -283,34 +356,14 @@ pub fn mouse_button_report(
         _ => return None, // Ignore other buttons
     };
 
-    // Add modifier bits
-    // Bit 2: Shift, Bit 3: Alt, Bit 4: Control
+    // Add modifier bits: Bit 2: Shift, Bit 3: Alt, Bit 4: Control
     let button_value = button_code | modifiers;
-
-    // SGR format uses 1-based indexing
-    let col = point.column.0 + 1;
-    let row = point.line.0 + 1;
-
-    // SGR format: ESC [ < button ; col ; row M/m
-    // M for press, m for release
-    let action = if pressed { b'M' } else { b'm' };
-
-    let sequence = format!("\x1b[<{};{};{}{}", button_value, col, row, action as char);
-    Some(sequence.into_bytes())
+    format_mouse_report(point, button_value, pressed, mode)
 }
 
-/// Generate mouse motion/drag report escape sequence for SGR 1006 mode.
+/// Generate mouse motion/drag report escape sequence.
 ///
-/// When `MOUSE_MOTION` (report all motion) or `MOUSE_DRAG` (report motion while
-/// button is held) is active, this generates the standard SGR 1006 motion report:
-/// `ESC [ < button+32 ; col ; row M`.
-///
-/// # Arguments
-///
-/// * `point` - The terminal grid coordinates of the cursor
-/// * `button` - Which mouse button (if any) is currently pressed down
-/// * `modifiers` - Modifier keys held during the motion
-/// * `mode` - The current terminal mode flags
+/// Supports SGR 1006 mode, UTF-8 mode, and standard DEC 1000 X10 mode.
 pub fn mouse_motion_report(
     point: AlacPoint,
     button: Option<MouseButton>,
@@ -325,10 +378,6 @@ pub fn mouse_motion_report(
     }
 
     // Base motion code is 32.
-    // Left drag: 32 + 0 = 32
-    // Middle drag: 32 + 1 = 33
-    // Right drag: 32 + 2 = 34
-    // Motion without button pressed (MOUSE_MOTION): 32 + 3 = 35
     let button_code = match button {
         Some(MouseButton::Left) => 32,
         Some(MouseButton::Middle) => 33,
@@ -337,93 +386,71 @@ pub fn mouse_motion_report(
     };
 
     let button_value = button_code | modifiers;
-    let col = point.column.0 + 1;
-    let row = point.line.0 + 1;
-
-    let sequence = format!("\x1b[<{};{};{}M", button_value, col, row);
-    Some(sequence.into_bytes())
+    format_mouse_report(point, button_value, true, mode)
 }
 
 /// Generate scroll wheel report escape sequence.
 ///
-/// This function generates the escape sequence for scroll wheel events.
-/// The behavior depends on the terminal mode:
-/// - In mouse mode: sends a mouse wheel report
-/// - In alternate screen without mouse mode: sends arrow key sequences
-/// - In normal screen: returns None (let the terminal handle scrollback)
-///
-/// # Arguments
-///
-/// * `delta` - The scroll delta (positive = up, negative = down)
-/// * `point` - The terminal grid coordinates where the scroll occurred
-/// * `modifiers` - Modifier keys held during the scroll
-/// * `mode` - The current terminal mode flags
-///
-/// # Returns
-///
-/// An optional vector of bytes representing the scroll report.
-/// Returns `None` if scrolling should be handled locally (scrollback).
-///
-/// # Examples
-///
-/// ```
-/// use alacritty_terminal::term::TermMode;
-/// use alacritty_terminal::index::{Point, Line, Column};
-/// use gpui_terminal::mouse::scroll_report;
-///
-/// let point = Point::new(Line(5), Column(10));
-/// let mode = TermMode::MOUSE_REPORT_CLICK;
-///
-/// let bytes = scroll_report(3, point, 0, mode);
-/// assert!(bytes.is_some());
-/// ```
+/// This function generates the escape sequence for scroll wheel events:
+/// - When mouse reporting is enabled (and Shift is not held): sends repeated mouse wheel events
+///   in SGR 1006 or DEC 1000 X10 format matching the application's negotiated mode.
+/// - When alternate screen or application cursor mode is active (TUI like vim, nano, less,
+///   htop, lazygit, git log) and Shift is not held: sends arrow key sequences (faux scrolling).
+/// - Otherwise: returns `None` so the local terminal scrollback buffer can be scrolled.
 pub fn scroll_report(
     delta: i32,
     point: AlacPoint,
     modifiers: u8,
     mode: TermMode,
 ) -> Option<Vec<u8>> {
-    // If mouse reporting is enabled, send mouse wheel events
-    if mode.intersects(TermMode::MOUSE_REPORT_CLICK | TermMode::MOUSE_MOTION | TermMode::MOUSE_DRAG)
+    if delta == 0 {
+        return None;
+    }
+
+    // Bit 2 is Shift (value 4). Shift overrides mouse reporting/faux scrolling
+    // so the user can scroll terminal history or select text.
+    let shift_held = (modifiers & 4) != 0;
+
+    // 1. If mouse reporting is enabled and Shift is not held, send mouse wheel events
+    if !shift_held
+        && mode.intersects(
+            TermMode::MOUSE_REPORT_CLICK | TermMode::MOUSE_MOTION | TermMode::MOUSE_DRAG,
+        )
     {
         // Button codes for scroll: 64 = wheel up, 65 = wheel down
         let button_code = if delta > 0 { 64 } else { 65 };
         let button_value = button_code | modifiers;
 
-        // SGR format uses 1-based indexing
-        let col = point.column.0 + 1;
-        let row = point.line.0 + 1;
-
-        // Mouse wheel events are always "pressed" (M), never released
-        let sequence = format!("\x1b[<{};{};{}M", button_value, col, row);
-        return Some(sequence.into_bytes());
+        if let Some(single_report) = format_mouse_report(point, button_value, true, mode) {
+            let count = delta.unsigned_abs().min(10) as usize;
+            let mut result = Vec::with_capacity(single_report.len() * count);
+            for _ in 0..count {
+                result.extend_from_slice(&single_report);
+            }
+            return Some(result);
+        }
     }
 
-    // If in alternate screen mode but no mouse reporting, send arrow keys
-    if mode.contains(TermMode::ALT_SCREEN) {
+    // 2. If in alternate screen mode or application cursor mode (TUI like vim, nano, less,
+    // htop, lazygit, git log) and Shift is not held, translate scroll wheel to arrow keys.
+    if !shift_held
+        && (mode.contains(TermMode::ALT_SCREEN)
+            || mode.contains(TermMode::APP_CURSOR))
+    {
         return Some(scroll_to_arrow_keys(delta, mode));
     }
 
-    // In normal screen mode without mouse reporting, let the terminal handle scrollback
+    // 3. In normal screen mode without mouse reporting, let the terminal handle scrollback
     None
 }
 
 /// Convert scroll delta to arrow key sequences.
 ///
-/// This is used when an application is in alternate screen mode (like vim or less)
-/// but doesn't have mouse reporting enabled. The scroll wheel is translated to
-/// arrow key presses to allow navigation.
-///
-/// # Arguments
-///
-/// * `delta` - The scroll delta (positive = up, negative = down)
-/// * `mode` - The current terminal mode (affects arrow key format)
-///
-/// # Returns
-///
-/// A byte sequence containing the appropriate arrow key escape sequences.
+/// This is used when an application is in alternate screen or application cursor mode
+/// (like vim, nano, less, git log) but doesn't have mouse reporting enabled. The scroll
+/// wheel is translated to arrow key presses to allow smooth TUI navigation.
 fn scroll_to_arrow_keys(delta: i32, mode: TermMode) -> Vec<u8> {
-    let count = delta.abs().min(5) as usize; // Limit to 5 lines per scroll
+    let count = delta.unsigned_abs().min(10) as usize;
 
     // Determine arrow key sequence based on mode
     let arrow_seq = if delta > 0 {
@@ -610,7 +637,7 @@ mod tests {
     #[test]
     fn test_mouse_button_report_left_click() {
         let point = AlacPoint::new(Line(5), Column(10));
-        let mode = TermMode::MOUSE_REPORT_CLICK;
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
 
         let bytes = mouse_button_report(MouseButton::Left, true, point, 0, mode);
         assert!(bytes.is_some());
@@ -623,9 +650,21 @@ mod tests {
     }
 
     #[test]
+    fn test_mouse_button_report_normal_x10() {
+        let point = AlacPoint::new(Line(5), Column(10));
+        let mode = TermMode::MOUSE_REPORT_CLICK; // Normal X10 mode without SGR_MOUSE
+
+        let bytes = mouse_button_report(MouseButton::Left, true, point, 0, mode);
+        assert!(bytes.is_some());
+        // ESC [ M (32 + 0) (32 + 1 + 10) (32 + 1 + 5)
+        // 32 = ' ', 43 = '+', 38 = '&'
+        assert_eq!(bytes.unwrap(), vec![0x1b, b'[', b'M', 32, 43, 38]);
+    }
+
+    #[test]
     fn test_mouse_button_report_right_release() {
         let point = AlacPoint::new(Line(0), Column(0));
-        let mode = TermMode::MOUSE_REPORT_CLICK;
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
 
         let bytes = mouse_button_report(MouseButton::Right, false, point, 0, mode);
         assert!(bytes.is_some());
@@ -638,7 +677,7 @@ mod tests {
     #[test]
     fn test_mouse_button_report_with_modifiers() {
         let point = AlacPoint::new(Line(0), Column(0));
-        let mode = TermMode::MOUSE_REPORT_CLICK;
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
         let modifiers = encode_modifiers(true, true, true); // Shift + Alt + Ctrl = 28
 
         let bytes = mouse_button_report(MouseButton::Left, true, point, modifiers, mode);
@@ -661,21 +700,49 @@ mod tests {
     #[test]
     fn test_scroll_report_mouse_mode() {
         let point = AlacPoint::new(Line(5), Column(10));
-        let mode = TermMode::MOUSE_REPORT_CLICK;
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
 
-        // Scroll up
-        let bytes = scroll_report(3, point, 0, mode);
+        // Scroll up 1 line
+        let bytes = scroll_report(1, point, 0, mode);
         assert!(bytes.is_some());
         let sequence = String::from_utf8(bytes.unwrap()).unwrap();
         // Wheel up = button 64
         assert_eq!(sequence, "\x1b[<64;11;6M");
 
-        // Scroll down
+        // Scroll up 3 lines -> repeated 3 times
+        let bytes = scroll_report(3, point, 0, mode);
+        assert!(bytes.is_some());
+        let sequence = String::from_utf8(bytes.unwrap()).unwrap();
+        assert_eq!(sequence, "\x1b[<64;11;6M\x1b[<64;11;6M\x1b[<64;11;6M");
+
+        // Scroll down 2 lines -> repeated 2 times
         let bytes = scroll_report(-2, point, 0, mode);
         assert!(bytes.is_some());
         let sequence = String::from_utf8(bytes.unwrap()).unwrap();
         // Wheel down = button 65
-        assert_eq!(sequence, "\x1b[<65;11;6M");
+        assert_eq!(sequence, "\x1b[<65;11;6M\x1b[<65;11;6M");
+    }
+
+    #[test]
+    fn test_scroll_report_normal_x10_mouse_mode() {
+        let point = AlacPoint::new(Line(5), Column(10));
+        let mode = TermMode::MOUSE_REPORT_CLICK; // Normal X10 mode without SGR_MOUSE
+
+        let bytes = scroll_report(1, point, 0, mode);
+        assert!(bytes.is_some());
+        // ESC [ M (32 + 64) (32 + 1 + 10) (32 + 1 + 5)
+        assert_eq!(bytes.unwrap(), vec![0x1b, b'[', b'M', 96, 43, 38]);
+    }
+
+    #[test]
+    fn test_scroll_report_shift_bypass() {
+        let point = AlacPoint::new(Line(0), Column(0));
+        let mode = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
+        let shift_mod = 4; // Shift held
+
+        // Holding Shift must bypass mouse reporting to allow scrolling outer buffer
+        let bytes = scroll_report(3, point, shift_mod, mode);
+        assert!(bytes.is_none());
     }
 
     #[test]
@@ -692,16 +759,22 @@ mod tests {
     }
 
     #[test]
-    fn test_scroll_report_alternate_screen_app_cursor() {
+    fn test_scroll_report_app_cursor_conpty_tui() {
         let point = AlacPoint::new(Line(0), Column(0));
-        let mode = TermMode::ALT_SCREEN | TermMode::APP_CURSOR;
+        // On Windows ConPTY, ALT_SCREEN may be swallowed, but APP_CURSOR is active for TUIs
+        let mode = TermMode::APP_CURSOR;
 
-        // Scroll down with app cursor mode
+        // Scroll down with app cursor mode -> translates to \x1bOB
         let bytes = scroll_report(-2, point, 0, mode);
         assert!(bytes.is_some());
         let sequence = bytes.unwrap();
-        // Should be 2 arrow down sequences in app cursor format
         assert_eq!(sequence, b"\x1bOB\x1bOB");
+
+        // Scroll up with app cursor mode -> translates to \x1bOA
+        let bytes = scroll_report(2, point, 0, mode);
+        assert!(bytes.is_some());
+        let sequence = bytes.unwrap();
+        assert_eq!(sequence, b"\x1bOA\x1bOA");
     }
 
     #[test]
@@ -744,13 +817,13 @@ mod tests {
     fn test_scroll_to_arrow_keys_limit() {
         let mode = TermMode::empty();
 
-        // Very large scroll should be limited to 5 lines
+        // Large scroll should be clamped to 10 lines
         let bytes = scroll_to_arrow_keys(100, mode);
-        let expected = b"\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A";
+        let expected = b"\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A\x1b[A";
         assert_eq!(bytes, expected);
 
         let bytes = scroll_to_arrow_keys(-100, mode);
-        let expected = b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B";
+        let expected = b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B";
         assert_eq!(bytes, expected);
     }
 
@@ -758,8 +831,8 @@ mod tests {
     fn test_mouse_motion_report() {
         let point = AlacPoint::new(Line(3), Column(7)); // col 8, row 4
 
-        // 1. In MOUSE_DRAG mode with Left button held:
-        let mode_drag = TermMode::MOUSE_DRAG;
+        // 1. In MOUSE_DRAG | SGR_MOUSE mode with Left button held:
+        let mode_drag = TermMode::MOUSE_DRAG | TermMode::SGR_MOUSE;
         let report = mouse_motion_report(point, Some(MouseButton::Left), 0, mode_drag);
         assert!(report.is_some());
         assert_eq!(String::from_utf8(report.unwrap()).unwrap(), "\x1b[<32;8;4M");
@@ -768,14 +841,14 @@ mod tests {
         let report = mouse_motion_report(point, None, 0, mode_drag);
         assert!(report.is_none());
 
-        // 3. In MOUSE_MOTION mode with no button: code 35
-        let mode_motion = TermMode::MOUSE_MOTION;
+        // 3. In MOUSE_MOTION | SGR_MOUSE mode with no button: code 35
+        let mode_motion = TermMode::MOUSE_MOTION | TermMode::SGR_MOUSE;
         let report = mouse_motion_report(point, None, 0, mode_motion);
         assert!(report.is_some());
         assert_eq!(String::from_utf8(report.unwrap()).unwrap(), "\x1b[<35;8;4M");
 
         // 4. In MOUSE_REPORT_CLICK mode (clicks only, no drag/motion): returns None
-        let mode_click = TermMode::MOUSE_REPORT_CLICK;
+        let mode_click = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
         let report = mouse_motion_report(point, Some(MouseButton::Left), 0, mode_click);
         assert!(report.is_none());
     }

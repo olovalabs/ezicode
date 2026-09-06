@@ -468,4 +468,22 @@ mod tests {
         // Both Arcs should point to the same terminal
         assert!(Arc::ptr_eq(&arc1, &arc2));
     }
+
+    #[test]
+    fn test_scroll_direction() {
+        let (tx, _rx) = channel();
+        let event_proxy = GpuiEventProxy::new(tx);
+        let mut terminal = TerminalState::new(80, 24, event_proxy);
+        for i in 0..100 {
+            terminal.process_bytes(format!("Line {}\r\n", i).as_bytes());
+        }
+        terminal.with_term_mut(|term| {
+            let initial = term.grid().display_offset();
+            assert_eq!(initial, 0);
+            term.scroll_display(alacritty_terminal::grid::Scroll::Delta(5));
+            assert_eq!(term.grid().display_offset(), 5);
+            term.scroll_display(alacritty_terminal::grid::Scroll::Delta(-5));
+            assert_eq!(term.grid().display_offset(), 0);
+        });
+    }
 }

@@ -1008,12 +1008,16 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let cell_point = crate::mouse::pixel_to_cell(
+        let max_col = self.config.cols.saturating_sub(1);
+        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
             self.renderer.cell_width,
             self.renderer.cell_height,
         );
+        cell_point.column.0 = cell_point.column.0.min(max_col);
+        cell_point.line.0 = cell_point.line.0.min(max_row);
 
         let mode = self.state.mode();
         let mouse_tracking_active = mode.intersects(
@@ -1109,12 +1113,16 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let cell_point = crate::mouse::pixel_to_cell(
+        let max_col = self.config.cols.saturating_sub(1);
+        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
             self.renderer.cell_width,
             self.renderer.cell_height,
         );
+        cell_point.column.0 = cell_point.column.0.min(max_col);
+        cell_point.line.0 = cell_point.line.0.min(max_row);
 
         if mouse_tracking_active && !event.modifiers.shift {
             let modifiers = crate::mouse::encode_modifiers(
@@ -1155,12 +1163,16 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let cell_point = crate::mouse::pixel_to_cell(
+        let max_col = self.config.cols.saturating_sub(1);
+        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
             self.renderer.cell_width,
             self.renderer.cell_height,
         );
+        cell_point.column.0 = cell_point.column.0.min(max_col);
+        cell_point.line.0 = cell_point.line.0.min(max_row);
 
         let mode = self.state.mode();
         let mouse_tracking_active = mode.intersects(
@@ -1254,12 +1266,35 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let cell_point = crate::mouse::pixel_to_cell(
+        let max_col = self.config.cols.saturating_sub(1);
+        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
             self.renderer.cell_width,
             self.renderer.cell_height,
         );
+        cell_point.column.0 = cell_point.column.0.min(max_col);
+        cell_point.line.0 = cell_point.line.0.min(max_row);
+
+        let display_offset = self.state.with_term(|term| term.grid().display_offset());
+
+        // If viewing history (display_offset > 0) and mouse tracking is not active,
+        // browsing history takes priority over sending TUI arrow keys until
+        // the user returns to the live screen (display_offset == 0).
+        if display_offset > 0
+            && !mode.intersects(
+                alacritty_terminal::term::TermMode::MOUSE_REPORT_CLICK
+                    | alacritty_terminal::term::TermMode::MOUSE_MOTION
+                    | alacritty_terminal::term::TermMode::MOUSE_DRAG,
+            )
+        {
+            self.state.with_term_mut(|term| {
+                term.scroll_display(alacritty_terminal::grid::Scroll::Delta(lines));
+            });
+            cx.notify();
+            return;
+        }
 
         if let Some(report) = crate::mouse::scroll_report(lines, cell_point, modifiers, mode) {
             let mut writer = self.stdin_writer.lock();
