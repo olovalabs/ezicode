@@ -1,4 +1,4 @@
-use crate::highlighter::{HighlightTheme, LanguageRegistry};
+use crate::highlighter::{HighlightTheme, LanguageConfig, LanguageRegistry};
 use crate::input::RopeExt;
 
 use anyhow::{anyhow, Context, Result};
@@ -6,8 +6,10 @@ use gpui::{HighlightStyle, SharedString};
 
 use ropey::{ChunkCursor, Rope};
 use std::{
+    cell::RefCell,
     collections::{BTreeSet, HashMap},
     ops::Range,
+    sync::{Arc, LazyLock, Mutex},
     usize,
 };
 use sum_tree::Bias;
@@ -15,24 +17,20 @@ use tree_sitter::{
     InputEdit, Node, Parser, Point, Query, QueryCursor, QueryMatch, StreamingIterator, Tree,
 };
 
+#[derive(Clone)]
+struct CompiledLanguageQuery {
+    query: Arc<Query>,
+    injection_queries: HashMap<SharedString, Arc<Query>>,
+    injection_content_capture_index: Option<u32>,
+}
+
 /// A syntax highlighter that supports incremental parsing, multiline text,
 /// and caching of highlight results.
 #[allow(unused)]
 pub struct SyntaxHighlighter {
     language: SharedString,
-    query: Option<Query>,
-    injection_queries: HashMap<SharedString, Query>,
-
-    locals_pattern_index: usize,
-    highlights_pattern_index: usize,
-    // highlight_indices: Vec<Option<Highlight>>,
-    non_local_variable_patterns: Vec<bool>,
-    injection_content_capture_index: Option<u32>,
-    injection_language_capture_index: Option<u32>,
-    local_scope_capture_index: Option<u32>,
-    local_def_capture_index: Option<u32>,
-    local_def_value_capture_index: Option<u32>,
-    local_ref_capture_index: Option<u32>,
+    compiled: Option<Arc<CompiledLanguageQuery>>,
+    cursor: RefCell<QueryCursor>,
 
     /// The last parsed source text.
     text: Rope,
@@ -186,82 +184,40 @@ impl SyntaxHighlighter {
             .set_language(&config.language)
             .context("parse set_language")?;
 
+        let compiled = Self::get_or_compile_query(&config)?;
+
+        Ok(Self {
+            language: config.name.clone(),
+            compiled: Some(compiled),
+            cursor: RefCell::new(QueryCursor::new()),
+            text: Rope::new(),
+            parser,
+            tree: None,
+        })
+    }
+
+    fn get_or_compile_query(config: &LanguageConfig) -> Result<Arc<CompiledLanguageQuery>> {
+        static CACHE: LazyLock<Mutex<HashMap<SharedString, Arc<CompiledLanguageQuery>>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+
+        let mut cache = CACHE.lock().unwrap();
+        if let Some(compiled) = cache.get(&config.name) {
+            return Ok(Arc::clone(compiled));
+        }
+
         // Concatenate the query strings, keeping track of the start offset of each section.
         let mut query_source = String::new();
         query_source.push_str(&config.injections);
-        let locals_query_offset = query_source.len();
         query_source.push_str(&config.locals);
-        let highlights_query_offset = query_source.len();
         query_source.push_str(&config.highlights);
 
-        // Construct a single query by concatenating the three query strings, but record the
-        // range of pattern indices that belong to each individual string.
         let query = Query::new(&config.language, &query_source).context("new query")?;
 
-        let mut locals_pattern_index = 0;
-        let mut highlights_pattern_index = 0;
-        for i in 0..(query.pattern_count()) {
-            let pattern_offset = query.start_byte_for_pattern(i);
-            if pattern_offset < highlights_query_offset {
-                if pattern_offset < highlights_query_offset {
-                    highlights_pattern_index += 1;
-                }
-                if pattern_offset < locals_query_offset {
-                    locals_pattern_index += 1;
-                }
-            }
-        }
-
-        // let Some(mut combined_injections_query) =
-        //     Query::new(&config.language, &config.injections).ok()
-        // else {
-        //     return None;
-        // };
-
-        // let mut has_combined_queries = false;
-        // for pattern_index in 0..locals_pattern_index {
-        //     let settings = query.property_settings(pattern_index);
-        //     if settings.iter().any(|s| &*s.key == "injection.combined") {
-        //         has_combined_queries = true;
-        //         query.disable_pattern(pattern_index);
-        //     } else {
-        //         combined_injections_query.disable_pattern(pattern_index);
-        //     }
-        // }
-        // let combined_injections_query = if has_combined_queries {
-        //     Some(combined_injections_query)
-        // } else {
-        //     None
-        // };
-
-        // Find all of the highlighting patterns that are disabled for nodes that
-        // have been identified as local variables.
-        let non_local_variable_patterns = (0..query.pattern_count())
-            .map(|i| {
-                query
-                    .property_predicates(i)
-                    .iter()
-                    .any(|(prop, positive)| !*positive && prop.key.as_ref() == "local")
-            })
-            .collect();
-
-        // Store the numeric ids for all of the special captures.
         let mut injection_content_capture_index = None;
-        let mut injection_language_capture_index = None;
-        let mut local_def_capture_index = None;
-        let mut local_def_value_capture_index = None;
-        let mut local_ref_capture_index = None;
-        let mut local_scope_capture_index = None;
         for (i, name) in query.capture_names().iter().enumerate() {
-            let i = Some(i as u32);
-            match *name {
-                "injection.content" => injection_content_capture_index = i,
-                "injection.language" => injection_language_capture_index = i,
-                "local.definition" => local_def_capture_index = i,
-                "local.definition-value" => local_def_value_capture_index = i,
-                "local.reference" => local_ref_capture_index = i,
-                "local.scope" => local_scope_capture_index = i,
-                _ => {}
+            if *name == "injection.content" {
+                injection_content_capture_index = Some(i as u32);
+                break;
             }
         }
 
@@ -270,7 +226,7 @@ impl SyntaxHighlighter {
             if let Some(inj_config) = LanguageRegistry::singleton().language(&inj_language) {
                 match Query::new(&inj_config.language, &inj_config.highlights) {
                     Ok(q) => {
-                        injection_queries.insert(inj_config.name.clone(), q);
+                        injection_queries.insert(inj_config.name.clone(), Arc::new(q));
                     }
                     Err(e) => {
                         tracing::error!(
@@ -283,26 +239,14 @@ impl SyntaxHighlighter {
             }
         }
 
-        // let highlight_indices = vec![None; query.capture_names().len()];
-
-        Ok(Self {
-            language: config.name.clone(),
-            query: Some(query),
+        let compiled = Arc::new(CompiledLanguageQuery {
+            query: Arc::new(query),
             injection_queries,
-
-            locals_pattern_index,
-            highlights_pattern_index,
-            non_local_variable_patterns,
             injection_content_capture_index,
-            injection_language_capture_index,
-            local_scope_capture_index,
-            local_def_capture_index,
-            local_def_value_capture_index,
-            local_ref_capture_index,
-            text: Rope::new(),
-            parser,
-            tree: None,
-        })
+        });
+
+        cache.insert(config.name.clone(), Arc::clone(&compiled));
+        Ok(compiled)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -360,16 +304,17 @@ impl SyntaxHighlighter {
             return highlights;
         };
 
-        let Some(query) = &self.query else {
+        let Some(compiled) = &self.compiled else {
             return highlights;
         };
+        let query = &compiled.query;
 
         let root_node = tree.root_node();
 
         let source = &self.text;
-        let mut cursor = QueryCursor::new();
+        let mut cursor = self.cursor.borrow_mut();
         cursor.set_byte_range(range);
-        let mut matches = cursor.matches(&query, root_node, TextProvider(&source));
+        let mut matches = cursor.matches(query, root_node, TextProvider(&source));
 
         while let Some(query_match) = matches.next() {
             // Ref:
@@ -440,7 +385,10 @@ impl SyntaxHighlighter {
         let end_offset = self.text.clip_offset(node.end_byte(), Bias::Right);
 
         let mut cache = vec![];
-        let Some(query) = &self.injection_queries.get(injection_language) else {
+        let Some(compiled) = &self.compiled else {
+            return cache;
+        };
+        let Some(query) = compiled.injection_queries.get(injection_language) else {
             return cache;
         };
 
@@ -505,7 +453,10 @@ impl SyntaxHighlighter {
         query: &'a Query,
         query_match: &QueryMatch<'a, 'a>,
     ) -> (Option<SharedString>, Option<Node<'a>>, bool) {
-        let content_capture_index = self.injection_content_capture_index;
+        let content_capture_index = self
+            .compiled
+            .as_ref()
+            .and_then(|c| c.injection_content_capture_index);
         // let language_capture_index = self.injection_language_capture_index;
 
         let mut language_name: Option<SharedString> = None;

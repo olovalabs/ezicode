@@ -735,14 +735,13 @@ impl TextElement {
     /// First usize is the offset of skipped.
     fn highlight_lines(
         &mut self,
-        visible_range: &Range<usize>,
+        _visible_range: &Range<usize>,
         _visible_top: Pixels,
         visible_byte_range: Range<usize>,
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
         let state = self.state.read(cx);
         let text = &state.text;
-        let is_multi_line = state.mode.is_multi_line();
 
         let (highlighter, diagnostics) = match &state.mode {
             InputMode::CodeEditor {
@@ -754,35 +753,13 @@ impl TextElement {
         };
         let highlighter = highlighter.as_ref()?;
 
-        let mut offset = visible_byte_range.start;
-        let mut styles = vec![];
-
-        for line in text
-            .iter_lines()
-            .skip(visible_range.start)
-            .take(visible_range.len())
-        {
-            let line_len = if is_multi_line {
-                // +1 for `\n`
-                line.len() + 1
-            } else {
-                line.len()
-            };
-
-            // Clamp to the text length: the last line of a buffer has no
-            // trailing `\n`, so `+1` would end the range one byte past the
-            // text — inside the final multibyte character when there is one.
-            // A non-char-boundary run end then trips GPUI's
-            // `debug_assert!(text.is_char_boundary(run.end))` and crashes
-            // debug builds (see gpui/src/elements/text.rs).
-            let range = offset..(offset + line_len).min(text.len());
-            let line_styles = highlighter.styles(&range, &cx.theme().highlight_theme);
-            styles = gpui::combine_highlights(styles, line_styles).collect();
-
-            offset = range.end;
+        let clamped_range = visible_byte_range.start.min(text.len())..visible_byte_range.end.min(text.len());
+        if clamped_range.is_empty() {
+            return None;
         }
 
-        let diagnostic_styles = diagnostics.styles_for_range(&visible_byte_range, cx);
+        let mut styles = highlighter.styles(&clamped_range, &cx.theme().highlight_theme);
+        let diagnostic_styles = diagnostics.styles_for_range(&clamped_range, cx);
 
         // hover definition style
         if let Some(hover_style) = self.layout_hover_definition(cx) {

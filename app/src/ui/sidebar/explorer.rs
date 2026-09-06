@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use gpui::{
     div, prelude::*, px, rgba, svg, uniform_list, AnyElement, Context, FocusHandle, FontWeight,
-    IntoElement, MouseButton, SharedString, UniformListScrollHandle, Window,
+    IntoElement, MouseButton, Render, SharedString, UniformListScrollHandle, Window,
 };
 use gpui_component::{input::Input, menu::ContextMenuExt, tooltip::Tooltip, Sizable};
 
@@ -665,4 +665,36 @@ fn tree_row(
             .menu("Delete", Box::new(ExplorerDelete { path: path_c5.clone() }))
     })
     .into_any_element()
+}
+
+impl Render for ExplorerDrag {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let is_dir = self.path.is_dir();
+        let icon_path = if is_dir {
+            file_icons::folder_icon_for(&self.path, false)
+        } else {
+            file_icons::icon_for(&self.path)
+        };
+        let name = self
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .px(px(8.0))
+            .py(px(4.0))
+            .rounded(px(4.0))
+            .bg(rgba(0x252526f0))
+            .border_1()
+            .border_color(rgba(0x454545ff))
+            .text_size(px(13.0))
+            .text_color(rgba(0xccccccff))
+            .child(icon_img(icon_path, ICON_SIZE))
+            .child(div().w(px(6.0)).flex_none())
+            .child(SharedString::from(name.to_string()))
+    }
 }
