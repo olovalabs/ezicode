@@ -779,21 +779,8 @@ impl Workspace {
         self.next_terminal_id += 1;
 
         // Label: "bash 1", "zsh 2", "PowerShell 3" (Zed-style)
-        let label = if cfg!(windows) {
-            format!("PowerShell {id}")
-        } else {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-            let base = if shell.ends_with("zsh") {
-                "zsh"
-            } else if shell.ends_with("fish") {
-                "fish"
-            } else if shell.ends_with("nu") {
-                "nu"
-            } else {
-                "bash"
-            };
-            format!("{base} {id}")
-        };
+        let shell_name = crate::terminal::Terminal::detect_shell_name();
+        let label = format!("{shell_name} {id}");
         let palette = self.theme().terminal_palette.clone();
         let term = cx.new(|cx| {
             crate::terminal::Terminal::new(working_dir.as_deref(), label, palette, window, cx)

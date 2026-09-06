@@ -44,6 +44,7 @@ pub struct Terminal {
     /// Working directory for this terminal session
     pub working_dir: Option<PathBuf>,
     /// Shell executable path (e.g. "/bin/bash", "powershell.exe")
+    #[allow(dead_code)]
     pub shell_path: String,
     /// Process ID of the shell (for monitoring)
     pub pid: Option<u32>,
@@ -87,172 +88,13 @@ fn dirs_home() -> Option<PathBuf> {
     }
 }
 
-#[cfg(windows)]
-fn is_capslock_on() -> bool {
-    extern "system" {
-        fn GetKeyState(nVirtKey: i32) -> i16;
-    }
-    const VK_CAPITAL: i32 = 0x14;
-    unsafe { (GetKeyState(VK_CAPITAL) & 1) != 0 }
-}
 
-#[cfg(not(windows))]
-fn is_capslock_on() -> bool {
-    false
-}
 
 /// Convert a GPUI keystroke to terminal escape sequence bytes with complete support
 /// for Shift and Caps Lock capitalization, shifted symbols, and control keys.
+#[allow(dead_code)]
 pub fn terminal_keystroke_to_bytes(keystroke: &gpui::Keystroke) -> Option<Vec<u8>> {
-    // 1. Special and navigation keys
-    match keystroke.key.as_str() {
-        "space" => {
-            if keystroke.modifiers.control {
-                return Some(b"\x00".to_vec());
-            }
-            return Some(b" ".to_vec());
-        }
-        "enter" => return Some(b"\r".to_vec()),
-        "escape" => return Some(b"\x1b".to_vec()),
-        "backspace" => return Some(b"\x7f".to_vec()),
-        "tab" => {
-            if keystroke.modifiers.shift {
-                return Some(b"\x1b[Z".to_vec());
-            }
-            return Some(b"\t".to_vec());
-        }
-        "up" => return Some(b"\x1b[A".to_vec()),
-        "down" => return Some(b"\x1b[B".to_vec()),
-        "right" => return Some(b"\x1b[C".to_vec()),
-        "left" => return Some(b"\x1b[D".to_vec()),
-        "home" => return Some(b"\x1b[H".to_vec()),
-        "end" => return Some(b"\x1b[F".to_vec()),
-        "pageup" => return Some(b"\x1b[5~".to_vec()),
-        "pagedown" => return Some(b"\x1b[6~".to_vec()),
-        "insert" => return Some(b"\x1b[2~".to_vec()),
-        "delete" => return Some(b"\x1b[3~".to_vec()),
-        "f1" => return Some(b"\x1bOP".to_vec()),
-        "f2" => return Some(b"\x1bOQ".to_vec()),
-        "f3" => return Some(b"\x1bOR".to_vec()),
-        "f4" => return Some(b"\x1bOS".to_vec()),
-        "f5" => return Some(b"\x1b[15~".to_vec()),
-        "f6" => return Some(b"\x1b[17~".to_vec()),
-        "f7" => return Some(b"\x1b[18~".to_vec()),
-        "f8" => return Some(b"\x1b[19~".to_vec()),
-        "f9" => return Some(b"\x1b[20~".to_vec()),
-        "f10" => return Some(b"\x1b[21~".to_vec()),
-        "f11" => return Some(b"\x1b[23~".to_vec()),
-        "f12" => return Some(b"\x1b[24~".to_vec()),
-        _ => {}
-    }
-
-    // 2. Control combinations
-    if keystroke.modifiers.control {
-        let key = keystroke.key.as_str();
-        if key.len() == 1 {
-            let ch = key.chars().next().unwrap();
-            if ch.is_ascii_alphabetic() {
-                let upper = ch.to_ascii_uppercase();
-                let ctrl_char = (upper as u8) - b'@';
-                return Some(vec![ctrl_char]);
-            }
-            match ch {
-                '[' => return Some(b"\x1b".to_vec()),
-                '\\' => return Some(b"\x1c".to_vec()),
-                ']' => return Some(b"\x1d".to_vec()),
-                '^' => return Some(b"\x1e".to_vec()),
-                '_' => return Some(b"\x1f".to_vec()),
-                '?' => return Some(b"\x7f".to_vec()),
-                _ => {}
-            }
-        }
-    }
-
-    // 3. Alt combinations
-    if keystroke.modifiers.alt {
-        let key = keystroke.key.as_str();
-        if key.len() == 1 {
-            let ch = key.chars().next().unwrap();
-            if ch.is_ascii() {
-                return Some(vec![b'\x1b', ch as u8]);
-            }
-        }
-    }
-
-    // 4. Regular printable characters: handle Shift, CapsLock, symbols, letters
-    let is_caps = is_capslock_on();
-    // Shift XOR CapsLock determines if letter should be capitalized
-    let should_uppercase = keystroke.modifiers.shift ^ is_caps;
-
-    // Check if key is a single ASCII letter
-    let key = keystroke.key.as_str();
-    if key.len() == 1 {
-        let ch = key.chars().next().unwrap();
-        if ch.is_ascii_alphabetic() {
-            let out_char = if should_uppercase {
-                ch.to_ascii_uppercase()
-            } else {
-                ch.to_ascii_lowercase()
-            };
-            return Some(vec![out_char as u8]);
-        }
-    }
-
-    // If key_char is available (from IME or platform event)
-    if !keystroke.modifiers.control && !keystroke.modifiers.alt {
-        if let Some(key_char) = &keystroke.key_char {
-            if key_char.len() == 1 {
-                let ch = key_char.chars().next().unwrap();
-                if ch.is_ascii_alphabetic() {
-                    let out_char = if should_uppercase {
-                        ch.to_ascii_uppercase()
-                    } else {
-                        ch.to_ascii_lowercase()
-                    };
-                    return Some(vec![out_char as u8]);
-                }
-            }
-            return Some(key_char.as_bytes().to_vec());
-        }
-    }
-
-    // Fallback for shifted US keyboard layout symbols
-    if key.len() == 1 {
-        let ch = key.chars().next().unwrap();
-        if keystroke.modifiers.shift {
-            let shifted = match ch {
-                '1' => '!',
-                '2' => '@',
-                '3' => '#',
-                '4' => '$',
-                '5' => '%',
-                '6' => '^',
-                '7' => '&',
-                '8' => '*',
-                '9' => '(',
-                '0' => ')',
-                '-' => '_',
-                '=' => '+',
-                '[' => '{',
-                ']' => '}',
-                '\\' => '|',
-                ';' => ':',
-                '\'' => '"',
-                ',' => '<',
-                '.' => '>',
-                '/' => '?',
-                '`' => '~',
-                other => other,
-            };
-            return Some(vec![shifted as u8]);
-        }
-        if ch.is_ascii() {
-            return Some(vec![ch as u8]);
-        }
-        return Some(key.as_bytes().to_vec());
-    }
-
-    None
+    gpui_terminal::input::keystroke_to_bytes(keystroke, alacritty_terminal::term::TermMode::empty())
 }
 
 impl Terminal {
@@ -326,12 +168,10 @@ impl Terminal {
         // Zed-compatible environment variables for proper terminal behavior
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        // Set LANG for proper Unicode/emoji support
-        if cfg!(not(windows)) {
-            if std::env::var("LANG").is_err() {
-                cmd.env("LANG", "en_US.UTF-8");
-            }
-        }
+        cmd.env("TERM_PROGRAM", "zed");
+        cmd.env("TERM_PROGRAM_VERSION", "0.1.0");
+        cmd.env("LANG", "en_US.UTF-8");
+        cmd.env("LC_ALL", "en_US.UTF-8");
 
         // Spawn the shell process. We only need the child handle briefly to
         // extract the PID; the process stays alive because the PTY master
@@ -402,22 +242,10 @@ impl Terminal {
         };
 
         let pty_writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> = Arc::new(Mutex::new(writer));
-        let pty_writer_for_input = pty_writer.clone();
 
         let view = cx.new(|cx| {
             TerminalView::new(SharedWriter(pty_writer.clone()), reader, config, cx)
                 .with_resize_callback(resize_callback)
-                .with_key_handler(move |event| {
-                    if let Some(bytes) = terminal_keystroke_to_bytes(&event.keystroke) {
-                        if let Ok(mut writer) = pty_writer_for_input.lock() {
-                            use std::io::Write;
-                            let _ = writer.write_all(&bytes);
-                            let _ = writer.flush();
-                        }
-                        return true;
-                    }
-                    false
-                })
         });
 
         view.read(cx).focus_handle().focus(window);
@@ -440,9 +268,19 @@ impl Terminal {
     }
 
     /// Detect the system's default shell. Returns (command_path, display_name).
-    fn detect_shell() -> (String, String) {
+    pub fn detect_shell() -> (String, String) {
         if cfg!(windows) {
-            // On Windows prefer PowerShell, fall back to cmd
+            // On Windows, prefer Git Bash if installed because it provides a complete Unix
+            // TUI environment with native vim, nano, less, tig, git, etc.
+            for path in &[
+                r"C:\Program Files\Git\bin\bash.exe",
+                r"C:\Program Files (x86)\Git\bin\bash.exe",
+            ] {
+                if std::path::Path::new(path).exists() {
+                    return (path.to_string(), "bash".to_string());
+                }
+            }
+            // Fall back to standard Windows PowerShell
             ("powershell.exe".to_string(), "PowerShell".to_string())
         } else {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
@@ -459,6 +297,11 @@ impl Terminal {
             };
             (shell, name.to_string())
         }
+    }
+
+    /// Helper to get just the detected shell display name (e.g. "bash", "PowerShell", "zsh")
+    pub fn detect_shell_name() -> String {
+        Self::detect_shell().1
     }
 
     /// Create a dummy PTY pair for error recovery. This lets us create a
@@ -538,6 +381,7 @@ impl Terminal {
 
     /// Rename the terminal tab. Zed supports renaming terminals via
     /// right-click → "Rename" or the `terminal: rename` command.
+    #[allow(dead_code)]
     pub fn rename(&mut self, new_name: String, cx: &mut Context<Self>) {
         self.name = new_name;
         cx.notify();

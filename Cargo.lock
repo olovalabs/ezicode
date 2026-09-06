@@ -44,30 +44,6 @@ dependencies = [
 
 [[package]]
 name = "alacritty_terminal"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f86b5e25264f1700783fd95c9c74e5d146e8ac1450eac815ad108e9adfc9779"
-dependencies = [
- "base64",
- "bitflags 2.13.1",
- "home",
- "libc",
- "log",
- "miow",
- "parking_lot",
- "piper",
- "polling",
- "regex-automata",
- "rustix-openpty 0.1.1",
- "serde",
- "signal-hook",
- "unicode-width 0.1.14",
- "vte 0.13.1",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "alacritty_terminal"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46319972e74179d707445f64aaa2893bbf6a111de3a9af29b7eb382f8b39e282"
@@ -83,11 +59,11 @@ dependencies = [
  "polling",
  "regex-automata",
  "rustix 1.1.4",
- "rustix-openpty 0.2.0",
+ "rustix-openpty",
  "serde",
  "signal-hook",
- "unicode-width 0.2.2",
- "vte 0.15.0",
+ "unicode-width",
+ "vte",
  "windows-sys 0.59.0",
 ]
 
@@ -128,7 +104,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "app"
 version = "0.1.0"
 dependencies = [
- "alacritty_terminal 0.24.2",
+ "alacritty_terminal",
  "anyhow",
  "async-channel 2.5.0",
  "gpui",
@@ -1058,7 +1034,7 @@ checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -2485,7 +2461,7 @@ dependencies = [
 name = "gpui-terminal"
 version = "0.1.0"
 dependencies = [
- "alacritty_terminal 0.25.1",
+ "alacritty_terminal",
  "anyhow",
  "arboard",
  "flume 0.12.0",
@@ -5217,7 +5193,6 @@ checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
 dependencies = [
  "bitflags 2.13.1",
  "errno",
- "itoa",
  "libc",
  "linux-raw-sys 0.4.15",
  "windows-sys 0.59.0",
@@ -5234,17 +5209,6 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.12.1",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rustix-openpty"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a25c3aad9fc1424eb82c88087789a7d938e1829724f3e4043163baf0d13cfc12"
-dependencies = [
- "errno",
- "libc",
- "rustix 0.38.44",
 ]
 
 [[package]]
@@ -7063,12 +7027,6 @@ checksum = "b1d386ff53b415b7fe27b50bb44679e2cc4660272694b7b6f3326d8480823a94"
 
 [[package]]
 name = "unicode-width"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
-
-[[package]]
-name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
@@ -7142,12 +7100,6 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
-
-[[package]]
-name = "utf8parse"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
@@ -7237,20 +7189,6 @@ dependencies = [
 
 [[package]]
 name = "vte"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a0b683b20ef64071ff03745b14391751f6beab06a54347885459b77a3f2caa5"
-dependencies = [
- "bitflags 2.13.1",
- "cursor-icon",
- "log",
- "serde",
- "utf8parse",
- "vte_generate_state_changes",
-]
-
-[[package]]
-name = "vte"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
@@ -7261,16 +7199,6 @@ dependencies = [
  "log",
  "memchr",
  "serde",
-]
-
-[[package]]
-name = "vte_generate_state_changes"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e369bee1b05d510a7b4ed645f5faa90619e05437111783ea5848f28d97d3c2e"
-dependencies = [
- "proc-macro2",
- "quote",
 ]
 
 [[package]]

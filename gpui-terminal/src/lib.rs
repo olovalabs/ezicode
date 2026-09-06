@@ -347,6 +347,7 @@ pub mod terminal;
 pub mod view;
 
 // Re-export main types for convenience
+pub use alacritty_terminal;
 pub use clipboard::Clipboard;
 pub use colors::{ColorPalette, ColorPaletteBuilder};
 pub use event::{GpuiEventProxy, TerminalEvent};

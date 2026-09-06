@@ -114,46 +114,72 @@ use gpui::Keystroke;
 /// assert_eq!(bytes, Some(b"\r".to_vec()));
 /// ```
 pub fn keystroke_to_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
-    // Handle special keys first
-    match keystroke.key.as_str() {
-        // Basic control characters
+    let key_lower = keystroke.key.to_ascii_lowercase();
+
+    // Standard xterm modifier calculation: 1 + shift*1 + alt*2 + ctrl*4
+    let mod_code = 1
+        + (if keystroke.modifiers.shift { 1 } else { 0 })
+        + (if keystroke.modifiers.alt { 2 } else { 0 })
+        + (if keystroke.modifiers.control { 4 } else { 0 });
+
+    // Handle special navigation and function keys
+    match key_lower.as_str() {
         "space" => {
             if keystroke.modifiers.control {
-                return Some(b"\x00".to_vec()); // Ctrl+Space = NUL
+                return Some(vec![0x00]); // Ctrl+Space = NUL
             }
             return Some(b" ".to_vec());
         }
-        "enter" => return Some(b"\r".to_vec()),
+        "enter" | "return" => return Some(b"\r".to_vec()),
         "escape" => return Some(b"\x1b".to_vec()),
-        "backspace" => return Some(b"\x7f".to_vec()),
         "tab" => {
-            // Shift+Tab sends a different sequence
             if keystroke.modifiers.shift {
-                return Some(b"\x1b[Z".to_vec());
+                return Some(b"\x1b[Z".to_vec()); // Backtab
             }
             return Some(b"\t".to_vec());
         }
+        "backspace" => {
+            if keystroke.modifiers.alt {
+                return Some(b"\x1b\x7f".to_vec()); // Alt+Backspace (word delete backwards)
+            }
+            if keystroke.modifiers.control {
+                return Some(vec![0x08]); // Ctrl+Backspace (BS)
+            }
+            return Some(b"\x7f".to_vec());
+        }
 
-        // Arrow keys - check APP_CURSOR mode
+        // Arrow keys
         "up" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}A").into_bytes());
+            }
             if mode.contains(TermMode::APP_CURSOR) {
                 return Some(b"\x1bOA".to_vec());
             }
             return Some(b"\x1b[A".to_vec());
         }
         "down" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}B").into_bytes());
+            }
             if mode.contains(TermMode::APP_CURSOR) {
                 return Some(b"\x1bOB".to_vec());
             }
             return Some(b"\x1b[B".to_vec());
         }
         "right" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}C").into_bytes());
+            }
             if mode.contains(TermMode::APP_CURSOR) {
                 return Some(b"\x1bOC".to_vec());
             }
             return Some(b"\x1b[C".to_vec());
         }
         "left" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}D").into_bytes());
+            }
             if mode.contains(TermMode::APP_CURSOR) {
                 return Some(b"\x1bOD".to_vec());
             }
@@ -161,45 +187,139 @@ pub fn keystroke_to_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u
         }
 
         // Navigation keys
-        "home" => return Some(b"\x1b[H".to_vec()),
-        "end" => return Some(b"\x1b[F".to_vec()),
-        "pageup" => return Some(b"\x1b[5~".to_vec()),
-        "pagedown" => return Some(b"\x1b[6~".to_vec()),
-        "insert" => return Some(b"\x1b[2~".to_vec()),
-        "delete" => return Some(b"\x1b[3~".to_vec()),
+        "home" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}H").into_bytes());
+            }
+            if mode.contains(TermMode::APP_CURSOR) {
+                return Some(b"\x1bOH".to_vec());
+            }
+            return Some(b"\x1b[H".to_vec());
+        }
+        "end" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}F").into_bytes());
+            }
+            if mode.contains(TermMode::APP_CURSOR) {
+                return Some(b"\x1bOF".to_vec());
+            }
+            return Some(b"\x1b[F".to_vec());
+        }
+        "pageup" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[5;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[5~".to_vec());
+        }
+        "pagedown" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[6;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[6~".to_vec());
+        }
+        "insert" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[2;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[2~".to_vec());
+        }
+        "delete" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[3;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[3~".to_vec());
+        }
 
-        // Function keys
-        "f1" => return Some(b"\x1bOP".to_vec()),
-        "f2" => return Some(b"\x1bOQ".to_vec()),
-        "f3" => return Some(b"\x1bOR".to_vec()),
-        "f4" => return Some(b"\x1bOS".to_vec()),
-        "f5" => return Some(b"\x1b[15~".to_vec()),
-        "f6" => return Some(b"\x1b[17~".to_vec()),
-        "f7" => return Some(b"\x1b[18~".to_vec()),
-        "f8" => return Some(b"\x1b[19~".to_vec()),
-        "f9" => return Some(b"\x1b[20~".to_vec()),
-        "f10" => return Some(b"\x1b[21~".to_vec()),
-        "f11" => return Some(b"\x1b[23~".to_vec()),
-        "f12" => return Some(b"\x1b[24~".to_vec()),
+        // Function keys F1-F4
+        "f1" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}P").into_bytes());
+            }
+            return Some(b"\x1bOP".to_vec());
+        }
+        "f2" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}Q").into_bytes());
+            }
+            return Some(b"\x1bOQ".to_vec());
+        }
+        "f3" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}R").into_bytes());
+            }
+            return Some(b"\x1bOR".to_vec());
+        }
+        "f4" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[1;{mod_code}S").into_bytes());
+            }
+            return Some(b"\x1bOS".to_vec());
+        }
+
+        // Function keys F5-F12
+        "f5" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[15;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[15~".to_vec());
+        }
+        "f6" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[17;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[17~".to_vec());
+        }
+        "f7" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[18;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[18~".to_vec());
+        }
+        "f8" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[19;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[19~".to_vec());
+        }
+        "f9" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[20;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[20~".to_vec());
+        }
+        "f10" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[21;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[21~".to_vec());
+        }
+        "f11" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[23;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[23~".to_vec());
+        }
+        "f12" => {
+            if mod_code > 1 {
+                return Some(format!("\x1b[24;{mod_code}~").into_bytes());
+            }
+            return Some(b"\x1b[24~".to_vec());
+        }
 
         _ => {}
     }
 
     // Handle Ctrl+key combinations
-    if keystroke.modifiers.control {
+    if keystroke.modifiers.control && !keystroke.modifiers.alt {
         let key = keystroke.key.as_str();
-
-        // Ctrl+A through Ctrl+Z map to 0x01 through 0x1a
         if key.len() == 1 {
             let ch = key.chars().next().unwrap();
             if ch.is_ascii_alphabetic() {
-                // Convert to uppercase and then to control character
                 let upper = ch.to_ascii_uppercase();
                 let ctrl_char = (upper as u8) - b'@';
                 return Some(vec![ctrl_char]);
             }
 
-            // Special Ctrl combinations
             match ch {
                 '[' => return Some(b"\x1b".to_vec()),  // Ctrl+[
                 '\\' => return Some(b"\x1c".to_vec()), // Ctrl+\
@@ -213,48 +333,74 @@ pub fn keystroke_to_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u
     }
 
     // Handle Alt+key combinations
-    if keystroke.modifiers.alt {
+    if keystroke.modifiers.alt && !keystroke.modifiers.control {
         let key = keystroke.key.as_str();
         if key.len() == 1 {
-            // Alt+key sends ESC followed by the key
             let ch = key.chars().next().unwrap();
             if ch.is_ascii() {
-                let mut bytes = vec![b'\x1b'];
-                bytes.push(ch as u8);
-                return Some(bytes);
+                return Some(vec![b'\x1b', ch as u8]);
             }
         }
     }
 
-    // Handle regular printable characters
-    // Use key_char if available (contains the actual typed character with modifiers like Shift)
-    if let Some(key_char) = &keystroke.key_char
-        && !keystroke.modifiers.control
-        && !keystroke.modifiers.alt
-    {
-        return Some(key_char.as_bytes().to_vec());
+    // Handle regular printable characters:
+    // If key_char is available (from IME or platform event)
+    if !keystroke.modifiers.control && !keystroke.modifiers.alt {
+        if let Some(key_char) = &keystroke.key_char {
+            if !key_char.is_empty() {
+                return Some(key_char.as_bytes().to_vec());
+            }
+        }
     }
 
-    // Fallback to key for single characters
+    // Fallback for shifted US keyboard layout symbols when key_char is None (common on Windows)
     let key = keystroke.key.as_str();
     if key.len() == 1 {
         let ch = key.chars().next().unwrap();
-        if ch.is_ascii() && !keystroke.modifiers.control {
-            // Handle shift modifier for uppercase
-            let ch = if keystroke.modifiers.shift {
-                ch.to_ascii_uppercase()
+        if keystroke.modifiers.shift && !keystroke.modifiers.control && !keystroke.modifiers.alt {
+            let shifted = match ch {
+                '1' => '!',
+                '2' => '@',
+                '3' => '#',
+                '4' => '$',
+                '5' => '%',
+                '6' => '^',
+                '7' => '&',
+                '8' => '*',
+                '9' => '(',
+                '0' => ')',
+                '-' => '_',
+                '=' => '+',
+                '[' => '{',
+                ']' => '}',
+                '\\' => '|',
+                ';' => ':',
+                '\'' => '"',
+                ',' => '<',
+                '.' => '>',
+                '/' => '?',
+                '`' => '~',
+                _ if ch.is_ascii_alphabetic() => ch.to_ascii_uppercase(),
+                _ => ch,
+            };
+            return Some(vec![shifted as u8]);
+        }
+
+        if ch.is_ascii() && !keystroke.modifiers.control && !keystroke.modifiers.alt {
+            let out_char = if ch.is_ascii_alphabetic() {
+                ch.to_ascii_lowercase()
             } else {
                 ch
             };
-            return Some(vec![ch as u8]);
+            return Some(vec![out_char as u8]);
         }
+
         // For non-ASCII characters, encode as UTF-8
         if !keystroke.modifiers.control && !keystroke.modifiers.alt {
             return Some(key.as_bytes().to_vec());
         }
     }
 
-    // If we get here, the keystroke doesn't produce any output
     None
 }
 
@@ -429,4 +575,60 @@ mod tests {
         let space = Keystroke::parse("space").unwrap();
         assert_eq!(keystroke_to_bytes(&space, mode), Some(b" ".to_vec()));
     }
+
+    #[test]
+    fn test_modified_arrow_keys() {
+        let mode = TermMode::empty();
+
+        // Shift: mod_code = 1 + 1 = 2
+        let shift_up = Keystroke::parse("shift-up").unwrap();
+        assert_eq!(keystroke_to_bytes(&shift_up, mode), Some(b"\x1b[1;2A".to_vec()));
+
+        // Alt: mod_code = 1 + 2 = 3
+        let alt_down = Keystroke::parse("alt-down").unwrap();
+        assert_eq!(keystroke_to_bytes(&alt_down, mode), Some(b"\x1b[1;3B".to_vec()));
+
+        // Ctrl: mod_code = 1 + 4 = 5
+        let ctrl_left = Keystroke::parse("ctrl-left").unwrap();
+        assert_eq!(keystroke_to_bytes(&ctrl_left, mode), Some(b"\x1b[1;5D".to_vec()));
+
+        let ctrl_right = Keystroke::parse("ctrl-right").unwrap();
+        assert_eq!(keystroke_to_bytes(&ctrl_right, mode), Some(b"\x1b[1;5C".to_vec()));
+
+        // Ctrl+Shift: mod_code = 1 + 1 + 4 = 6
+        let ctrl_shift_right = Keystroke::parse("ctrl-shift-right").unwrap();
+        assert_eq!(keystroke_to_bytes(&ctrl_shift_right, mode), Some(b"\x1b[1;6C".to_vec()));
+    }
+
+    #[test]
+    fn test_modified_navigation_and_fn_keys() {
+        let mode = TermMode::empty();
+
+        // Ctrl-Home
+        let ctrl_home = Keystroke::parse("ctrl-home").unwrap();
+        assert_eq!(keystroke_to_bytes(&ctrl_home, mode), Some(b"\x1b[1;5H".to_vec()));
+
+        // Shift-F1
+        let shift_f1 = Keystroke::parse("shift-f1").unwrap();
+        assert_eq!(keystroke_to_bytes(&shift_f1, mode), Some(b"\x1b[1;2P".to_vec()));
+
+        // Ctrl-F5
+        let ctrl_f5 = Keystroke::parse("ctrl-f5").unwrap();
+        assert_eq!(keystroke_to_bytes(&ctrl_f5, mode), Some(b"\x1b[15;5~".to_vec()));
+    }
+
+    #[test]
+    fn test_shifted_symbols_fallback() {
+        let mode = TermMode::empty();
+
+        let shift_1 = Keystroke::parse("shift-1").unwrap();
+        assert_eq!(keystroke_to_bytes(&shift_1, mode), Some(b"!".to_vec()));
+
+        let shift_dash = Keystroke::parse("shift--").unwrap();
+        assert_eq!(keystroke_to_bytes(&shift_dash, mode), Some(b"_".to_vec()));
+
+        let shift_slash = Keystroke::parse("shift-/").unwrap();
+        assert_eq!(keystroke_to_bytes(&shift_slash, mode), Some(b"?".to_vec()));
+    }
 }
+
