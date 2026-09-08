@@ -1,4 +1,4 @@
-# Olova Editor
+# ezicode
 
 Native code editor: file tree + [gpui-component](https://github.com/longbridge/gpui-component) `Input` in **code editor** mode (rope buffer, tree-sitter highlighting, search).
 
@@ -44,7 +44,7 @@ Open `App.tsx` in a project with nothing installed and you get:
 1. `lang.rs` → `tsx` → the `typescript-language-server` adapter.
 2. Nothing installed, so a background `npm install typescript-language-server
    typescript@6` runs into a **private** container dir
-   (`~/.local/share/olova-editor/language-servers/<server>`, mirroring Zed's
+   (`~/.local/share/ezicode/language-servers/<server>`, mirroring Zed's
    `~/.local/share/zed/languages/`) — never a global prefix, never your
    project. The status bar shows `◌ installing…`.
 3. Install finishes → the server starts and every already-open buffer it

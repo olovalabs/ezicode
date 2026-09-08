@@ -1,9 +1,9 @@
 //! VS Code & Zed-style persistent settings system.
 //!
 //! Stores user configuration in a platform-standard `settings.json`:
-//! - Windows: `%APPDATA%/html2gpui/settings.json`
-//! - macOS:   `~/Library/Application Support/html2gpui/settings.json`
-//! - Linux:   `~/.config/html2gpui/settings.json`
+//! - Windows: `%APPDATA%/ezicode/settings.json`
+//! - macOS:   `~/Library/Application Support/ezicode/settings.json`
+//! - Linux:   `~/.config/ezicode/settings.json`
 
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
@@ -58,46 +58,59 @@ fn default_tab_size() -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(rename = "editor.fontSize", default = "default_font_size")]
-    pub editor_font_size: f32,
+    pub font_size: f32,
 
     #[serde(rename = "workbench.colorTheme", default = "default_theme")]
-    pub workbench_color_theme: String,
+    pub theme: String,
 
-    #[serde(rename = "editor.autoSave", default = "default_auto_save")]
-    pub editor_auto_save: AutoSaveMode,
+    #[serde(rename = "files.autoSave", default = "default_auto_save")]
+    pub auto_save: AutoSaveMode,
 
-    #[serde(rename = "editor.autoSaveDelay", default = "default_auto_save_delay")]
-    pub editor_auto_save_delay: u64,
+    #[serde(rename = "files.autoSaveDelay", default = "default_auto_save_delay")]
+    pub auto_save_delay: u64,
 
     #[serde(rename = "editor.tabSize", default = "default_tab_size")]
-    pub editor_tab_size: usize,
+    pub tab_size: usize,
 
-    #[serde(rename = "terminal.integrated.shell", default, skip_serializing_if = "Option::is_none")]
-    pub terminal_integrated_shell: Option<String>,
+    #[serde(rename = "terminal.shell", default, skip_serializing_if = "Option::is_none")]
+    pub terminal_shell: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            editor_font_size: default_font_size(),
-            workbench_color_theme: default_theme(),
-            editor_auto_save: default_auto_save(),
-            editor_auto_save_delay: default_auto_save_delay(),
-            editor_tab_size: default_tab_size(),
-            terminal_integrated_shell: None,
+            font_size: default_font_size(),
+            theme: default_theme(),
+            auto_save: default_auto_save(),
+            auto_save_delay: default_auto_save_delay(),
+            tab_size: default_tab_size(),
+            terminal_shell: None,
         }
     }
 }
 
-/// Returns the configuration directory for the current operating system.
+/// Returns the platform-specific directory where `settings.json` lives:
+/// - Windows: `%APPDATA%\ezicode` (falls back to legacy `%APPDATA%\html2gpui`)
+/// - macOS: `~/Library/Application Support/ezicode`
+/// - Linux / BSD: `$XDG_CONFIG_HOME/ezicode` or `~/.config/ezicode`
 pub fn config_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            return PathBuf::from(appdata).join("html2gpui");
+            let ezicode = PathBuf::from(&appdata).join("ezicode");
+            let legacy = PathBuf::from(&appdata).join("html2gpui");
+            if !ezicode.exists() && legacy.exists() {
+                return legacy;
+            }
+            return ezicode;
         }
         if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            return PathBuf::from(userprofile).join("AppData").join("Roaming").join("html2gpui");
+            let ezicode = PathBuf::from(&userprofile).join("AppData").join("Roaming").join("ezicode");
+            let legacy = PathBuf::from(&userprofile).join("AppData").join("Roaming").join("html2gpui");
+            if !ezicode.exists() && legacy.exists() {
+                return legacy;
+            }
+            return ezicode;
         }
         PathBuf::from(".").join("config")
     }
@@ -105,10 +118,12 @@ pub fn config_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("html2gpui");
+            let ezicode = PathBuf::from(&home).join("Library").join("Application Support").join("ezicode");
+            let legacy = PathBuf::from(&home).join("Library").join("Application Support").join("html2gpui");
+            if !ezicode.exists() && legacy.exists() {
+                return legacy;
+            }
+            return ezicode;
         }
         PathBuf::from(".").join("config")
     }
@@ -116,10 +131,20 @@ pub fn config_dir() -> PathBuf {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            return PathBuf::from(xdg).join("html2gpui");
+            let ezicode = PathBuf::from(&xdg).join("ezicode");
+            let legacy = PathBuf::from(&xdg).join("html2gpui");
+            if !ezicode.exists() && legacy.exists() {
+                return legacy;
+            }
+            return ezicode;
         }
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(".config").join("html2gpui");
+            let ezicode = PathBuf::from(&home).join(".config").join("ezicode");
+            let legacy = PathBuf::from(&home).join(".config").join("html2gpui");
+            if !ezicode.exists() && legacy.exists() {
+                return legacy;
+            }
+            return ezicode;
         }
         PathBuf::from(".").join("config")
     }

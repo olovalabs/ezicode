@@ -450,7 +450,7 @@ impl Workspace {
                 if self.root.is_some() {
                     format!("Settings — {}", self.root_display)
                 } else {
-                    "Settings — Olova Editor".to_string()
+                    "Settings — ezicode".to_string()
                 }
             } else if let Some(path) = &tab.path {
                 let star = if tab.dirty { " ●" } else { "" };
@@ -471,17 +471,17 @@ impl Workspace {
                 if self.root.is_some() {
                     format!("untitled{star} — {}", self.root_display)
                 } else {
-                    format!("untitled{star} — Olova Editor")
+                    format!("untitled{star} — ezicode")
                 }
             } else if self.root.is_some() {
                 self.root_display.clone()
             } else {
-                "Olova Editor".to_string()
+                "ezicode".to_string()
             }
         } else if self.root.is_some() {
             self.root_display.clone()
         } else {
-            "Olova Editor".to_string()
+            "ezicode".to_string()
         }
     }
 
@@ -3104,7 +3104,7 @@ impl Workspace {
     }
 
     pub(crate) fn about(&mut self, cx: &mut Context<Self>) {
-        self.status = format!("Olova Editor — {} (Zed theme system)", self.theme().name);
+        self.status = format!("ezicode — {} (Zed theme system)", self.theme().name);
         cx.notify();
     }
 }

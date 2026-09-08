@@ -50,7 +50,7 @@ pub fn language_servers_dir() -> PathBuf {
     } else {
         std::env::temp_dir()
     };
-    base.join("olova-editor").join("language-servers")
+    base.join("ezicode").join("language-servers")
 }
 
 /// The container directory for one server (Zed's `container_dir`).
@@ -62,7 +62,7 @@ pub fn container_dir(server_name: &str) -> PathBuf {
 pub fn node_binary() -> Option<PathBuf> {
     // An explicit override always wins, so users on unusual setups (nvm,
     // Volta, corporate images) can point us at the right runtime.
-    if let Some(explicit) = std::env::var_os("OLOVA_NODE") {
+    if let Some(explicit) = std::env::var_os("EZICODE_NODE").or_else(|| std::env::var_os("OLOVA_NODE")) {
         let p = PathBuf::from(explicit);
         if p.is_file() {
             return Some(p);
@@ -120,7 +120,7 @@ pub fn node_version() -> Option<String> {
 
 /// The marker file recording which packages we installed into a container.
 fn marker_path(container: &Path) -> PathBuf {
-    container.join(".olova-installed")
+    container.join(".ezicode-installed")
 }
 
 /// Zed's `should_install_npm_package`, simplified: install when the entry
@@ -236,7 +236,7 @@ pub fn install_npm_server(
     if !pkg_json.exists() {
         let _ = std::fs::write(
             &pkg_json,
-            format!("{{\"name\":\"olova-{server_name}\",\"private\":true}}\n"),
+            format!("{{\"name\":\"ezicode-{server_name}\",\"private\":true}}\n"),
         );
     }
 
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn needs_install_detects_missing_entry_and_marker_drift() {
-        let tmp = std::env::temp_dir().join(format!("olova-node-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ezicode-node-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let entry = tmp.join("server.js");

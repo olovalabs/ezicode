@@ -34,7 +34,7 @@ use workspace::Workspace;
 /// vanishing window. Panics on the main thread terminate the process, so
 /// without this a UI-thread panic looks like a silent exit.
 fn install_panic_logger() {
-    let log_path = std::env::temp_dir().join("olova-editor-panic.log");
+    let log_path = std::env::temp_dir().join("ezicode-panic.log");
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
         let name = thread.name().unwrap_or("<unnamed>");

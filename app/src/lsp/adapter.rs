@@ -104,7 +104,7 @@ impl ServerAdapter {
                 });
                 Some(json!({
                     "provideFormatter": true,
-                    "hostInfo": "olova",
+                    "hostInfo": "ezicode",
                     "tsserver": { "path": tsdk },
                     "preferences": {
                         "includeInlayParameterNameHints": "all",

@@ -155,5 +155,5 @@ calling `display_name(root)` per frame.
    `uniform_list` primitive.
 3. **Incremental LSP sync** (issue #3) — switch `content_changes` from
    `range: None` to edit ranges once the editor exposes them.
-4. Optional runtime check: `OLOVA_PERF=1 cargo run` exists for measuring the
+4. Optional runtime check: `EZICODE_PERF=1 cargo run` exists for measuring the
    explorer reload cost against `perf::stat_count()`.

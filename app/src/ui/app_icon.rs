@@ -1,4 +1,4 @@
-//! App icon (Olova logo) rendering utilities.
+//! App icon (ezicode logo) rendering utilities.
 //!
 //! Renders the embedded logo wherever the app needs branding — welcome
 //! screen, title bar, about dialog, etc.
@@ -11,11 +11,13 @@ use gpui_component::IconName;
 
 use crate::theme::Colors;
 
-/// Get the path to the olova logo PNG (if it exists on disk).
+/// Get the path to the app logo PNG (if it exists on disk).
 /// We use a path-based image so the GPUI image cache can handle it.
 fn logo_path() -> Option<PathBuf> {
     // Check a few common locations
     let candidates = [
+        "assets/logo/ezicode.png",
+        "app/assets/logo/ezicode.png",
         "assets/logo/olova.png",
         "app/assets/logo/olova.png",
     ];
@@ -30,8 +32,8 @@ fn logo_path() -> Option<PathBuf> {
 
 /// Render the app icon at a specific size.
 ///
-/// Uses the embedded `olova.png` if available. If not, falls back to a
-/// colored circle with a stylized "O" — still recognizable as branding.
+/// Uses the embedded logo if available. If not, falls back to a
+/// colored circle with a stylized "E" — still recognizable as branding.
 pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
     if let Some(path) = logo_path() {
         return img(path)
@@ -40,7 +42,7 @@ pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
             .into_any_element();
     }
 
-    // Fallback: colored circle with "O"
+    // Fallback: colored circle with "E"
     div()
         .w(px(size))
         .h(px(size))
@@ -52,7 +54,7 @@ pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
         .text_color(rgba(t.background))
         .font_weight(FontWeight::BOLD)
         .text_size(px(size * 0.55))
-        .child("O")
+        .child("E")
         .into_any_element()
 }
 
@@ -83,5 +85,5 @@ pub fn render_app_icon_with_label(
 /// This makes the app identifiable in dropdowns.
 #[allow(dead_code)]
 pub fn app_icon_name() -> IconName {
-    IconName::Star  // Placeholder; will use a custom Olova glyph if added
+    IconName::Star  // Placeholder; will use a custom ezicode glyph if added
 }

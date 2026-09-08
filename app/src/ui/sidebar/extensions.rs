@@ -41,7 +41,7 @@ pub(crate) fn render_extensions_panel(t: &Colors) -> AnyElement {
                 ))
                 .child(extension_item(
                     "HTML to GPUI Preview",
-                    "olova.html2gpui",
+                    "ezicode.preview",
                     "Live GPUI element previewer",
                     true,
                     t,

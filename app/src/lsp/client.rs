@@ -883,7 +883,7 @@ impl LspClient {
             ..Default::default()
         };
         params.client_info = Some(lsp_types::ClientInfo {
-            name: "Olova Editor".into(),
+            name: "ezicode".into(),
             version: Some("0.1.0".into()),
         });
 
@@ -2215,7 +2215,7 @@ mod tests {
             return;
         };
 
-        let dir = std::env::temp_dir().join(format!("olova-lsp-live-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ezicode-lsp-live-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("bad.ts");
         let code = "function f(x: number): string { return x; }\n";

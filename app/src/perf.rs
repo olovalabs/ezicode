@@ -1,11 +1,9 @@
-//! Opt-in performance instrumentation.
-//!
-//! Everything here is inert unless `OLOVA_PERF` is set to something other than
+//! Everything here is inert unless `EZICODE_PERF` is set to something other than
 //! `0`, so the probes can stay in the hot paths permanently without costing
 //! anything in normal runs:
 //!
 //! ```text
-//! OLOVA_PERF=1 cargo run
+//! EZICODE_PERF=1 cargo run
 //! ```
 //!
 //! Three primitives:
@@ -25,10 +23,12 @@ static BOOT: OnceLock<Instant> = OnceLock::new();
 static LAST_MARK_MS: AtomicU64 = AtomicU64::new(0);
 static STAT_CALLS: AtomicU32 = AtomicU32::new(0);
 
-/// True when `OLOVA_PERF` is set and not `0`.
+/// True when `EZICODE_PERF` is set and not `0`.
 pub fn enabled() -> bool {
     *ENABLED.get_or_init(|| {
-        std::env::var_os("OLOVA_PERF").is_some_and(|v| v != "0" && !v.is_empty())
+        std::env::var_os("EZICODE_PERF")
+            .or_else(|| std::env::var_os("OLOVA_PERF"))
+            .is_some_and(|v| v != "0" && !v.is_empty())
     })
 }
 
