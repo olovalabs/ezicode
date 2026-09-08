@@ -58,33 +58,33 @@ fn default_tab_size() -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(rename = "editor.fontSize", default = "default_font_size")]
-    pub font_size: f32,
+    pub editor_font_size: f32,
 
     #[serde(rename = "workbench.colorTheme", default = "default_theme")]
-    pub theme: String,
+    pub workbench_color_theme: String,
 
-    #[serde(rename = "files.autoSave", default = "default_auto_save")]
-    pub auto_save: AutoSaveMode,
+    #[serde(rename = "editor.autoSave", default = "default_auto_save")]
+    pub editor_auto_save: AutoSaveMode,
 
-    #[serde(rename = "files.autoSaveDelay", default = "default_auto_save_delay")]
-    pub auto_save_delay: u64,
+    #[serde(rename = "editor.autoSaveDelay", default = "default_auto_save_delay")]
+    pub editor_auto_save_delay: u64,
 
     #[serde(rename = "editor.tabSize", default = "default_tab_size")]
-    pub tab_size: usize,
+    pub editor_tab_size: usize,
 
-    #[serde(rename = "terminal.shell", default, skip_serializing_if = "Option::is_none")]
-    pub terminal_shell: Option<String>,
+    #[serde(rename = "terminal.integrated.shell", default, skip_serializing_if = "Option::is_none")]
+    pub terminal_integrated_shell: Option<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            font_size: default_font_size(),
-            theme: default_theme(),
-            auto_save: default_auto_save(),
-            auto_save_delay: default_auto_save_delay(),
-            tab_size: default_tab_size(),
-            terminal_shell: None,
+            editor_font_size: default_font_size(),
+            workbench_color_theme: default_theme(),
+            editor_auto_save: default_auto_save(),
+            editor_auto_save_delay: default_auto_save_delay(),
+            editor_tab_size: default_tab_size(),
+            terminal_integrated_shell: None,
         }
     }
 }
