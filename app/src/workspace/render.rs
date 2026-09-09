@@ -390,7 +390,7 @@ impl Render for Workspace {
                                     .bg(rgba(t.editor_bg))
                                     // Tab bar - only show when tabs exist
                                     .when(!tabs.is_empty(), |d| {
-                                        d.child(ui::tab_bar::render_tab_bar(tabs, active_tab, &t, cx))
+                                        d.child(ui::tab_bar::render_tab_bar(tabs, active_tab, git_repo, &t, cx))
                                     })
                                     // Editor area / Settings area / Welcome
                                     .when(welcome, |d| d.child(ui::welcome::render_welcome(&t, cx)))

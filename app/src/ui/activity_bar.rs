@@ -1,5 +1,5 @@
-//! VS Code-style activity bar: modern floating rail on the far left
-//! themed dynamically with active theme tokens.
+//! Modern floating pill activity bar matching modern IDE design
+//! with an elevated vertical capsule container, circular buttons, and dynamic theme tokens.
 
 use gpui::{div, prelude::*, px, rgba, svg, Context, FontWeight, IntoElement, SharedString, Window};
 
@@ -13,22 +13,32 @@ pub(crate) fn render_activity_bar(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     div()
+        .id("activity-bar")
         .w(px(48.0))
         .h_full()
         .flex()
         .flex_col()
+        .items_center()
         .justify_between()
-        .bg(rgba(t.panel))
+        .bg(rgba(t.background))
         .border_r_1()
         .border_color(rgba(t.border_variant))
-        .py(px(6.0))
+        .py(px(8.0))
+        // Floating Top Pill Capsule
         .child(
             div()
-                .w_full()
+                .id("activity-pill")
+                .w(px(40.0))
+                .rounded_full()
+                .bg(rgba(t.elevated_surface))
+                .border_1()
+                .border_color(rgba(t.border_variant))
+                .py(px(6.0))
+                .px(px(3.0))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(3.0))
+                .gap(px(4.0))
                 .child(activity_icon(
                     "act-explorer",
                     "ui_icons/files_tint.svg",
@@ -51,7 +61,6 @@ pub(crate) fn render_activity_bar(
                     "act-git",
                     "ui_icons/source-control_tint.svg",
                     show_sidebar && activity == Activity::Git,
-                    // Real change count (VS Code style badge); hidden at zero.
                     (git_change_count > 0).then(|| git_change_count.to_string()),
                     Activity::Git,
                     t,
@@ -67,13 +76,18 @@ pub(crate) fn render_activity_bar(
                     cx,
                 )),
         )
+        // Bottom Settings Circular Capsule
         .child(
             div()
-                .w_full()
+                .id("activity-settings-pill")
+                .size(px(40.0))
+                .rounded_full()
+                .bg(rgba(t.elevated_surface))
+                .border_1()
+                .border_color(rgba(t.border_variant))
                 .flex()
-                .flex_col()
                 .items_center()
-                .pb(px(4.0))
+                .justify_center()
                 .child(activity_static_icon(
                     "act-settings",
                     "ui_icons/settings-gear_tint.svg",
@@ -101,68 +115,61 @@ fn activity_icon(
         t.icon_muted
     };
 
-    let mut inner = div()
-        .size(px(36.0))
-        .rounded(px(10.0))
+    let mut item = div()
+        .id(SharedString::from(id))
+        .group(SharedString::from(id))
+        .size(px(34.0))
+        .rounded_full()
         .flex()
         .items_center()
         .justify_center()
+        .cursor_pointer()
         .relative();
 
     if selected {
-        inner = inner
+        item = item
             .bg(rgba(t.element_selected))
             .border_1()
             .border_color(rgba(t.border_focused));
     } else {
-        inner = inner.hover(|s| s.bg(rgba(t.ghost_hover)));
+        item = item.hover(|s| s.bg(rgba(t.ghost_hover)));
     }
 
-    inner = inner.child(
+    item = item.child(
         svg()
             .path(svg_path)
-            .w(px(20.0))
-            .h(px(20.0))
+            .w(px(18.0))
+            .h(px(18.0))
             .text_color(rgba(icon_color))
             .group_hover(SharedString::from(id), |s| s.text_color(rgba(t.text))),
     );
 
     if let Some(b) = badge {
-        inner = inner.child(
+        item = item.child(
             div()
                 .absolute()
-                .bottom(px(0.0))
+                .top(px(0.0))
                 .right(px(0.0))
-                .min_w(px(15.0))
-                .h(px(15.0))
-                .px(px(3.0))
+                .min_w(px(14.0))
+                .h(px(14.0))
+                .px(px(2.0))
                 .rounded_full()
                 .bg(rgba(t.text_accent))
                 .border_1()
-                .border_color(rgba(t.panel))
+                .border_color(rgba(t.elevated_surface))
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(9.5))
+                .text_size(px(9.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(t.background))
                 .child(SharedString::from(b)),
         );
     }
 
-    div()
-        .id(SharedString::from(id))
-        .group(SharedString::from(id))
-        .w_full()
-        .h(px(42.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .child(inner)
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.toggle_activity(which, window, cx)
-        }))
+    item.on_click(cx.listener(move |this, _, window, cx| {
+        this.toggle_activity(which, window, cx);
+    }))
 }
 
 fn activity_static_icon(
@@ -172,33 +179,23 @@ fn activity_static_icon(
     action: impl Fn(&mut Workspace, &gpui::ClickEvent, &mut Window, &mut Context<Workspace>) + 'static,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let mut inner = div()
-        .size(px(36.0))
-        .rounded(px(10.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .relative()
-        .hover(|s| s.bg(rgba(t.ghost_hover)));
-
-    inner = inner.child(
-        svg()
-            .path(svg_path)
-            .w(px(20.0))
-            .h(px(20.0))
-            .text_color(rgba(t.icon_muted))
-            .group_hover(SharedString::from(id), |s| s.text_color(rgba(t.text))),
-    );
-
     div()
         .id(SharedString::from(id))
         .group(SharedString::from(id))
-        .w_full()
-        .h(px(42.0))
+        .size(px(34.0))
+        .rounded_full()
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .child(inner)
+        .hover(|s| s.bg(rgba(t.ghost_hover)))
+        .child(
+            svg()
+                .path(svg_path)
+                .w(px(18.0))
+                .h(px(18.0))
+                .text_color(rgba(t.icon_muted))
+                .group_hover(SharedString::from(id), |s| s.text_color(rgba(t.text))),
+        )
         .on_click(cx.listener(action))
 }

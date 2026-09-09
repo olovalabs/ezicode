@@ -172,6 +172,16 @@ fn parse_family(json: &str, out: &mut Vec<Theme>) {
                 }
             }
         }
+        if colors.border == Colors::MISSING {
+            colors.border = 0x30363dff;
+        }
+        if colors.border_variant == Colors::MISSING {
+            colors.border_variant = if colors.border != Colors::MISSING {
+                colors.border
+            } else {
+                0x21262dff
+            };
+        }
         // Semantic fallbacks for tabs and terminal if omitted in theme files
         if colors.tab_bar == Colors::MISSING {
             colors.tab_bar = if colors.toolbar != Colors::MISSING {
