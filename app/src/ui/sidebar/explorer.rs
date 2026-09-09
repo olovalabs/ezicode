@@ -52,8 +52,6 @@ pub(crate) fn render_tree(
         .flex()
         .flex_col()
         .bg(rgba(t.panel))
-        .border_r_1()
-        .border_color(rgba(t.border_variant))
         .overflow_hidden();
 
     // Root project header and its quick actions mirror the compact toolbar in

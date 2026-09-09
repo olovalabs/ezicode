@@ -11,8 +11,6 @@ pub(crate) fn render_extensions_panel(t: &Colors) -> AnyElement {
         .flex()
         .flex_col()
         .bg(rgba(t.panel))
-        .border_r_1()
-        .border_color(rgba(t.border_variant))
         .child(panel_header("EXTENSIONS", t))
         .child(
             div()

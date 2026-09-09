@@ -143,6 +143,7 @@ pub(crate) struct Workspace {
     pub(crate) activity: Activity,
     pub(crate) show_sidebar: bool,
     pub(crate) show_terminal: bool,
+    pub(crate) terminal_maximized: bool,
     pub(crate) theme_ix: usize,
     /// Editor buffer font size in pixels (supports Ctrl++/Ctrl-- zoom like Zed)
     pub(crate) font_size: f32,
@@ -219,6 +220,7 @@ pub(crate) struct PanelResizeDrag {
     /// Mouse position along the drag axis at grab time.
     pub(crate) start_mouse: f32,
     /// Panel size at grab time.
+    #[allow(dead_code)]
     pub(crate) start_size: f32,
 }
 
@@ -406,6 +408,7 @@ impl Workspace {
             activity: Activity::Explorer,
             show_sidebar: true,
             show_terminal: false,
+            terminal_maximized: false,
             theme_ix,
             font_size,
             settings,
@@ -827,8 +830,19 @@ impl Workspace {
     /// Sessions in all tabs stay alive; [`Self::close_terminal`] kills them.
     pub(crate) fn hide_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_terminal = false;
+        self.terminal_maximized = false;
         self.status = "Terminal hidden".into();
         self.focus_active_editor_or_self(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_terminal_maximized(&mut self, cx: &mut Context<Self>) {
+        if !self.show_terminal {
+            self.show_terminal = true;
+            self.terminal_maximized = true;
+        } else {
+            self.terminal_maximized = !self.terminal_maximized;
+        }
         cx.notify();
     }
 

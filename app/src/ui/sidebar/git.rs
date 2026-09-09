@@ -66,8 +66,6 @@ pub(crate) fn render_git_panel(
         .flex()
         .flex_col()
         .bg(rgba(t.panel))
-        .border_r_1()
-        .border_color(rgba(t.border_variant))
         .overflow_hidden();
 
     col = col.child(header(t, window, cx));

@@ -82,8 +82,6 @@ pub(crate) fn render_no_folder_panel(t: &Colors, cx: &mut Context<Workspace>) ->
         .gap(px(10.0))
         .pt(px(48.0))
         .bg(rgba(t.panel))
-        .border_r_1()
-        .border_color(rgba(t.border_variant))
         .child(super::common::panel_header("EXPLORER", t))
         .child(
             div()

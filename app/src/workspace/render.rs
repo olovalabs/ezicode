@@ -17,11 +17,9 @@ use crate::workspace::CreatingKind;
 use super::{Activity, PanelResizeDrag, ResizeKind, Workspace};
 
 /// Pixels of chrome reserved above/below the terminal so it can be dragged to
-/// (nearly) full height like VS Code's maximized panel: title bar (34) +
-/// status bar (26) + 5px drag handle + a 35px sliver so the tab/editor stay
-/// visible above the panel. Drag the divider up and the terminal swallows the
-/// whole editor region.
-const TERMINAL_MAX_RESERVE: f32 = 100.0;
+/// full height: title bar (34) + status bar (26) = 60px.
+/// Drag the divider up and the terminal expands to full height.
+const TERMINAL_MAX_RESERVE: f32 = 60.0;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -53,11 +51,13 @@ impl Render for Workspace {
         // (VS Code behavior) instead of scaling proportionally. (Must happen
         // before the field borrows below, since both mutate `self`.)
         let max_sidebar = f32::from(window.viewport_size().width - px(320.0)).max(220.0);
-        self.sidebar_width = self.sidebar_width.clamp(170.0, max_sidebar);
+        let min_sidebar = if self.panel_resize.is_some() { 60.0 } else { 170.0 };
+        self.sidebar_width = self.sidebar_width.clamp(min_sidebar, max_sidebar);
         let sidebar_w = self.sidebar_width;
         let max_terminal = f32::from(window.viewport_size().height - px(TERMINAL_MAX_RESERVE))
             .max(120.0);
-        self.terminal_height = self.terminal_height.clamp(80.0, max_terminal);
+        let min_terminal = if self.panel_resize.is_some() { 45.0 } else { 80.0 };
+        self.terminal_height = self.terminal_height.clamp(min_terminal, max_terminal);
         let terminal_h = self.terminal_height;
         let panel_resize = self.panel_resize;
 
@@ -84,6 +84,7 @@ impl Render for Workspace {
         let font_size = self.font_size;
         let terminal_tabs = &self.terminal_tabs;
         let active_terminal = self.active_terminal;
+        let terminal_maximized = self.terminal_maximized && self.show_terminal && !self.terminal_tabs.is_empty();
 
         // Tab-related data
         let tabs = &self.tabs;
@@ -363,8 +364,11 @@ impl Render for Workspace {
                                     }
                                 }),
                         )
-                        .child(resize_handle(ResizeKind::Sidebar, &t, cx))
                     })
+                    // Sidebar resizer: always visible right next to the sidebar (or
+                    // activity bar when hidden), allowing click, drag, or double-click to
+                    // reveal and resize, matching VS Code.
+                    .child(resize_handle(ResizeKind::Sidebar, &t, cx))
                     .child(
                                 // Editor column absorbs all remaining space; the
                         // terminal panel below it is also a fixed-pixel panel
@@ -375,7 +379,9 @@ impl Render for Workspace {
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .child(
+                            // Editor area: hidden when terminal is full-screen maximized
+                            .when(!terminal_maximized, |col| {
+                                col.child(
                                 div()
                                     .flex_1()
                                     .min_h(px(0.0))
@@ -415,21 +421,43 @@ impl Render for Workspace {
                                             d.flex_1()
                                         }
                                     }),
-                            )
-                            .when(show_terminal && !terminal_tabs.is_empty(), |col| {
+                                )
+                            })
+                            // Terminal resizer: always visible above the status bar
+                            // even when collapsed, allowing drag-to-reveal or click to open like VS Code.
+                            .when(!terminal_tabs.is_empty(), |col| {
                                 col.child(resize_handle(ResizeKind::Terminal, &t, cx))
-                                    .child(
-                                        div()
-                                            .h(px(terminal_h))
-                                            .flex_shrink_0()
-                                            .overflow_hidden()
-                                            .child(crate::terminal::render_terminal_panel(
-                                                terminal_tabs,
-                                                active_terminal,
-                                                &t,
-                                                cx,
-                                            )),
-                                    )
+                                    .when(show_terminal, |col| {
+                                        if terminal_maximized {
+                                            col.child(
+                                                div()
+                                                    .flex_1()
+                                                    .size_full()
+                                                    .overflow_hidden()
+                                                    .child(crate::terminal::render_terminal_panel(
+                                                        terminal_tabs,
+                                                        active_terminal,
+                                                        true,
+                                                        &t,
+                                                        cx,
+                                                    )),
+                                            )
+                                        } else {
+                                            col.child(
+                                                div()
+                                                    .h(px(terminal_h))
+                                                    .flex_shrink_0()
+                                                    .overflow_hidden()
+                                                    .child(crate::terminal::render_terminal_panel(
+                                                        terminal_tabs,
+                                                        active_terminal,
+                                                        false,
+                                                        &t,
+                                                        cx,
+                                                    )),
+                                            )
+                                        }
+                                    })
                             }),
                     ),
             )
@@ -464,22 +492,38 @@ impl Render for Workspace {
                             };
                             match rz.kind {
                                 ResizeKind::Sidebar => {
-                                    let max =
-                                        f32::from(window.viewport_size().width - px(320.0))
-                                            .max(220.0);
-                                    this.sidebar_width = (rz.start_size
-                                        + (f32::from(ev.position.x) - rz.start_mouse))
-                                        .clamp(170.0, max);
+                                    // Direct coordinate tracking (Zed formula): sidebar width is exactly
+                                    // distance from the right edge of activity bar (x=48px) to the cursor.
+                                    let dist = f32::from(ev.position.x) - 48.0;
+                                    if dist < 60.0 {
+                                        this.show_sidebar = false;
+                                    } else {
+                                        this.show_sidebar = true;
+                                        let max = f32::from(window.viewport_size().width - px(320.0)).max(220.0);
+                                        this.sidebar_width = dist.clamp(60.0, max);
+                                    }
                                 }
                                 ResizeKind::Terminal => {
-                                    let max =
-                                        f32::from(
-                                            window.viewport_size().height - px(TERMINAL_MAX_RESERVE),
-                                        )
-                                        .max(120.0);
-                                    this.terminal_height = (rz.start_size
-                                        - (f32::from(ev.position.y) - rz.start_mouse))
-                                        .clamp(80.0, max);
+                                    let bottom = f32::from(window.viewport_size().height) - 26.0;
+                                    let dist = bottom - f32::from(ev.position.y);
+                                    let titlebar_h = 34.0;
+                                    let max_avail = (f32::from(window.viewport_size().height) - 26.0 - titlebar_h).max(120.0);
+
+                                    if dist < 45.0 {
+                                        // Dragged down near status bar -> collapse to hide
+                                        this.show_terminal = false;
+                                        this.terminal_maximized = false;
+                                    } else if dist >= max_avail - 45.0 {
+                                        // Dragged all the way up near the top titlebar -> totally full screen!
+                                        this.show_terminal = true;
+                                        this.terminal_maximized = true;
+                                        this.terminal_height = max_avail;
+                                    } else {
+                                        // Normal resizing
+                                        this.show_terminal = true;
+                                        this.terminal_maximized = false;
+                                        this.terminal_height = dist.clamp(45.0, max_avail - 45.0);
+                                    }
                                 }
                             }
                             cx.stop_propagation();
@@ -487,6 +531,35 @@ impl Render for Workspace {
                         },
                     ))
                     .on_mouse_up(MouseButton::Left, cx.listener(
+                        |this, ev: &MouseUpEvent, _window, cx| {
+                            if let Some(rz) = this.panel_resize.take() {
+                                match rz.kind {
+                                    ResizeKind::Sidebar => {
+                                        if !this.show_sidebar {
+                                            if (f32::from(ev.position.x) - rz.start_mouse).abs() < 5.0 {
+                                                this.show_sidebar = true;
+                                                this.sidebar_width = 300.0;
+                                            }
+                                        } else {
+                                            this.sidebar_width = this.sidebar_width.max(170.0);
+                                        }
+                                    }
+                                    ResizeKind::Terminal => {
+                                        if !this.show_terminal {
+                                            if (rz.start_mouse - f32::from(ev.position.y)).abs() < 5.0 {
+                                                this.show_terminal = true;
+                                                this.terminal_height = 320.0;
+                                            }
+                                        } else {
+                                            this.terminal_height = this.terminal_height.max(80.0);
+                                        }
+                                    }
+                                }
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .on_mouse_up(MouseButton::Right, cx.listener(
                         |this, _: &MouseUpEvent, _, cx| {
                             if this.panel_resize.take().is_some() {
                                 cx.notify();
@@ -503,9 +576,8 @@ impl Render for Workspace {
     }
 }
 
-/// Thin draggable divider between panels (VS Code style): a 5px hit zone
-/// with a 1px visible line that brightens on hover. Grabbing it starts a
-/// panel resize drag handled by the root div's mouse listeners.
+/// Zed-style panel resize handle: a 5px transparent hit zone with a centered
+/// 1px border line that brightens on hover, with double-click to reset size.
 fn resize_handle(kind: ResizeKind, t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
     let idle = rgba(t.border_variant);
     let hot = rgba(t.icon);
@@ -527,8 +599,7 @@ fn resize_handle(kind: ResizeKind, t: &Colors, cx: &mut Context<Workspace>) -> i
         .group("resize-handle")
         .flex()
         .items_center()
-        .justify_center()
-        .hover(|s| s.bg(rgba(t.element_hover)));
+        .justify_center();
 
     let base = if vertical {
         base.w(px(5.0)).h_full().cursor_col_resize()
@@ -536,12 +607,51 @@ fn resize_handle(kind: ResizeKind, t: &Colors, cx: &mut Context<Workspace>) -> i
         base.h(px(5.0)).w_full().cursor_row_resize()
     };
 
-    base.child(line.bg(idle).group_hover("resize-handle", |s| s.bg(hot)))
+        base.child(line.bg(idle).group_hover("resize-handle", |s| s.bg(hot)))
         .on_mouse_down(MouseButton::Left, cx.listener(
         move |this, ev: &gpui::MouseDownEvent, _, cx| {
+            if ev.click_count == 2 {
+                match kind {
+                    ResizeKind::Sidebar => {
+                        this.show_sidebar = !this.show_sidebar;
+                        if this.show_sidebar && this.sidebar_width < 170.0 {
+                            this.sidebar_width = 300.0;
+                        }
+                    }
+                    ResizeKind::Terminal => {
+                        this.show_terminal = !this.show_terminal;
+                        if this.show_terminal {
+                            if this.terminal_maximized {
+                                // Restore from full screen
+                                this.terminal_maximized = false;
+                                this.terminal_height = 320.0;
+                            } else if this.terminal_height >= 500.0 {
+                                this.terminal_maximized = false;
+                                this.terminal_height = 320.0;
+                            } else {
+                                // Maximize to full height
+                                this.terminal_maximized = true;
+                            }
+                        } else {
+                            this.terminal_maximized = false;
+                            this.terminal_height = 320.0;
+                        }
+                    }
+                }
+                this.panel_resize = None;
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
             let (start_mouse, start_size) = match kind {
-                ResizeKind::Sidebar => (f32::from(ev.position.x), this.sidebar_width),
-                ResizeKind::Terminal => (f32::from(ev.position.y), this.terminal_height),
+                ResizeKind::Sidebar => {
+                    let current_w = if this.show_sidebar { this.sidebar_width } else { 0.0 };
+                    (f32::from(ev.position.x), current_w)
+                }
+                ResizeKind::Terminal => {
+                    let current_h = if this.show_terminal { this.terminal_height } else { 0.0 };
+                    (f32::from(ev.position.y), current_h)
+                }
             };
             this.panel_resize = Some(PanelResizeDrag {
                 kind,

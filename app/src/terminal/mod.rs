@@ -411,6 +411,7 @@ impl Terminal {
 pub fn render_terminal_panel(
     tabs: &[Entity<Terminal>],
     active: usize,
+    maximized: bool,
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -426,11 +427,9 @@ pub fn render_terminal_panel(
         .flex()
         .flex_col()
         .bg(rgba(t.terminal_bg))
-        .border_t_1()
-        .border_color(rgba(t.border_variant))
         // Terminal tab strip (Zed-style: one tab per shell, [+] to add,
         // chevron to collapse/hide the panel)
-        .child(render_terminal_tab_bar(tabs, active, t, cx))
+        .child(render_terminal_tab_bar(tabs, active, maximized, t, cx))
         // Embedded Terminal View from gpui-terminal (active tab only).
         // The view fills all remaining vertical space and handles its own
         // scrolling, cursor rendering, and PTY I/O.
@@ -454,6 +453,7 @@ pub fn render_terminal_panel(
 fn render_terminal_tab_bar(
     tabs: &[Entity<Terminal>],
     active: usize,
+    maximized: bool,
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -497,7 +497,42 @@ fn render_terminal_tab_bar(
     with_tabs
         .child(div().flex_1()) // Spacer pushes buttons to the right
         .child(render_new_terminal_button(t, cx))
+        .child(render_maximize_terminal_button(maximized, t, cx))
         .child(render_hide_panel_button(t, cx))
+}
+
+/// Maximize / restore button that expands the terminal to full height or restores it.
+fn render_maximize_terminal_button(
+    maximized: bool,
+    t: &Colors,
+    cx: &mut Context<Workspace>,
+) -> impl IntoElement {
+    let icon_path = if maximized {
+        "window-restore.svg"
+    } else {
+        "window-maximize.svg"
+    };
+
+    div()
+        .id("term-max-btn")
+        .w(px(22.0))
+        .h(px(20.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .hover(|s| s.bg(rgba(t.element_hover)))
+        .child(
+            svg()
+                .path(icon_path)
+                .w(px(11.0))
+                .h(px(11.0))
+                .text_color(rgba(t.text_muted)),
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.toggle_terminal_maximized(cx);
+        }))
 }
 
 /// A single terminal tab with status indicator and close button (Zed-style).
