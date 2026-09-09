@@ -1008,8 +1008,9 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let max_col = self.config.cols.saturating_sub(1);
-        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let (curr_cols, curr_rows) = self.dimensions();
+        let max_col = curr_cols.saturating_sub(1);
+        let max_row = (curr_rows as i32).saturating_sub(1);
         let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
@@ -1113,8 +1114,9 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let max_col = self.config.cols.saturating_sub(1);
-        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let (curr_cols, curr_rows) = self.dimensions();
+        let max_col = curr_cols.saturating_sub(1);
+        let max_row = (curr_rows as i32).saturating_sub(1);
         let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
@@ -1163,8 +1165,9 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let max_col = self.config.cols.saturating_sub(1);
-        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let (curr_cols, curr_rows) = self.dimensions();
+        let max_col = curr_cols.saturating_sub(1);
+        let max_row = (curr_rows as i32).saturating_sub(1);
         let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
@@ -1266,8 +1269,9 @@ impl TerminalView {
             x: bounds.origin.x + self.config.padding.left,
             y: bounds.origin.y + self.config.padding.top,
         };
-        let max_col = self.config.cols.saturating_sub(1);
-        let max_row = (self.config.rows as i32).saturating_sub(1);
+        let (curr_cols, curr_rows) = self.dimensions();
+        let max_col = curr_cols.saturating_sub(1);
+        let max_row = (curr_rows as i32).saturating_sub(1);
         let mut cell_point = crate::mouse::pixel_to_cell(
             event.position,
             origin,
@@ -1279,10 +1283,12 @@ impl TerminalView {
 
         let display_offset = self.state.with_term(|term| term.grid().display_offset());
 
-        // If viewing history (display_offset > 0) and mouse tracking is not active,
-        // browsing history takes priority over sending TUI arrow keys until
-        // the user returns to the live screen (display_offset == 0).
+        // If viewing history (display_offset > 0) in normal screen mode (not in an alternate
+        // screen / TUI) and mouse tracking is not active, browsing history takes priority.
+        // In alternate screen mode (TUI), there is no history, so wheel events must always
+        // be dispatched to the application (mouse reporting or arrow keys).
         if display_offset > 0
+            && !mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
             && !mode.intersects(
                 alacritty_terminal::term::TermMode::MOUSE_REPORT_CLICK
                     | alacritty_terminal::term::TermMode::MOUSE_MOTION

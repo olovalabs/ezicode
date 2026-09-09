@@ -289,6 +289,16 @@ pub fn rasterize_box_or_block(
         0x253B => Some(vec![rect(0.0, hmy, w, ht), rect(hmx, 0.0, ht, hmy + ht)]), // ┻
         0x254B => Some(vec![rect(0.0, hmy, w, ht), rect(hmx, 0.0, ht, h)]),     // ╋
 
+        // Half lines / single-ended lines
+        0x2574 => Some(vec![rect(0.0, my, mx + t, t)]),              // ╴
+        0x2575 => Some(vec![rect(mx, 0.0, t, my + t)]),              // ╵
+        0x2576 => Some(vec![rect(mx, my, w - mx, t)]),              // ╶
+        0x2577 => Some(vec![rect(mx, my, t, h - my)]),              // ╷
+        0x2578 => Some(vec![rect(0.0, hmy, hmx + ht, ht)]),         // ╸
+        0x2579 => Some(vec![rect(hmx, 0.0, ht, hmy + ht)]),         // ╹
+        0x257A => Some(vec![rect(hmx, hmy, w - hmx, ht)]),         // ╺
+        0x257B => Some(vec![rect(hmx, hmy, ht, h - hmy)]),         // ╻
+
         // Double lines
         0x2550 => {
             let offset = (t * 1.3).max(2.0);
@@ -767,11 +777,13 @@ impl TerminalRenderer {
             x: bounds.origin.x + padding.left,
             y: bounds.origin.y + padding.top,
         };
-        let display_offset = grid.display_offset();
-
-        // Vertical centering offset for tall font line heights
-        let base_height = self.cell_height / self.line_height_multiplier;
-        let vertical_offset = (self.cell_height - base_height) / 2.0;
+        // In alternate screen mode (TUIs like vim, lazygit, htop, btop),
+        // there is no scrollback history — the display offset must be 0.
+        let display_offset = if term.mode().contains(TermMode::ALT_SCREEN) {
+            0
+        } else {
+            grid.display_offset()
+        };
 
         let mut row_backgrounds: Vec<BackgroundRect> = Vec::new();
         let mut batched_text_runs: Vec<BatchedTextRun> = Vec::new();
@@ -786,7 +798,11 @@ impl TerminalRenderer {
             for col_idx in 0..num_cols {
                 let cell = &grid[alacritty_terminal::index::Line(buffer_line)]
                     [alacritty_terminal::index::Column(col_idx)];
-                let ch = cell.c;
+                let ch = if cell.c == ' ' || cell.c == '\0' {
+                    ' '
+                } else {
+                    cell.c
+                };
 
                 let mut fg_color = self.palette.resolve(cell.fg, colors);
                 let mut bg_color = self.palette.resolve(cell.bg, colors);
@@ -880,7 +896,32 @@ impl TerminalRenderer {
                         cell_text.push(zc);
                     }
                 }
-                let cell_width_units = if cell.flags.contains(Flags::WIDE_CHAR) { 2 } else { 1 };
+                let is_wide = cell.flags.contains(Flags::WIDE_CHAR);
+                let has_zerowidth = cell.zerowidth().is_some();
+                let cell_width_units = if is_wide { 2 } else { 1 };
+
+                // Wide characters (2 cells) and combining characters cannot be batched
+                // with single-width ASCII characters because GPUI's monospace `force_width`
+                // spaces each glyph at 1 column width, which breaks alignment for all
+                // following characters on the line. Isolate them into their own run.
+                if is_wide || has_zerowidth {
+                    if let Some(run) = current_run.take() {
+                        batched_text_runs.push(run);
+                    }
+                    batched_text_runs.push(BatchedTextRun {
+                        text: cell_text,
+                        cell_count: cell_width_units,
+                        start_col: col_idx,
+                        row: line_idx,
+                        fg_color,
+                        bg_color,
+                        bold,
+                        italic,
+                        underline,
+                        strikethrough,
+                    });
+                    continue;
+                }
 
                 if let Some(ref mut run) = current_run {
                     if run.fg_color == fg_color
@@ -1013,11 +1054,11 @@ impl TerminalRenderer {
         // 3. Paint batched text runs using monospace cell_width hint (Zed technique)
         for run in batched_text_runs {
             let x = origin.x + self.cell_width * (run.start_col as f32);
-            let y = origin.y + self.cell_height * (run.row as f32) + vertical_offset;
+            let y = origin.y + self.cell_height * (run.row as f32);
 
             let font = Font {
                 family: self.font_family.clone().into(),
-                features: FontFeatures::default(),
+                features: FontFeatures::disable_ligatures(),
                 fallbacks: None,
                 weight: if run.bold {
                     FontWeight::BOLD
@@ -1056,11 +1097,20 @@ impl TerminalRenderer {
                 },
             };
 
+            // Only use `Some(self.cell_width)` when every character in the run
+            // is a single-width glyph matching the column count. Wide characters
+            // and combining characters must be allowed to shape at their natural width.
+            let force_width = if run.cell_count > 1 || run.text.chars().count() != run.cell_count {
+                None
+            } else {
+                Some(self.cell_width)
+            };
+
             let shaped_line = window.text_system().shape_line(
                 run.text.into(),
                 self.font_size,
                 &[text_run],
-                Some(self.cell_width), // MONOSPACE COLUMN WIDTH CONSTRAINT!
+                force_width,
             );
 
             let _ = shaped_line.paint(Point { x, y }, self.cell_height, window, _cx);
