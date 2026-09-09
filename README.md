@@ -4,6 +4,8 @@
 
 # ezicode
 
+<img width="1448" height="1000" alt="Untitled Design (1)" src="https://github.com/user-attachments/assets/1f9ae29f-5742-4f81-872d-f350cc46c992" />
+
 **A blazingly fast, GPU-accelerated native code editor built with Rust, GPUI, and Tree-sitter.**
 
 [![Rust](https://img.shields.io/badge/rust-2021%20edition-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
