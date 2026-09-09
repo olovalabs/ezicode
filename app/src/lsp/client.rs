@@ -389,7 +389,7 @@ impl LspManager {
         super::adapter::adapter_for_language(lang).map(|a| a.name)
     }
 
-    pub fn change_document(&mut self, path: &Path, lang: &str, text: &str) {
+    pub fn change_document(&mut self, path: &Path, lang: &str, text: String) {
         if let Some(client) = self.client_for(lang) {
             client.did_change(path, text);
         }
@@ -970,23 +970,27 @@ impl LspClient {
         self.send_payload(&msg);
     }
 
-    pub fn did_change(&self, path: &Path, text: &str) {
+    pub fn did_change(&self, path: &Path, text: String) {
         if !*self.is_initialized.lock().unwrap() {
             return;
         }
-        self.last_texts
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), text.to_string());
-
         // Coalesce: remember only the latest text per document. The writer
         // thread flushes pending changes as debounced full-document syncs,
         // so a fast typist costs one network round-trip every ~120 ms
         // instead of one whole-document serialization + write per keystroke.
+        //
+        // `text` arrives owned (the caller's single per-keystroke buffer
+        // read); it is cloned once for `last_texts` and moved into
+        // `pending_changes`, so a keystroke costs two copies total instead
+        // of three.
+        self.last_texts
+            .lock()
+            .unwrap()
+            .insert(path.to_path_buf(), text.clone());
         self.pending_changes
             .lock()
             .unwrap()
-            .insert(path.to_path_buf(), text.to_string());
+            .insert(path.to_path_buf(), text);
     }
 
     pub fn did_close(&self, path: &Path) {

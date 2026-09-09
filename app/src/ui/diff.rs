@@ -58,6 +58,28 @@ pub enum SideBySideRow {
     },
 }
 
+/// A unified diff parsed into render-ready rows and change stats.
+///
+/// Parsing includes word-level intra-line diffing, which is the expensive
+/// part — so it runs **once per diff load, on a background thread** (see
+/// `Workspace::open_diff` / `refresh_active_diff`) and is then shared with
+/// the render loop through an `Arc`. Re-renders (theme switches, git status
+/// updates, panel toggles, …) reuse this snapshot instead of re-parsing the
+/// whole diff on every frame.
+#[derive(Clone, Debug)]
+pub(crate) struct ParsedDiff {
+    pub rows: Vec<SideBySideRow>,
+    pub added: usize,
+    pub removed: usize,
+}
+
+/// Parse a unified diff into rows and stats. Cheap wrapper around
+/// [`parse_side_by_side_diff`] for background-thread use.
+pub(crate) fn parse_diff(raw: &str) -> ParsedDiff {
+    let (rows, added, removed) = parse_side_by_side_diff(raw);
+    ParsedDiff { rows, added, removed }
+}
+
 pub(crate) fn render_diff_view(
     diff: &DiffTab,
     font_size: f32,
@@ -88,11 +110,12 @@ pub(crate) fn render_diff_view(
     let path = diff.path.clone();
     let file_icon_path = file_icons::icon_for(rel_path);
 
-    // Calculate diff rows and stats
-    let (rows, total_added, total_removed) = if let Some(text) = &diff.text {
-        parse_side_by_side_diff(text)
-    } else {
-        (Vec::new(), 0, 0)
+    // Use the background-parsed snapshot. Parsing (with word-level
+    // intra-line diffing) is far too expensive to run on every repaint, so
+    // it is done once when the diff loads and shared here via `Arc`.
+    let (rows, total_added, total_removed) = match &diff.parsed {
+        Some(parsed) => (parsed.rows.clone(), parsed.added, parsed.removed),
+        None => (Vec::new(), 0, 0),
     };
 
     let is_staged = diff.staged;

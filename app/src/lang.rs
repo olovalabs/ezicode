@@ -14,11 +14,20 @@ use std::path::Path;
 /// Tree-sitter language id used by the highlighter for this file
 /// (`"rust"`, `"python"`, …), or `None` for unrecognized files.
 pub fn language_for(path: &Path) -> Option<&'static str> {
-    let ext = path
+    let ext_raw = path
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+        .unwrap_or("");
+    // Extensions are almost always lowercase; only allocate when an
+    // uppercase letter actually needs folding (this runs on every render
+    // for the status bar's language label).
+    let mut folded = String::new();
+    let ext = if ext_raw.bytes().any(|b| b.is_ascii_uppercase()) {
+        folded = ext_raw.to_ascii_lowercase();
+        folded.as_str()
+    } else {
+        ext_raw
+    };
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     match name {
         "Dockerfile" | "Containerfile" => return Some("dockerfile"),
@@ -28,7 +37,7 @@ pub fn language_for(path: &Path) -> Option<&'static str> {
         ".bashrc" | ".bash_profile" | ".zshrc" | ".profile" => return Some("bash"),
         _ => {}
     }
-    if let Some(lang) = by_extension(&ext) {
+    if let Some(lang) = by_extension(ext) {
         return Some(lang);
     }
     // Extension-less scripts: sniff the shebang from the first line.
@@ -90,11 +99,16 @@ fn by_extension(ext: &str) -> Option<&'static str> {
 }
 
 /// Detect the language of an extension-less file from its `#!` shebang.
+///
+/// Only the first bytes of the file can contain a shebang, so this reads a
+/// single 256-byte block instead of the whole file — detection stays O(1)
+/// even for huge extension-less files (minified bundles, logs, dumps).
 fn shebang_language(path: &Path) -> Option<&'static str> {
-    let Ok(content) = std::fs::read(path) else {
-        return None;
-    };
-    let head = content.get(..256)?;
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 256];
+    let n = file.read(&mut head).ok()?;
+    let head = head.get(..n)?;
     if head.len() < 2 || head[0] != b'#' || head[1] != b'!' {
         return None;
     }

@@ -131,19 +131,56 @@ pub fn branch(root: &Path) -> Option<String> {
 }
 
 /// Full `git status` snapshot for `root`.
+///
+/// `--branch` makes git prepend a `## <branch>` record, so the branch and
+/// the change list come from a **single** process spawn. The watcher thread
+/// polls this every ~1.5 s; the previous extra `git rev-parse` (itself up to
+/// two attempts) doubled the process-spawn cost of every poll. The
+/// `rev-parse` fallback now only runs in the rare detached-HEAD case.
 pub fn status(root: &Path) -> Option<RepoStatus> {
     let (raw, ok) = run_git(
         root,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--branch",
+            "--untracked-files=normal",
+        ],
     )?;
     if !ok {
         return None;
     }
+    let branch = branch_from_porcelain(&raw).or_else(|| branch(root));
     Some(RepoStatus {
         root: root.to_path_buf(),
-        branch: branch(root),
+        branch,
         changes: parse_porcelain(&raw, root),
     })
+}
+
+/// Extract the current branch from the `## ` header record emitted by
+/// `git status --porcelain --branch`.
+///
+/// Header shapes (git 2.x): `## main`, `## main...origin/main`,
+/// `## main...origin/main [ahead 1]`, `## No commits yet on main`, and
+/// `## HEAD (no branch)` on a detached HEAD. Returns `None` when the header
+/// is missing or detached, so the caller can fall back to `rev-parse`.
+fn branch_from_porcelain(raw: &str) -> Option<String> {
+    let header = raw.split('\0').next()?;
+    let name = header.strip_prefix("## ")?;
+    // Fresh repository with no commits yet.
+    if let Some(rest) = name.strip_prefix("No commits yet on ") {
+        let name = rest.trim();
+        return (!name.is_empty()).then(|| name.to_string());
+    }
+    // `<local>...<remote> [tracking info]` — keep only the local side.
+    let name = name.split("...").next().unwrap_or("").trim();
+    if name.is_empty() || name.contains(' ') {
+        // `HEAD (no branch)` — detached HEAD; let rev-parse resolve it.
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// Parse `git status --porcelain=v1 -z` output into [`GitChange`]s.
@@ -157,6 +194,13 @@ pub fn parse_porcelain(raw: &str, root: &Path) -> Vec<GitChange> {
     let mut out: Vec<GitChange> = Vec::new();
 
     for rec in records {
+        // `--branch` prepends a `## <branch>` header record; it is parsed
+        // separately by `branch_from_porcelain` and skipped here (its third
+        // byte is a space too, so without this guard it would be misread as
+        // a bogus `##` change entry).
+        if rec.starts_with("## ") {
+            continue;
+        }
         let is_status_record = rec.len() >= 3 && rec.as_bytes().get(2) == Some(&b' ');
         if !is_status_record {
             // Rename/copy continuation: the previous (source) name.
@@ -460,6 +504,38 @@ mod tests {
     #[test]
     fn parses_empty_status() {
         assert!(parse_porcelain("", root()).is_empty());
+    }
+
+    #[test]
+    fn branch_header_is_skipped_in_change_list() {
+        // `git status --porcelain=v1 -z --branch` prepends a `## <branch>`
+        // record. It must not appear as a change entry.
+        let raw = "## main\0 M a.rs\0";
+        let changes = parse_porcelain(raw, root());
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].rel, "a.rs");
+    }
+
+    #[test]
+    fn extracts_branch_from_header() {
+        assert_eq!(
+            branch_from_porcelain("## main\0 M a.rs\0"),
+            Some("main".to_string())
+        );
+        // Local branch with an upstream + tracking info.
+        assert_eq!(
+            branch_from_porcelain("## main...origin/main [ahead 1]\0"),
+            Some("main".to_string())
+        );
+        // Fresh repository with no commits yet.
+        assert_eq!(
+            branch_from_porcelain("## No commits yet on main\0"),
+            Some("main".to_string())
+        );
+        // Detached HEAD falls back to rev-parse (None here).
+        assert_eq!(branch_from_porcelain("## HEAD (no branch)\0"), None);
+        // No header at all.
+        assert_eq!(branch_from_porcelain(" M a.rs\0"), None);
     }
 
     #[test]
