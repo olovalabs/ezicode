@@ -34,6 +34,19 @@ impl Render for Workspace {
             self.poll_terminal_processes(cx);
         }
 
+        // Guarantee that when no editor, modal, or input has focus, the workspace
+        // focus handle is focused so that global keybindings like Ctrl+P, Ctrl+Shift+P,
+        // Ctrl+G, etc. are always dispatched, even on the welcome screen or an empty workspace.
+        if self.picker.is_none()
+            && self.active_editor().is_none()
+            && !self.show_terminal
+            && self.git_commit_input.is_none()
+            && self.inline_creating.is_none()
+            && self.inline_renaming.is_none()
+        {
+            window.focus(&self.focus_handle);
+        }
+
         let th = self.theme();
         let t = th.colors;
         let welcome = self.welcome_visible();
@@ -412,7 +425,12 @@ impl Render for Workspace {
                                                     ),
                                             )
                                         } else {
-                                            d.flex_1()
+                                            d.flex_1().on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(|this, _, window, _| {
+                                                    window.focus(&this.focus_handle);
+                                                }),
+                                            )
                                         }
                                     }),
                                 )

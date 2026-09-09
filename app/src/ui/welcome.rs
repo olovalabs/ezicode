@@ -1,4 +1,6 @@
-use gpui::{div, prelude::*, px, rgba, App, Context, IntoElement, SharedString, Window};
+use gpui::{
+    div, prelude::*, px, rgba, App, Context, IntoElement, MouseButton, SharedString, Window,
+};
 
 use crate::theme::Colors;
 use crate::ui::app_icon;
@@ -14,11 +16,23 @@ pub(crate) fn render_welcome(t: &Colors, cx: &mut Context<Workspace>) -> impl In
         .justify_center()
         .gap(px(10.0))
         .bg(rgba(t.editor_bg))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, _| {
+                window.focus(&this.focus_handle);
+            }),
+        )
         .child(app_icon::render_app_icon(96.0, t))
         .child(div().h(px(16.0)))
         .child(welcome_button(
-            "Open Folder",
+            "Quick Open File (Ctrl+P)",
             true,
+            t,
+            cx.listener(|this, _, window, cx| this.toggle_file_finder(window, cx)),
+        ))
+        .child(welcome_button(
+            "Open Folder",
+            false,
             t,
             cx.listener(|this, _, window, cx| this.open_folder_dialog(window, cx)),
         ))
