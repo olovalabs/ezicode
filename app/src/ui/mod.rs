@@ -9,3 +9,4 @@ pub mod tab_bar;
 pub mod titlebar;
 pub mod welcome;
 pub mod picker;
+pub mod breadcrumbs;

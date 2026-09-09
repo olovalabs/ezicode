@@ -1,7 +1,7 @@
 use gpui::{
     div, prelude::*, px, rgba, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Render, Window,
 };
-use gpui_component::input::Input;
+use gpui_component::input::{Input, RopeExt as _};
 
 use crate::actions::*;
 use crate::lang;
@@ -409,7 +409,30 @@ impl Render for Workspace {
                                                 diff, font_size, split_diff, &t, cx,
                                             ))
                                         } else if let Some(editor) = editor {
-                                            d.child(
+                                            let cursor_line = {
+                                                let ed = editor.read(cx);
+                                                let offset = ed.cursor();
+                                                let text = ed.text();
+                                                (text.offset_to_position(offset).line + 1) as usize
+                                            };
+                                            let breadcrumb_items = open.map(|p| {
+                                                let text = editor.read(cx).value().to_string();
+                                                ui::breadcrumbs::extract_breadcrumbs(
+                                                    p,
+                                                    &text,
+                                                    cursor_line,
+                                                    root_opt.map(|r| r.as_path()),
+                                                )
+                                            }).unwrap_or_default();
+
+                                            d.when(!breadcrumb_items.is_empty(), |d| {
+                                                d.child(ui::breadcrumbs::render_breadcrumbs(
+                                                    &breadcrumb_items,
+                                                    &t,
+                                                    cx,
+                                                ))
+                                            })
+                                            .child(
                                                 div()
                                                     .flex_1()
                                                     .min_h(px(0.0))

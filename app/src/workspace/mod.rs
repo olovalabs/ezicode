@@ -3298,4 +3298,23 @@ impl Workspace {
             cx.notify();
         }
     }
+
+    pub(crate) fn jump_to_line(
+        &mut self,
+        line: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(editor) = self.active_editor() {
+            let position = lsp_types::Position {
+                line: (line as u32).saturating_sub(1),
+                character: 0,
+            };
+            editor.update(cx, |this, cx| {
+                this.set_cursor_position(position, window, cx);
+            });
+            self.status = format!("Jumped to line {line}");
+            cx.notify();
+        }
+    }
 }
