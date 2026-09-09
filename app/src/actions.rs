@@ -44,7 +44,12 @@ actions!(
         TerminalTab2,
         TerminalTab3,
         TerminalTab4,
-        TerminalTab5
+        TerminalTab5,
+
+        ToggleFileFinder,
+        ToggleCommandPalette,
+        ToggleGoToLine,
+        CloseModal
     ]
 );
 

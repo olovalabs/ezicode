@@ -33,12 +33,13 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                         .child(app_icon::render_app_icon(20.0, t)),
                 )
                 .child(menu_btn("m-file", "File", t, |menu, _, _| {
-                    menu.menu("New File", Box::new(NewFile))
+                    menu.menu("New File (Ctrl+N)", Box::new(NewFile))
                         .separator()
-                        .menu("Open File…", Box::new(OpenFile))
+                        .menu("Open File… (Ctrl+O)", Box::new(OpenFile))
                         .menu("Open Folder…", Box::new(OpenFolder))
+                        .menu("Quick Open File… (Ctrl+P)", Box::new(ToggleFileFinder))
                         .separator()
-                        .menu("Save", Box::new(Save))
+                        .menu("Save (Ctrl+S)", Box::new(Save))
                         .separator()
                         .menu("Preferences: Settings (Ctrl+,)", Box::new(OpenSettings))
                         .separator()
@@ -57,10 +58,13 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                         .menu("Copy Problem / Error (Ctrl+Alt+C)", Box::new(CopyDiagnostic))
                 }))
                 .child(menu_btn("m-view", "View", t, move |menu, window, cx| {
-                    menu.menu("Explorer", Box::new(ShowExplorer))
-                        .menu("Search", Box::new(ShowSearch))
-                        .menu("Source Control", Box::new(ShowGit))
-                        .menu("Extensions", Box::new(ShowExtensions))
+                    menu.menu("Command Palette… (Ctrl+Shift+P)", Box::new(ToggleCommandPalette))
+                        .menu("Go to Line… (Ctrl+G)", Box::new(ToggleGoToLine))
+                        .separator()
+                        .menu("Explorer (Ctrl+Shift+E)", Box::new(ShowExplorer))
+                        .menu("Search (Ctrl+Shift+F)", Box::new(ShowSearch))
+                        .menu("Source Control (Ctrl+Shift+G)", Box::new(ShowGit))
+                        .menu("Extensions (Ctrl+Shift+X)", Box::new(ShowExtensions))
                         .separator()
                         .submenu("Theme", window, cx, move |menu, _, _| {
                             let mut m = menu;

@@ -25,6 +25,11 @@ impl Render for Workspace {
             self.git_commit(window, cx);
         }
 
+        if self.picker_confirm_pending {
+            self.picker_confirm_pending = false;
+            self.confirm_picker(window, cx);
+        }
+
         if self.show_terminal && !self.terminal_tabs.is_empty() {
             self.poll_terminal_processes(cx);
         }
@@ -269,6 +274,28 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &GitCommit, window, cx| {
                 this.git_commit(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFileFinder, window, cx| {
+                this.toggle_file_finder(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
+                this.toggle_command_palette(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleGoToLine, window, cx| {
+                this.toggle_goto_line(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseModal, window, cx| {
+                this.close_modal(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &gpui_component::input::MoveUp, _, cx| {
+                if this.picker.is_some() {
+                    this.picker_prev(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &gpui_component::input::MoveDown, _, cx| {
+                if this.picker.is_some() {
+                    this.picker_next(cx);
+                }
             }))
 
             .key_context("Workspace")
@@ -532,6 +559,10 @@ impl Render for Workspace {
                     overlay.cursor_row_resize()
                 };
                 root.child(overlay)
+            })
+            .when(self.picker.is_some(), |root| {
+                let picker = self.picker.as_ref().unwrap();
+                root.child(ui::picker::render_picker(picker, &t, cx))
             })
     }
 }

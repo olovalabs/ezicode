@@ -8,3 +8,4 @@ pub mod status_bar;
 pub mod tab_bar;
 pub mod titlebar;
 pub mod welcome;
+pub mod picker;

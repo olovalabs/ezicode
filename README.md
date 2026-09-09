@@ -132,6 +132,10 @@ cargo build --release -p app
 ### General & Workspace
 | Shortcut | Action |
 |---|---|
+| <kbd>Ctrl</kbd> + <kbd>P</kbd> | Quick Open File (File Finder) |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> | Command Palette |
+| <kbd>Ctrl</kbd> + <kbd>G</kbd> | Go to Line:Column |
+| <kbd>Escape</kbd> | Close Active Modal / Popup |
 | <kbd>Ctrl</kbd> + <kbd>N</kbd> | New Untitled File |
 | <kbd>Ctrl</kbd> + <kbd>O</kbd> | Open File |
 | <kbd>Ctrl</kbd> + <kbd>S</kbd> | Save Current Buffer |

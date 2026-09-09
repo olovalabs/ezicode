@@ -93,6 +93,11 @@ fn main() {
                 KeyBinding::new("ctrl-shift-g", ShowGit, None),
                 KeyBinding::new("ctrl-shift-x", ShowExtensions, None),
 
+                KeyBinding::new("ctrl-p", ToggleFileFinder, None),
+                KeyBinding::new("ctrl-shift-p", ToggleCommandPalette, None),
+                KeyBinding::new("ctrl-g", ToggleGoToLine, None),
+                KeyBinding::new("escape", CloseModal, None),
+
                 KeyBinding::new("ctrl-w", CloseTab, None),
                 KeyBinding::new("ctrl-tab", NextTab, None),
                 KeyBinding::new("ctrl-shift-tab", PrevTab, None),

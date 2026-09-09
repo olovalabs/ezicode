@@ -9,7 +9,7 @@ use gpui::{
     AppContext, Context, Entity, FocusHandle, ScrollStrategy, SharedString,
     UniformListScrollHandle, Window,
 };
-use gpui_component::input::{InputEvent, InputState, TabSize};
+use gpui_component::input::{InputEvent, InputState, RopeExt as _, TabSize};
 use notify::Watcher as _;
 
 use crate::fs_tree::{
@@ -186,6 +186,10 @@ pub(crate) struct Workspace {
     pub(crate) settings: crate::settings::Settings,
 
     pub(crate) auto_save_generation: usize,
+
+    pub(crate) picker: Option<crate::ui::picker::PickerState>,
+
+    pub(crate) picker_confirm_pending: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -440,6 +444,8 @@ impl Workspace {
             git_poke_tx: None,
             git_commit_input: None,
             git_commit_pending: false,
+            picker: None,
+            picker_confirm_pending: false,
         }
     }
 
@@ -2986,5 +2992,310 @@ impl Workspace {
     pub(crate) fn about(&mut self, cx: &mut Context<Self>) {
         self.status = format!("ezicode — {} (Zed theme system)", self.theme().name);
         cx.notify();
+    }
+
+    pub(crate) fn toggle_file_finder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = &self.picker {
+            if p.kind == crate::ui::picker::PickerKind::FileFinder {
+                self.close_modal(window, cx);
+                return;
+            }
+        }
+
+        let root_dir = self
+            .root
+            .as_ref()
+            .map(|r| r.as_path())
+            .unwrap_or(Path::new("."));
+        let recent_files: Vec<PathBuf> = self
+            .tabs
+            .iter()
+            .filter_map(|t| t.path.clone())
+            .collect();
+        let items = crate::ui::picker::scan_workspace_files(root_dir, &recent_files);
+
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search files by name (append : to go to line or @ to go to symbol)")
+        });
+
+        cx.subscribe(&input, |this, _state, event: &InputEvent, cx| {
+            match event {
+                InputEvent::Change => {
+                    this.on_picker_input_changed(cx);
+                }
+                InputEvent::PressEnter { .. } => {
+                    this.picker_confirm_pending = true;
+                    cx.notify();
+                }
+                _ => {}
+            }
+        })
+        .detach();
+
+        input.update(cx, |this, cx| {
+            this.focus(window, cx);
+        });
+
+        self.picker = Some(crate::ui::picker::PickerState::new(
+            crate::ui::picker::PickerKind::FileFinder,
+            input,
+            items,
+        ));
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = &self.picker {
+            if p.kind == crate::ui::picker::PickerKind::CommandPalette {
+                self.close_modal(window, cx);
+                return;
+            }
+        }
+
+        let items = crate::ui::picker::command_palette_items();
+        let input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Type a command or action...")
+        });
+
+        cx.subscribe(&input, |this, _state, event: &InputEvent, cx| {
+            match event {
+                InputEvent::Change => {
+                    this.on_picker_input_changed(cx);
+                }
+                InputEvent::PressEnter { .. } => {
+                    this.picker_confirm_pending = true;
+                    cx.notify();
+                }
+                _ => {}
+            }
+        })
+        .detach();
+
+        input.update(cx, |this, cx| {
+            this.focus(window, cx);
+        });
+
+        self.picker = Some(crate::ui::picker::PickerState::new(
+            crate::ui::picker::PickerKind::CommandPalette,
+            input,
+            items,
+        ));
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_goto_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = &self.picker {
+            if p.kind == crate::ui::picker::PickerKind::GoToLine {
+                self.close_modal(window, cx);
+                return;
+            }
+        }
+
+        let total_lines = self
+            .active_editor()
+            .map(|ed| {
+                let rope = ed.read(cx).text();
+                rope.offset_to_position(rope.len()).line + 1
+            })
+            .unwrap_or(1);
+
+        let placeholder = format!("Go to line:column (1 - {})...", total_lines);
+        let input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(placeholder)
+        });
+
+        cx.subscribe(&input, |this, _state, event: &InputEvent, cx| {
+            match event {
+                InputEvent::PressEnter { .. } => {
+                    this.picker_confirm_pending = true;
+                    cx.notify();
+                }
+                _ => {}
+            }
+        })
+        .detach();
+
+        input.update(cx, |this, cx| {
+            this.focus(window, cx);
+        });
+
+        self.picker = Some(crate::ui::picker::PickerState::new(
+            crate::ui::picker::PickerKind::GoToLine,
+            input,
+            Vec::new(),
+        ));
+        cx.notify();
+    }
+
+    pub(crate) fn close_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.picker.take().is_some() {
+            self.focus_active_editor_or_self(window, cx);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn picker_next(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = &mut self.picker {
+            p.select_next();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn picker_prev(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = &mut self.picker {
+            p.select_prev();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn on_picker_input_changed(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = &mut self.picker {
+            let query = p.input.read(cx).value().to_string();
+            p.filter(&query);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn confirm_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(picker) = self.picker.take() else {
+            return;
+        };
+
+        match picker.kind {
+            crate::ui::picker::PickerKind::FileFinder => {
+                let query = picker.input.read(cx).value().to_string();
+                if let Some(item) = picker.selected_item() {
+                    let path = PathBuf::from(&item.id);
+                    self.open_file(path, window, cx);
+
+                    if let Some((_, line_part)) = query.split_once(':') {
+                        self.execute_goto_line(line_part, window, cx);
+                    }
+                }
+            }
+            crate::ui::picker::PickerKind::CommandPalette => {
+                if let Some(item) = picker.selected_item() {
+                    let cmd_id = item.id.clone();
+                    self.execute_palette_command(&cmd_id, window, cx);
+                }
+            }
+            crate::ui::picker::PickerKind::GoToLine => {
+                let val = picker.input.read(cx).value().to_string();
+                self.execute_goto_line(&val, window, cx);
+            }
+        }
+        self.focus_active_editor_or_self(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn select_picker_item(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(p) = &mut self.picker {
+            p.selected_index = index;
+        }
+        self.confirm_picker(window, cx);
+    }
+
+    pub(crate) fn execute_palette_command(
+        &mut self,
+        cmd_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match cmd_id {
+            "file.new" => self.new_file(window, cx),
+            "file.open" => self.open_file_dialog(window, cx),
+            "file.open_folder" => self.open_folder_dialog(window, cx),
+            "file.save" => self.save(window, cx),
+            "file.quick_open" => self.toggle_file_finder(window, cx),
+            "view.goto_line" => self.toggle_goto_line(window, cx),
+            "tab.close" => {
+                self.close_tab(self.active_tab, window, cx);
+            }
+            "tab.next" => self.handle_next_tab(&crate::actions::NextTab, window, cx),
+            "tab.prev" => self.handle_prev_tab(&crate::actions::PrevTab, window, cx),
+            "terminal.toggle" => self.toggle_terminal(window, cx),
+            "terminal.new" => self.new_terminal(window, cx),
+            "terminal.close" => self.close_active_terminal(window, cx),
+            "terminal.clear" => self.clear_active_terminal(cx),
+            "sidebar.toggle" => {
+                self.show_sidebar = !self.show_sidebar;
+                cx.notify();
+            }
+            "view.explorer" => self.set_activity_explicit(Activity::Explorer, window, cx),
+            "view.search" => self.set_activity_explicit(Activity::Search, window, cx),
+            "view.git" => self.set_activity_explicit(Activity::Git, window, cx),
+            "view.extensions" => self.set_activity_explicit(Activity::Extensions, window, cx),
+            "preferences.settings" => self.open_settings(cx),
+            "theme.github_dark" => self.apply_theme_by_name("GitHub Dark", window, cx),
+            "theme.ayu_dark" => self.apply_theme_by_name("Ayu Dark", window, cx),
+            "theme.ayu_mirage" => self.apply_theme_by_name("Ayu Mirage", window, cx),
+            "theme.ayu_light" => self.apply_theme_by_name("Ayu Light", window, cx),
+            "theme.gruvbox_dark" => self.apply_theme_by_name("Gruvbox Dark", window, cx),
+            "editor.format" => self.format_document(window, cx),
+            "editor.font_increase" => self.increase_font_size(cx),
+            "editor.font_decrease" => self.decrease_font_size(cx),
+            "editor.font_reset" => self.reset_font_size(cx),
+            "editor.copy_diagnostic" => self.copy_active_diagnostic(cx),
+            "git.refresh" => self.git_refresh(cx),
+            "git.stage_all" => self.git_stage_all(cx),
+            "git.unstage_all" => self.git_unstage_all(cx),
+            "git.discard_all" => self.git_discard_all(cx),
+            "git.commit" => self.git_commit(window, cx),
+            "help.about" => self.about(cx),
+            "app.quit" => self.quit(cx),
+            _ => {}
+        }
+    }
+
+    pub(crate) fn apply_theme_by_name(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let themes = theme::all();
+        if let Some(pos) = themes.iter().position(|t| t.name == name) {
+            self.apply_theme(pos, window, cx);
+        }
+    }
+
+    pub(crate) fn execute_goto_line(
+        &mut self,
+        val: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let trimmed = val.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let mut parts = trimmed.split(':');
+        let line: u32 = match parts.next().and_then(|s| s.trim().parse().ok()) {
+            Some(l) => l,
+            None => return,
+        };
+        let character: u32 = parts
+            .next()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(1);
+
+        if let Some(editor) = self.active_editor() {
+            let position = lsp_types::Position {
+                line: line.saturating_sub(1),
+                character: character.saturating_sub(1),
+            };
+            editor.update(cx, |this, cx| {
+                this.set_cursor_position(position, window, cx);
+            });
+            self.status = format!("Jumped to line {line}:{character}");
+            cx.notify();
+        }
     }
 }
