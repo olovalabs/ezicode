@@ -14,10 +14,12 @@ use crate::theme::Colors;
 /// Get the path to the app logo PNG (if it exists on disk).
 /// We use a path-based image so the GPUI image cache can handle it.
 fn logo_path() -> Option<PathBuf> {
-    // Check a few common locations
+    // Check common locations
     let candidates = [
         "assets/logo/ezicode.png",
         "app/assets/logo/ezicode.png",
+        "ezicode.png",
+        "logo.png",
         "assets/logo/olova.png",
         "app/assets/logo/olova.png",
     ];
@@ -32,11 +34,19 @@ fn logo_path() -> Option<PathBuf> {
 
 /// Render the app icon at a specific size.
 ///
-/// Uses the embedded logo if available. If not, falls back to a
+/// Uses the disk logo or embedded asset if available. If not, falls back to a
 /// colored circle with a stylized "E" — still recognizable as branding.
 pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
     if let Some(path) = logo_path() {
         return img(path)
+            .w(px(size))
+            .h(px(size))
+            .into_any_element();
+    }
+
+    // Try embedded asset from rust-embed (assets/logo/ezicode.png)
+    if crate::assets::AppAssets::get("logo/ezicode.png").is_some() {
+        return img("logo/ezicode.png")
             .w(px(size))
             .h(px(size))
             .into_any_element();

@@ -5,6 +5,8 @@ fn main() {
         // Verify the ICO exists before compiling
         let ico_path = if Path::new("assets/logo/ezicode.ico").exists() {
             "assets/logo/ezicode.ico"
+        } else if Path::new("app/assets/logo/ezicode.ico").exists() {
+            "app/assets/logo/ezicode.ico"
         } else {
             "assets/logo/olova.ico"
         };
