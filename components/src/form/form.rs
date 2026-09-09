@@ -8,7 +8,6 @@ use crate::{
     v_flex, Sizable, Size,
 };
 
-/// A form element that contains multiple form fields.
 #[derive(IntoElement)]
 pub struct Form {
     style: StyleRefinement,
@@ -25,49 +24,39 @@ impl Form {
         }
     }
 
-    /// Creates a new form with a horizontal layout.
     pub fn horizontal() -> Self {
         Self::new().layout(Axis::Horizontal)
     }
 
-    /// Creates a new form with a vertical layout.
     pub fn vertical() -> Self {
         Self::new().layout(Axis::Vertical)
     }
 
-    /// Set the layout for the form, default is `Axis::Vertical`.
     pub fn layout(mut self, layout: Axis) -> Self {
         self.props.layout = layout;
         self
     }
 
-    /// Set the width of the labels in the form. Default is `px(100.)`.
     pub fn label_width(mut self, width: Pixels) -> Self {
         self.props.label_width = Some(width);
         self
     }
 
-    /// Set the text size of the labels in the form. Default is `None`.
     pub fn label_text_size(mut self, size: Rems) -> Self {
         self.props.label_text_size = Some(size);
         self
     }
 
-    /// Add a child to the form.
     pub fn child(mut self, field: impl Into<Field>) -> Self {
         self.fields.push(field.into());
         self
     }
 
-    /// Add multiple children to the form.
     pub fn children(mut self, fields: impl IntoIterator<Item = Field>) -> Self {
         self.fields.extend(fields);
         self
     }
 
-    /// Set the column count for the form.
-    ///
-    /// Default is 1.
     pub fn columns(mut self, columns: usize) -> Self {
         self.props.columns = columns;
         self

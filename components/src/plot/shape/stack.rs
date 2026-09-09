@@ -1,24 +1,20 @@
-// @reference: https://d3js.org/d3-shape/stack
-
-/// Represents a stacked series data point with lower and upper values
 #[derive(Clone, Debug)]
 pub struct StackPoint<T> {
-    /// The lower value (baseline)
+
     pub y0: f32,
-    /// The upper value (topline)
+
     pub y1: f32,
-    /// Reference to the original data
+
     pub data: T,
 }
 
-/// Represents a stacked series
 #[derive(Clone, Debug)]
 pub struct StackSeries<T> {
-    /// The key for this series
+
     pub key: String,
-    /// The index of this series
+
     pub index: usize,
-    /// The points in this series
+
     pub points: Vec<StackPoint<T>>,
 }
 
@@ -44,7 +40,6 @@ impl<T: Clone> Stack<T> {
         Self::default()
     }
 
-    /// Set the data to be stacked
     pub fn data<I>(mut self, data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -53,7 +48,6 @@ impl<T: Clone> Stack<T> {
         self
     }
 
-    /// Set the keys (series) for stacking
     pub fn keys<I, S>(mut self, keys: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -63,7 +57,6 @@ impl<T: Clone> Stack<T> {
         self
     }
 
-    /// Set the value accessor function
     pub fn value<F>(mut self, value: F) -> Self
     where
         F: Fn(&T, &str) -> Option<f32> + 'static,

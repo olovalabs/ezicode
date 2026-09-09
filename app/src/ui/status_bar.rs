@@ -1,19 +1,12 @@
-//! Bottom status bar: transient messages on the left; git branch + change
-//! count, active language/LSP state, theme and encoding on the right.
-
 use gpui::{div, prelude::*, px, rgba, svg, FontWeight, IntoElement, SharedString};
 
 use crate::theme::Colors;
 
 #[allow(clippy::too_many_arguments)]
-/// What the status bar shows about the language server for the active file.
-///
-/// Mirrors the progression Zed surfaces (checking → downloading → starting →
-/// running), so a first-run `npm install` looks like progress rather than a
-/// hang.
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LspIndicator {
-    /// Server name, e.g. `typescript-language-server`.
+
     pub server: Option<&'static str>,
     pub state: Option<crate::lsp::ServerStatus>,
 }
@@ -69,7 +62,7 @@ pub(crate) fn render_status_bar(
                 .flex()
                 .items_center()
                 .gap(px(12.0))
-                // Git: branch + change count (hidden outside a repository).
+
                 .when_some(git_branch, |bar, branch| {
                     bar.child(
                         div()
@@ -97,7 +90,7 @@ pub(crate) fn render_status_bar(
                             ),
                     )
                 })
-                // Active file language + language-server state.
+
                 .when_some(lang, |bar, lang| {
                     let (dot, dot_color, label) = lsp.parts(t);
                     bar.child(
@@ -112,10 +105,7 @@ pub(crate) fn render_status_bar(
                                     .child(SharedString::from(dot)),
                             )
                             .child(SharedString::from(lang.to_string()))
-                            // The server name / progress, dimmed next to the
-                            // language so the useful detail (which server,
-                            // and whether it is still installing) is visible
-                            // without hovering.
+
                             .child(
                                 div()
                                     .text_size(px(11.0))

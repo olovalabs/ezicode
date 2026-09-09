@@ -6,13 +6,8 @@ use ropey::Rope;
 
 use crate::input::{popovers::HoverPopover, InputState, RopeExt};
 
-/// Hover provider
-///
-/// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
 pub trait HoverProvider {
-    /// textDocument/hover
-    ///
-    /// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover
+
     fn hover(
         &self,
         _text: &Rope,
@@ -23,7 +18,7 @@ pub trait HoverProvider {
 }
 
 impl InputState {
-    /// Handle hover trigger LSP request.
+
     pub(super) fn handle_hover_popover(
         &mut self,
         offset: usize,
@@ -44,7 +39,6 @@ impl InputState {
             }
         }
 
-        // Currently not implemented.
         let task = provider.hover(&self.text, offset, window, cx);
         let mut symbol_range = self.text.word_range(offset).unwrap_or(offset..offset);
         let editor = cx.entity();

@@ -24,7 +24,6 @@ pub use menu::*;
 const DEFAULT_WIDTH: Pixels = px(255.);
 const COLLAPSED_WIDTH: Pixels = px(48.);
 
-/// A Sidebar element that can contain collapsible child elements.
 #[derive(IntoElement)]
 pub struct Sidebar<E: Collapsible + IntoElement + 'static> {
     style: StyleRefinement,

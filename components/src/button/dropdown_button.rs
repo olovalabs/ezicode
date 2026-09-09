@@ -65,7 +65,6 @@ impl DropdownButton {
         self
     }
 
-    /// Set the dropdown menu of the button with anchor corner.
     pub fn dropdown_menu_with_anchor(
         mut self,
         anchor: impl Into<Corner>,

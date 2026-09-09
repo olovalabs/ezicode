@@ -12,18 +12,6 @@ use gpui::{
 };
 use rust_i18n::t;
 
-/// The settings structure containing multiple pages for app settings.
-///
-/// The hierarchy of settings is as follows:
-///
-/// ```ignore
-/// Settings
-///   SettingPage     <- The single active page displayed
-///     SettingGroup
-///       SettingItem
-///         Label
-///         SettingField (e.g., Switch, Dropdown, Input)
-/// ```
 #[derive(IntoElement)]
 pub struct Settings {
     id: ElementId,
@@ -35,7 +23,7 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Create a new settings with the given ID.
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -47,33 +35,26 @@ impl Settings {
         }
     }
 
-    /// Set the width of the sidebar, default is `250px`.
     pub fn sidebar_width(mut self, width: impl Into<Pixels>) -> Self {
         self.sidebar_width = width.into();
         self
     }
 
-    /// Add a page to the settings.
     pub fn page(mut self, page: SettingPage) -> Self {
         self.pages.push(page);
         self
     }
 
-    /// Add pages to the settings.
     pub fn pages(mut self, pages: impl IntoIterator<Item = SettingPage>) -> Self {
         self.pages.extend(pages);
         self
     }
 
-    /// Set the default variant for all setting groups.
-    ///
-    /// All setting groups will use this variant unless overridden individually.
     pub fn with_group_variant(mut self, variant: GroupBoxVariant) -> Self {
         self.group_variant = variant;
         self
     }
 
-    /// Set the style refinement for the sidebar.
     pub fn sidebar_style(mut self, style: &StyleRefinement) -> Self {
         self.sidebar_style = style.clone();
         self
@@ -213,12 +194,11 @@ impl Sizable for Settings {
 
 pub(super) struct SettingsState {
     pub(super) selected_index: SelectIndex,
-    /// If set, defer scrolling to this group index after rendering.
+
     pub(super) deferred_scroll_group_ix: Option<usize>,
     pub(super) search_input: Entity<InputState>,
 }
 
-/// Options for rendering setting item.
 #[derive(Clone, Copy)]
 pub struct RenderOptions {
     pub page_ix: usize,

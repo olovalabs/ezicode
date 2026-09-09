@@ -13,9 +13,6 @@ use gpui::{
 
 use crate::PixelsExt;
 
-/// A webview based on wry WebView.
-///
-/// [experimental]
 pub struct WebView {
     focus_handle: FocusHandle,
     webview: Rc<wry::WebView>,
@@ -30,7 +27,7 @@ impl Drop for WebView {
 }
 
 impl WebView {
-    /// Create a new WebView from a wry WebView.
+
     pub fn new(webview: wry::WebView, _: &mut Window, cx: &mut App) -> Self {
         let _ = webview.set_bounds(Rect::default());
 
@@ -42,40 +39,33 @@ impl WebView {
         }
     }
 
-    /// Show the webview.
     pub fn show(&mut self) {
         let _ = self.webview.set_visible(true);
         self.visible = true;
     }
 
-    /// Hide the webview.
     pub fn hide(&mut self) {
         _ = self.webview.focus_parent();
         _ = self.webview.set_visible(false);
         self.visible = false;
     }
 
-    /// Get whether the webview is visible.
     pub fn visible(&self) -> bool {
         self.visible
     }
 
-    /// Get the current bounds of the webview.
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.bounds
     }
 
-    /// Go back in the webview history.
     pub fn back(&mut self) -> anyhow::Result<()> {
         Ok(self.webview.evaluate_script("history.back();")?)
     }
 
-    /// Load a URL in the webview.
     pub fn load_url(&mut self, url: &str) {
         self.webview.load_url(url).unwrap();
     }
 
-    /// Get the raw wry webview.
     pub fn raw(&self) -> &wry::WebView {
         &self.webview
     }
@@ -121,14 +111,13 @@ impl Render for WebView {
     }
 }
 
-/// A webview element can display a wry webview.
 pub struct WebViewElement {
     parent: Entity<WebView>,
     view: Rc<wry::WebView>,
 }
 
 impl WebViewElement {
-    /// Create a new webview element from a wry WebView.
+
     pub fn new(
         view: Rc<wry::WebView>,
         parent: Entity<WebView>,
@@ -170,7 +159,6 @@ impl Element for WebViewElement {
         style.flex_grow = 0.0;
         style.flex_shrink = 1.;
         style.size = Size::full();
-        // If the parent view is no longer visible, we don't need to layout the webview
 
         let id = window.request_layout(style, [], cx);
         (id, ())
@@ -202,7 +190,6 @@ impl Element for WebViewElement {
             })
             .unwrap();
 
-        // Create a hitbox to handle mouse event
         Some(window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal))
     }
 
@@ -221,7 +208,7 @@ impl Element for WebViewElement {
             let webview = self.view.clone();
             window.on_mouse_event(move |event: &MouseDownEvent, _, _, _| {
                 if !bounds.contains(&event.position) {
-                    // Click white space to blur the input focus
+
                     let _ = webview.focus_parent();
                 }
             });

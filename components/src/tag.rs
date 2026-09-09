@@ -5,7 +5,6 @@ use gpui::{
     StyleRefinement, Styled, Window,
 };
 
-/// The variant of the Tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TagVariant {
     Primary,
@@ -118,9 +117,6 @@ impl TagVariant {
     }
 }
 
-/// Tag is a small status indicator.
-///
-/// Only support: Medium, Small
 #[derive(IntoElement)]
 pub struct Tag {
     style: StyleRefinement,
@@ -131,7 +127,7 @@ pub struct Tag {
     children: Vec<AnyElement>,
 }
 impl Tag {
-    /// Create a new Tag.
+
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -143,37 +139,30 @@ impl Tag {
         }
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Primary`]).
     pub fn primary() -> Self {
         Self::new().with_variant(TagVariant::Primary)
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Secondary`]).
     pub fn secondary() -> Self {
         Self::new().with_variant(TagVariant::Secondary)
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Danger`]).
     pub fn danger() -> Self {
         Self::new().with_variant(TagVariant::Danger)
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Success`]).
     pub fn success() -> Self {
         Self::new().with_variant(TagVariant::Success)
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Warning`]).
     pub fn warning() -> Self {
         Self::new().with_variant(TagVariant::Warning)
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Info`]).
     pub fn info() -> Self {
         Self::new().with_variant(TagVariant::Info)
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Custom`]).
     pub fn custom(color: Hsla, foreground: Hsla, border: Hsla) -> Self {
         Self::new().with_variant(TagVariant::Custom {
             color,
@@ -182,30 +171,25 @@ impl Tag {
         })
     }
 
-    /// Create a new tag with default variant ([`TagVariant::Color`]).
     pub fn color(color: impl Into<ColorName>) -> Self {
         Self::new().with_variant(TagVariant::Color(color.into()))
     }
 
-    /// Set the variant of the Tag.
     pub fn with_variant(mut self, variant: TagVariant) -> Self {
         self.variant = variant;
         self
     }
 
-    /// Use outline style
     pub fn outline(mut self) -> Self {
         self.outline = true;
         self
     }
 
-    /// Set rounded corners.
     pub fn rounded(mut self, radius: impl Into<AbsoluteLength>) -> Self {
         self.rounded = Some(radius.into());
         self
     }
 
-    /// Set rounded full
     pub fn rounded_full(mut self) -> Self {
         self.rounded = Some(rems(1.).into());
         self

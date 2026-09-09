@@ -49,7 +49,6 @@ pub(crate) fn set_value<T: Clone + 'static>(
     setting_field.set_value.clone()
 }
 
-/// The type of setting field to render.
 #[derive(Clone)]
 pub enum SettingFieldType {
     Switch,
@@ -117,19 +116,18 @@ impl SettingFieldType {
     }
 }
 
-/// A setting field that can get and set a value of type T in the App.
 pub struct SettingField<T> {
     pub(crate) field_type: SettingFieldType,
     pub(crate) style: StyleRefinement,
-    /// Function to get the value for this field.
+
     pub(crate) value: Rc<dyn Fn(&App) -> T>,
-    /// Function to set the value for this field.
+
     pub(crate) set_value: Rc<dyn Fn(T, &mut App)>,
     pub(crate) default_value: Option<T>,
 }
 
 impl SettingField<bool> {
-    /// Create a new Switch field.
+
     pub fn switch<V, S>(value: V, set_value: S) -> Self
     where
         V: Fn(&App) -> bool + 'static,
@@ -138,7 +136,6 @@ impl SettingField<bool> {
         Self::new(SettingFieldType::Switch, value, set_value)
     }
 
-    /// Create a new Checkbox field.
     pub fn checkbox<V, S>(value: V, set_value: S) -> Self
     where
         V: Fn(&App) -> bool + 'static,
@@ -149,7 +146,7 @@ impl SettingField<bool> {
 }
 
 impl SettingField<SharedString> {
-    /// Create a new Input field.
+
     pub fn input<V, S>(value: V, set_value: S) -> Self
     where
         V: Fn(&App) -> SharedString + 'static,
@@ -158,7 +155,6 @@ impl SettingField<SharedString> {
         Self::new(SettingFieldType::Input, value, set_value)
     }
 
-    /// Create a new Dropdown field with the given options.
     pub fn dropdown<V, S>(
         options: Vec<(SharedString, SharedString)>,
         value: V,
@@ -171,9 +167,6 @@ impl SettingField<SharedString> {
         Self::new(SettingFieldType::Dropdown { options }, value, set_value)
     }
 
-    /// Create a new setting field with the given custom element that implements [`SettingFieldElement`] trait.
-    ///
-    /// See also [`SettingField::render`] for simply building with a render closure.
     pub fn element<E>(element: E) -> Self
     where
         E: SettingFieldElement + 'static,

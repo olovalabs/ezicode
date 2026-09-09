@@ -1,8 +1,3 @@
-//! HTML5 markup minifier.
-//!
-//! This is a fork of the `html5minify` crate.
-//! https://github.com/martingallagher/html5minify
-
 use std::{cell::RefCell, io, rc::Rc, str};
 
 use html5ever::{
@@ -11,25 +6,12 @@ use html5ever::{
 };
 use markup5ever_rcdom::{Node, NodeData, RcDom};
 
-/// Defines the minify trait.
 #[allow(dead_code)]
 pub(crate) trait Minify {
-    /// Minifies the source returning the minified HTML5.
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if unable to read from the input reader or unable to
-    /// write to the output writer.
+
     fn minify(&self) -> Result<Vec<u8>, io::Error>;
 }
 
-/// Minifies the HTML input to the destination writer.
-/// Outputs HTML5; non-HTML5 input will be transformed to HTML5.
-///
-/// # Errors
-///
-/// Will return `Err` if unable to read from the input reader or unable to write
-/// to the output writer.
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn minify<R: io::Read, W: io::Write>(mut r: &mut R, w: &mut W) -> io::Result<()> {
@@ -50,7 +32,6 @@ where
     }
 }
 
-/// Minifier implementation for `io::Write`.
 #[allow(clippy::struct_excessive_bools)]
 pub struct Minifier<'a, W: io::Write> {
     w: &'a mut W,
@@ -60,7 +41,6 @@ pub struct Minifier<'a, W: io::Write> {
     preceding_whitespace: bool,
 }
 
-/// Holds node positional context.
 struct Context<'a> {
     parent: &'a Node,
     parent_context: Option<&'a Context<'a>>,
@@ -69,8 +49,7 @@ struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    /// Determine whether to trim whitespace.
-    /// Uses naive HTML5 whitespace collapsing rules.
+
     fn trim(&self, preceding_whitespace: bool) -> (bool, bool) {
         (preceding_whitespace || self.trim_left(), self.trim_right())
     }
@@ -122,7 +101,7 @@ impl<'a, W> Minifier<'a, W>
 where
     W: io::Write,
 {
-    /// Creates a new `Minifier` instance.
+
     #[inline]
     pub fn new(w: &'a mut W) -> Self {
         Self {
@@ -135,7 +114,7 @@ where
     }
 
     /// Collapse whitespace between elements and in text when whitespace isn't preserved by default.
-    /// Enabled by default.
+
     #[inline]
     #[allow(dead_code)]
     pub fn collapse_whitespace(&mut self, collapse: bool) -> &mut Self {
@@ -143,8 +122,6 @@ where
         self
     }
 
-    /// Omit writing the HTML5 doctype.
-    /// Disabled by default.
     #[inline]
     #[allow(dead_code)]
     pub fn omit_doctype(&mut self, omit: bool) -> &mut Self {
@@ -152,8 +129,6 @@ where
         self
     }
 
-    /// Preserve HTML comments.
-    /// Disabled by default.
     #[inline]
     #[allow(dead_code)]
     pub fn preserve_comments(&mut self, preserve: bool) -> &mut Self {
@@ -161,11 +136,6 @@ where
         self
     }
 
-    /// Minifies the given reader input.
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if unable to write to the output writer.
     #[inline]
     #[allow(dead_code)]
     pub fn minify<R: io::Read>(&mut self, mut r: &mut R) -> io::Result<()> {
@@ -796,11 +766,11 @@ mod tests {
     #[test]
     fn test_omit_tags() {
         for &(input, expected, collapse_whitespace, preserve_comments) in &[
-            // <html>
+
             ("<html>", "", true, false),
-            // Comments ignored
+
             ("<html><!-- -->", "", true, false),
-            // Comments preserved
+
             ("<html>     <!-- -->    ", "<html><!-- -->", true, true),
             ("<html><!-- --></html>", "<html><!-- -->", true, true),
             (
@@ -817,12 +787,12 @@ mod tests {
             ),
             (
                 "<html>    <!-- -->    </html>    <!-- -->    ",
-                // <body> is implicitly added to the DOM
+
                 "<html><!-- --><body>        </html><!-- -->",
                 false,
                 true,
             ),
-            // <head>
+
             (
                 "<html>   <head>   <title>A</title>     </head>   <body><p>     B  </p> </body>",
                 "<title>A</title><p>B",
@@ -841,7 +811,7 @@ mod tests {
                 true,
                 true,
             ),
-            // <body>
+
             ("<body>", "", true, false),
             (
                 "<body>    <script>let x = 1;</script>   ",
@@ -857,25 +827,25 @@ mod tests {
             ),
             ("<body>    <p>A", "<p>A", true, false),
             ("<body id=main>    <p>A", "<body id=main><p>A", true, false),
-            // Retain whitespace, whitespace before <p>
+
             (
                 "    <body>    <p>A      ",
                 "<body>    <p>A      ",
                 false,
                 false,
             ),
-            // Retain whitespace, touching <p>
+
             ("<body><p>A</body>", "<p>A", false, false),
-            // Comments ignored
+
             ("<body><p>A</body><!-- -->", "<p>A", false, false),
-            // Comments preserved
+
             (
                 "<body><p>A</body><!-- -->",
                 "<body><p>A</body><!-- -->",
                 false,
                 true,
             ),
-            // Retain end tag if touching inline element
+
             (
                 "<p>Some text</p><button></button>",
                 "<p>Some text</p><button></button>",

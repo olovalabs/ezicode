@@ -1,7 +1,3 @@
-//! Application state. The single [`Workspace`] entity owns the open buffer,
-//! the explorer tree and all UI flags; this module holds the struct plus the
-//! commands that mutate it. Rendering lives in [`render`].
-
 mod render;
 
 use std::collections::{HashMap, HashSet};
@@ -25,44 +21,36 @@ use crate::lang;
 use crate::lsp::{LspEvent, LspManager};
 use crate::theme;
 
-/// Represents a single open tab with its own editor buffer or special view
 #[derive(Clone)]
 pub struct OpenTab {
     pub path: Option<PathBuf>,
     pub editor: Option<Entity<InputState>>,
     pub dirty: bool,
     pub untitled: bool,
-    /// True if this is a preview tab (will be replaced when opening another file)
-    /// VS Code behavior: clicking a file opens it in preview mode,
-    /// editing promotes it to a permanent tab
+
     pub preview: bool,
-    /// True if this tab represents the VS Code Settings page
+
     pub is_settings: bool,
-    /// True when this tab is a Git diff view (of `diff.path`).
+
     pub diff: Option<DiffTab>,
 }
 
-/// A Git diff view opened from the source-control panel. The raw unified
-/// diff text is produced on a background thread and cached here.
 #[derive(Clone)]
 pub(crate) struct DiffTab {
-    /// Absolute path of the changed file.
+
     pub path: PathBuf,
-    /// Repo-relative path used for the git CLI.
+
     pub rel: String,
-    /// True when the diff shows the staged (index) version.
+
     pub staged: bool,
-    /// Cached unified-diff text, `None` while loading.
+
     pub text: Option<String>,
-    /// The diff parsed into render-ready rows, computed on the same
-    /// background thread as `text` and shared by `Arc`, so repaints never
-    /// re-run the (word-level) diff parser. `None` while loading.
+
     pub parsed: Option<Arc<crate::ui::diff::ParsedDiff>>,
-    /// Non-fatal load error (shown inside the diff view).
+
     pub error: Option<String>,
 }
 
-/// Which sidebar panel is active.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Activity {
     Explorer,
@@ -72,7 +60,7 @@ pub(crate) enum Activity {
 }
 
 impl Activity {
-    /// Label shown in the status bar when this panel is selected.
+
     pub(crate) fn status_label(self) -> &'static str {
         match self {
             Activity::Explorer => "EXPLORER",
@@ -168,73 +156,58 @@ pub(crate) struct Workspace {
     /// whole tree on every event.
     pub(crate) fs_event_tx: async_channel::Sender<PathBuf>,
     /// Cached `display_name(root)` so the title bar and explorer header don't
-    /// re-derive (and re-allocate) the folder name on every frame.
+
     pub(crate) root_display: String,
-    /// GPUI's shared form of the same label; cloning it for a render is cheap
-    /// and avoids converting the borrowed String into a new allocation.
+
     pub(crate) root_display_shared: SharedString,
-    /// Background file system watcher
+
     pub(crate) _watcher: Option<notify::RecommendedWatcher>,
-    /// Open tabs
+
     pub(crate) tabs: Vec<OpenTab>,
-    /// Index of the currently active tab
+
     pub(crate) active_tab: usize,
-    /// Workspace-level focus target (Zed-style). The workspace always holds
-    /// focus when no editor/terminal does, so global keybindings always have
-    /// a dispatch path and shortcuts never go dead.
+
     pub(crate) focus_handle: FocusHandle,
-    /// Draggable sidebar width in pixels. Kept at an absolute pixel value
-    /// when the window resizes (VS Code behavior): the editor area absorbs
-    /// the change instead of the sidebar scaling with the window.
+
     pub(crate) sidebar_width: f32,
-    /// Draggable terminal panel height in pixels (same behavior as above).
+
     pub(crate) terminal_height: f32,
-    /// Active panel resize drag: which handle was grabbed, where the mouse
-    /// was at grab time and how big the panel was.
+
     pub(crate) panel_resize: Option<PanelResizeDrag>,
-    /// Git repository state of the opened folder (`None` when it isn't a
-    /// git repository). Refreshed in the background by a polling thread.
+
     pub(crate) git: Option<RepoStatus>,
-    /// Pokes the git polling thread to re-run `git status` immediately
-    /// (after saves, commits, staging, …).
+
     pub(crate) git_poke_tx: Option<std::sync::mpsc::Sender<()>>,
-    /// The commit-message input of the source-control panel (created lazily
-    /// when the panel is opened).
+
     pub(crate) git_commit_input: Option<Entity<InputState>>,
-    /// Set by the commit input's Enter handler (which has no window handle);
-    /// render() runs the commit on the next frame, where the window exists.
+
     pub(crate) git_commit_pending: bool,
-    /// User preferences loaded from platform settings.json
+
     pub(crate) settings: crate::settings::Settings,
-    /// Debounce generation counter for auto-save
+
     pub(crate) auto_save_generation: usize,
 }
 
-/// Which divider is being dragged.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum ResizeKind {
     Sidebar,
     Terminal,
 }
 
-/// State of an in-progress panel resize drag.
 #[derive(Clone, Copy)]
 pub(crate) struct PanelResizeDrag {
     pub(crate) kind: ResizeKind,
-    /// Mouse position along the drag axis at grab time.
+
     pub(crate) start_mouse: f32,
-    /// Panel size at grab time.
+
     #[allow(dead_code)]
     pub(crate) start_size: f32,
 }
 
-/// A file read + decoded for the editor, produced off the UI thread by
-/// [`load_buffer_file`] so opening files never blocks input or painting.
 pub(crate) struct LoadedBuffer {
-    /// Decoded buffer text (lossy UTF-8).
+
     pub text: String,
-    /// Language id for the highlighter and LSP (`"text"` when highlighting
-    /// is disabled for this file).
+
     pub lang_id: &'static str,
     /// False when the file is too big for tree-sitter highlighting.
     pub highlight: bool,
@@ -370,8 +343,7 @@ impl Workspace {
 
                 // The parent always needs a refresh because a create/delete
                 // changes its entry set. A directory's own level is included
-                // too so a newly-created folder is visible as soon as it is
-                // expanded. Never walk the whole project tree for one event.
+
                 let mut dirs: HashSet<PathBuf> = HashSet::new();
                 for p in paths {
                     if let Some(parent) = p.parent() {
@@ -387,9 +359,6 @@ impl Workspace {
             }
         });
 
-        // Scan the affected directory levels off the UI thread. The UI only
-        // merges the finished snapshots, so even a watcher burst in a large
-        // folder cannot block input, scrolling, or painting.
         cx.spawn({
             let rx = fs_reload_rx.clone();
             async move |this, cx| {
@@ -427,8 +396,6 @@ impl Workspace {
             .unwrap_or_else(theme::default_index);
         let font_size = settings.editor_font_size;
 
-        // Start with NO project loaded — the welcome screen offers
-        // Open Folder / Open File / New File (VS Code-style).
         Self {
             root: None,
             tree: Vec::new(),
@@ -476,8 +443,6 @@ impl Workspace {
         }
     }
 
-    /// The git change entry for an absolute path, if this workspace is a
-    /// git repository and the path is changed.
     pub(crate) fn git_change_for(&self, path: &Path) -> Option<(PathBuf, GitChange)> {
         let repo = self.git.as_ref()?;
         let change = repo.changes.iter().find(|c| c.path == path).cloned()?;
@@ -542,18 +507,14 @@ impl Workspace {
         self.tabs.get(self.active_tab).and_then(|t| t.editor.as_ref())
     }
 
-    /// Get the active tab's file path
     pub fn active_path(&self) -> Option<&PathBuf> {
         self.tabs.get(self.active_tab)?.path.as_ref()
     }
 
-    /// Check if active tab has unsaved changes
     #[allow(dead_code)]
     pub fn is_dirty(&self) -> bool {
         self.tabs.get(self.active_tab).map(|t| t.dirty).unwrap_or(false)
     }
-
-    // -- commands -----------------------------------------------------------
 
     pub(crate) fn apply_theme(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let themes = theme::all();
@@ -563,18 +524,18 @@ impl Workspace {
         self.theme_ix = ix;
         self.settings.workbench_color_theme = th.name.to_string();
         let _ = self.settings.save();
-        // Keep the widget library (inputs, menus, scrollbars…) in sync.
+
         let mode = if th.appearance == "light" {
             gpui_component::ThemeMode::Light
         } else {
             gpui_component::ThemeMode::Dark
         };
         gpui_component::Theme::change(mode, Some(window), cx);
-        // Paint tree-sitter captures with this theme's exact syntax palette.
+
         gpui_component::Theme::global_mut(cx).highlight_theme = Arc::new(th.highlight_theme());
-        // Re-apply Zed fonts — Theme::change resets families from its config.
+
         crate::assets::sync_component_fonts(cx);
-        // Keep all open terminal tabs in sync with the new theme colors.
+
         let palette = &th.terminal_palette;
         for tab in &self.terminal_tabs {
             tab.update(cx, |term, cx| {
@@ -585,9 +546,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Rebuild the flat row cache after a tree or expansion change. This is
-    /// intentionally separate from rendering: the recursive walk is paid only
-    /// on actual explorer mutations, never while the editor is typing.
     fn rebuild_explorer_rows(&mut self) {
         let mut rows = Vec::new();
         if self.explorer_section_expanded {
@@ -600,13 +558,9 @@ impl Workspace {
         self.root = Some(path.clone());
         self.root_display = display_name(&path);
         self.root_display_shared = SharedString::from(self.root_display.clone());
-        // Re-root the language servers. A server's project graph (tsconfig,
-        // package.json, node_modules) is bound to the directory it was
-        // started in, so opening a different folder has to restart them.
+
         self.lsp.lock().unwrap().set_root(Some(path.clone()));
-        // Do not make opening a folder wait on a huge root directory. The
-        // first level is scanned on the background executor and installed only
-        // if this is still the active root when it completes.
+
         self.tree.clear();
         self.explorer_section_expanded = true;
         self.rebuild_explorer_rows();
@@ -635,9 +589,6 @@ impl Workspace {
         })
         .detach();
 
-        // Start filesystem watcher on the root directory. Each relevant
-        // changed path is forwarded (not just a "something changed" flag) so
-        // the reload on the UI side can be scoped to the affected directory.
         let tx = self.fs_event_tx.clone();
         let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
@@ -658,17 +609,11 @@ impl Workspace {
             self._watcher = Some(w);
         }
 
-        // Git integration: when the folder is inside a repository, watch its
-        // status in the background and show real changes in the source
-        // control panel.
         self.start_git_watcher(&path, cx);
 
         cx.notify();
     }
 
-    /// Detect a git repository for `root` and spawn a background thread that
-    /// polls `git status` every ~1.5 s, forwarding snapshots to the UI only
-    /// when they actually changed. `git_poke()` forces an immediate poll.
     pub(crate) fn start_git_watcher(&mut self, root: &Path, cx: &mut Context<Self>) {
         let Some(repo_root) = git::find_repo_root(root) else {
             self.git = None;
@@ -677,8 +622,6 @@ impl Workspace {
         let (poke_tx, poke_rx) = std::sync::mpsc::channel::<()>();
         let (status_tx, status_rx) = async_channel::unbounded::<RepoStatus>();
 
-        // First snapshot synchronously so the panel is populated before the
-        // first frame (the watcher would otherwise be ~1.5 s late).
         if let Some(status) = git::status(&repo_root) {
             self.git = Some(status.clone());
             let _ = status_tx.try_send(status);
@@ -690,13 +633,12 @@ impl Workspace {
                 if let Some(status) = git::status(&repo_root) {
                     if last.as_ref() != Some(&status) {
                         if status_tx.try_send(status.clone()).is_err() {
-                            break; // workspace is gone
+                            break;
                         }
                         last = Some(status);
                     }
                 }
-                // Sleep until the next poll, but wake up immediately when the
-                // workspace pokes us (save / commit / stage / …).
+
                 match poke_rx.recv_timeout(Duration::from_millis(1500)) {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -712,8 +654,7 @@ impl Workspace {
                 while let Ok(status) = rx.recv().await {
                     let _ = this.update(cx, |workspace, cx| {
                         workspace.git = Some(status);
-                        // Diff tabs show a snapshot; refresh the active one so
-                        // external changes (checkout, discard…) are visible.
+
                         workspace.refresh_active_diff(cx);
                         cx.notify();
                     });
@@ -723,7 +664,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Ask the git polling thread to re-run `git status` right now.
     pub(crate) fn git_poke(&self) {
         if let Some(tx) = &self.git_poke_tx {
             let _ = tx.send(());
@@ -743,7 +683,7 @@ impl Workspace {
     }
 
     pub(crate) fn new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Create a new untitled tab
+
         let editor = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("text")
@@ -758,7 +698,6 @@ impl Workspace {
                 .placeholder("Start typing...")
         });
 
-        // Subscribe to change events for the new editor
         cx.subscribe(&editor, move |this, _state, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 if let Some(tab) = this.tabs.get_mut(this.active_tab) {
@@ -778,7 +717,7 @@ impl Workspace {
             editor: Some(editor),
             dirty: false,
             untitled: true,
-            preview: false, // New file tabs are permanent
+            preview: false,
             is_settings: false,
             diff: None,
         });
@@ -794,8 +733,7 @@ impl Workspace {
         }
 
         self.show_terminal = true;
-        // Toggle only hides once at least one terminal already exists; if the
-        // user never opened one, lazily create the first tab (VS Code behavior).
+
         if self.terminal_tabs.is_empty() {
             self.new_terminal(window, cx);
             return;
@@ -805,16 +743,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Create a brand-new terminal tab (spawns a fresh shell/PTY), make it the
-    /// active tab, show the panel and give it focus. Labeled like Zed's
-    /// terminals (shell name + sequence number) so tabs stay distinguishable.
-    ///
-    /// Working directory priority (Zed-style):
-    /// 1. Active terminal's working directory (if a terminal is open)
-    /// 2. Project root directory
-    /// 3. User's home directory (fallback, handled by Terminal::new)
     pub(crate) fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Determine working directory: prefer active terminal's dir, then project root
+
         let working_dir = self
             .terminal_tabs
             .get(self.active_terminal)
@@ -824,7 +754,6 @@ impl Workspace {
         let id = self.next_terminal_id;
         self.next_terminal_id += 1;
 
-        // Label: "bash 1", "zsh 2", "PowerShell 3" (Zed-style)
         let shell_name = crate::terminal::Terminal::detect_shell_name();
         let label = format!("{shell_name} {id}");
         let palette = self.theme().terminal_palette.clone();
@@ -842,7 +771,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Switch the active terminal tab and hand it focus (VS Code tab click).
     pub(crate) fn activate_terminal(
         &mut self,
         index: usize,
@@ -860,17 +788,12 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Focus the active terminal tab's view.
     fn focus_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(term) = self.terminal_tabs.get(self.active_terminal).cloned() {
             term.read(cx).focus_handle(cx).focus(window);
         }
     }
 
-    /// Hide the terminal panel and hand focus back to the active editor (or
-    /// the workspace itself). Like Zed's dock toggle, focus is never left on
-    /// a panel that is about to disappear, otherwise keybindings go dead.
-    /// Sessions in all tabs stay alive; [`Self::close_terminal`] kills them.
     pub(crate) fn hide_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_terminal = false;
         self.terminal_maximized = false;
@@ -889,11 +812,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Close one terminal tab (VS Code tab ×): drops that terminal's entity,
-    /// which closes its PTY and kills the child shell. Adjusts the active tab
-    /// and hides the whole panel when the last tab is closed. Unlike
-    /// [`Self::hide_terminal`] this fully exits the closed shell, not just the
-    /// panel.
     pub(crate) fn close_terminal(
         &mut self,
         index: usize,
@@ -903,8 +821,7 @@ impl Workspace {
         if index >= self.terminal_tabs.len() {
             return;
         }
-        // Dropping the entity tears down the terminal view and closes the PTY
-        // master, which terminates the running shell process.
+
         self.terminal_tabs.remove(index);
 
         if self.terminal_tabs.is_empty() {
@@ -930,8 +847,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Switch to the next terminal tab (wraps around). Zed-style terminal
-    /// navigation: Alt+Right or Ctrl+PageDown cycle through sessions.
     pub(crate) fn next_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.terminal_tabs.len() <= 1 {
             return;
@@ -942,8 +857,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Switch to the previous terminal tab (wraps around). Zed-style:
-    /// Alt+Left or Ctrl+PageUp.
     pub(crate) fn prev_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.terminal_tabs.len() <= 1 {
             return;
@@ -955,7 +868,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Close the active terminal tab. If it's the last one, hide the panel.
     pub(crate) fn close_active_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.terminal_tabs.is_empty() {
             return;
@@ -964,7 +876,6 @@ impl Workspace {
         self.close_terminal(idx, window, cx);
     }
 
-    /// Switch to a specific terminal tab by index (Alt+1..5 shortcuts).
     pub(crate) fn switch_terminal_tab_to(
         &mut self,
         index: usize,
@@ -979,17 +890,10 @@ impl Workspace {
         }
     }
 
-    /// Clear the active terminal screen by sending the ANSI clear sequence.
-    /// Zed does this via its "terminal: clear" action.
-    ///
-    /// Sends:
-    /// - `\x1b[2J` — clear entire screen
-    /// - `\x1b[H` — move cursor to home position (top-left)
-    /// - `\x1b[3J` — clear scrollback buffer (Erase Scrollback)
     pub(crate) fn clear_active_terminal(&mut self, cx: &mut Context<Self>) {
         if let Some(term_entity) = self.terminal_tabs.get(self.active_terminal).cloned() {
             let term = term_entity.read(cx);
-            // ANSI escape sequences to clear screen + scrollback + home cursor
+
             let clear_seq = b"\x1b[2J\x1b[H\x1b[3J";
             if term.send_bytes(clear_seq) {
                 self.status = "Terminal cleared".into();
@@ -1000,10 +904,6 @@ impl Workspace {
         }
     }
 
-    /// Check all terminal processes for exit and update their state.
-    /// Called periodically from the render loop (Zed-style process monitoring).
-    /// When a terminal's shell exits, its tab shows a red dot and the exit
-    /// status so the user knows it's dead without having to type into it.
     pub(crate) fn poll_terminal_processes(&mut self, cx: &mut Context<Self>) {
         let mut any_changed = false;
         for term_entity in &self.terminal_tabs {
@@ -1019,9 +919,6 @@ impl Workspace {
         }
     }
 
-    /// Focus the active tab's editor, falling back to the workspace focus
-    /// handle when no editor is open. Keeps the dispatch path alive for
-    /// global keybindings at all times.
     pub(crate) fn focus_active_editor_or_self(
         &mut self,
         window: &mut Window,
@@ -1048,8 +945,7 @@ impl Workspace {
         } else {
             self.show_sidebar = true;
             self.activity = activity;
-            // The source-control panel owns a commit-message input; create it
-            // when the panel is first opened (needs the window handle).
+
             if activity == Activity::Git {
                 self.ensure_git_commit_input(window, cx);
             }
@@ -1073,9 +969,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Expands only the ancestors needed to make a path visible and queues a
-    /// centered scroll. This is the same "auto reveal" behavior users expect
-    /// from VS Code/Zed, without expanding unrelated branches.
     fn reveal_tree_path(&mut self, path: &Path) {
         let Some(root) = self.root.clone() else {
             return;
@@ -1122,11 +1015,10 @@ impl Workspace {
         self.selected_path = Some(path.clone());
         self.reveal_tree_path(&path);
 
-        // Check if file is already open in a tab
         if let Some(idx) = self.tabs.iter().position(|t| t.path.as_ref() == Some(&path)) {
-            // File already open - switch to its tab and promote preview to permanent
+
             self.active_tab = idx;
-            // Remove preview status - it's now a permanent tab
+
             if let Some(tab) = self.tabs.get_mut(idx) {
                 tab.preview = false;
             }
@@ -1134,10 +1026,6 @@ impl Workspace {
             return;
         }
 
-        // Zed-style: disk I/O, the binary/too-large checks and the UTF-8
-        // decode all run on the background executor, so opening a large file
-        // (or any file on a slow disk) never blocks input or painting. The
-        // tab itself is created on the UI thread once the load completes.
         self.status = format!("Opening {}…", display_name(&path));
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -1152,9 +1040,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Finish [`Self::open_file`] once the background read has completed:
-    /// create the editor, wire up LSP + change subscriptions, and install or
-    /// replace the tab. Runs on the UI thread.
     fn finish_open_file(
         &mut self,
         path: PathBuf,
@@ -1171,9 +1056,6 @@ impl Workspace {
             }
         };
 
-        // The file may have been opened again while the load was in flight
-        // (double-click then Enter, or two quick opens). Don't open a second
-        // tab for it.
         if let Some(idx) = self.tabs.iter().position(|t| t.path.as_ref() == Some(&path)) {
             self.active_tab = idx;
             if let Some(tab) = self.tabs.get_mut(idx) {
@@ -1183,11 +1065,8 @@ impl Workspace {
             return;
         }
 
-        // VS Code behavior: Check if current active tab is a preview tab
-        // If yes, REPLACE it with the new file (don't add a new tab)
-        // If no, ADD a new tab
         let replace_preview = if let Some(active_idx) = self.tabs.get(self.active_tab) {
-            // Active tab is preview AND not dirty AND is the only tab or current view
+
             active_idx.preview && !active_idx.dirty
         } else {
             false
@@ -1197,8 +1076,6 @@ impl Workspace {
         let highlight = loaded.highlight;
         let text = loaded.text;
 
-        // Create a new editor for this tab. `text` is moved in — no extra
-        // whole-buffer clone on open.
         let editor = cx.new(move |cx| {
             let mut state = InputState::new(window, cx)
                 .code_editor(lang_id)
@@ -1214,15 +1091,8 @@ impl Workspace {
             state
         });
 
-        // Notify LSP of document open and wire the editor up to the
-        // server: completions, hover, go-to-definition and code
-        // actions are driven by gpui-component's `InputState::lsp`
-        // provider hooks (the same surface Zed uses). If the server
-        // still has to be installed this returns false and the buffer
-        // is attached automatically once the install finishes.
         self.attach_language_server(&path, lang_id, &editor, cx);
 
-        // Subscribe to change events - also handles promoting preview to permanent
         let path_clone = path.clone();
         let lang_str = lang_id.to_string();
         let editor_ent = editor.clone();
@@ -1235,7 +1105,7 @@ impl Workspace {
                         tab.dirty = true;
                         ui_changed = true;
                     }
-                    // VS Code: editing a preview tab promotes it to permanent
+
                     if tab.preview {
                         tab.preview = false;
                         ui_changed = true;
@@ -1248,11 +1118,7 @@ impl Workspace {
                         lsp.change_document(&path_clone, &lang_str, text);
                     }
                 }
-                // The editor view repaints itself. Only repaint the
-                // workspace chrome (dirty dot / preview promotion)
-                // when it actually changed, so steady-state typing
-                // doesn't rebuild the whole window (explorer, tab
-                // bar, status bar) on every keystroke.
+
                 if ui_changed {
                     cx.notify();
                 }
@@ -1263,23 +1129,23 @@ impl Workspace {
         .detach();
 
         if replace_preview {
-            // REPLACE the current preview tab with the new file
+
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 tab.path = Some(path.clone());
                 tab.dirty = false;
                 tab.untitled = false;
-                tab.preview = true; // New file is still in preview mode
+                tab.preview = true;
                 tab.is_settings = false;
                 tab.editor = Some(editor);
             }
         } else {
-            // ADD a new tab in preview mode (VS Code style)
+
             self.tabs.push(OpenTab {
                 path: Some(path.clone()),
                 editor: Some(editor),
                 dirty: false,
                 untitled: false,
-                preview: true, // New tabs start as preview
+                preview: true,
                 is_settings: false,
                 diff: None,
             });
@@ -1294,7 +1160,7 @@ impl Workspace {
     }
 
     pub(crate) fn save(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        // Get active tab
+
         let tab = match self.active_tab_mut() {
             Some(t) => t,
             None => {
@@ -1304,18 +1170,15 @@ impl Workspace {
             }
         };
 
-        // If settings tab, nothing to save
         if tab.is_settings {
             return;
         }
 
-        // If untitled, fall back to Save As
         if tab.path.is_none() {
             self.save_as(cx);
             return;
         }
 
-        // Save the file (disk write runs on the background executor).
         let path = tab.path.clone().unwrap();
         let Some(editor) = &tab.editor else {
             return;
@@ -1325,19 +1188,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Write `text` to `path` without blocking the UI thread (Zed performs
-    /// file saves on a background executor for exactly this reason: a slow
-    /// disk, network mount or antivirus scan must never freeze the editor).
-    ///
-    /// The bookkeeping that used to follow the synchronous write happens on
-    /// the UI thread once the write finishes:
-    /// - the dirty marker is cleared **only when the buffer still matches
-    ///   the written snapshot** — if the user kept typing during the write,
-    ///   the newer text correctly stays dirty;
-    /// - the language server receives `didSave` (ESLint, gopls and
-    ///   rust-analyzer run their heavier checks on save);
-    /// - git status is poked and `settings.json` is reloaded when it was the
-    ///   saved file.
     fn write_file_async(
         &mut self,
         path: PathBuf,
@@ -1448,7 +1298,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Get mutable reference to the active tab
     fn active_tab_mut(&mut self) -> Option<&mut OpenTab> {
         self.tabs.get_mut(self.active_tab)
     }
@@ -1459,8 +1308,7 @@ impl Workspace {
             for n in nodes {
                 if n.path == path {
                     n.expanded = !n.expanded;
-                    // Do not use `children.is_empty()` as the loaded marker:
-                    // an empty folder is a valid (and cached) result.
+
                     let needs_load = n.expanded && !n.children_loaded;
                     return (true, needs_load.then(|| n.path.clone()));
                 }
@@ -1526,7 +1374,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Merge a directory snapshot produced by the background scanner.
     fn apply_loaded_dir_inner(&mut self, dir: &Path, entries: Vec<TreeNode>) -> bool {
         let Some(root) = self.root.clone() else {
             return false;
@@ -1572,9 +1419,6 @@ impl Workspace {
         apply(&mut self.tree, dir, &mut entries)
     }
 
-    /// Scan a directory off the UI thread and merge it if it still belongs to
-    /// the active workspace. This is shared by lazy expansion and explicit
-    /// refreshes/mutations so a large directory never blocks a click.
     fn load_directory_async(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
         let Some(root) = self.root.clone() else {
             return;
@@ -1598,12 +1442,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Reload one affected directory level after a filesystem change without
-    /// blocking the UI thread. A collapsed directory is intentionally not
-    /// scanned into the tree; it is marked stale and will be loaded fresh when
-    /// the user expands it. An expanded directory gets a shallow merge, so
-    /// loaded grandchildren move across unchanged entries without being
-    /// rescanned.
     pub(crate) fn reload_dir(&mut self, dir: &Path, cx: &mut Context<Self>) {
         self.load_directory_async(dir.to_path_buf(), cx);
     }
@@ -1621,11 +1459,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Implements the small, high-value part of Zed/VS Code explorer
-    /// navigation without forcing the editor to take focus: arrows move the
-    /// cached visible-row selection, right/left expand and collapse, and
-    /// Enter opens/toggles. Selection is always scrolled into view by the
-    /// same uniform-list handle used by mouse navigation.
     pub(crate) fn handle_explorer_key(
         &mut self,
         event: &gpui::KeyDownEvent,
@@ -1633,8 +1466,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let key = event.keystroke.key.as_str();
-        // The input entity owns text editing while an inline editor is active.
-        // Do not let the list interpret Enter, arrows, or Delete underneath it.
+
         if self.inline_creating.is_some() || self.inline_renaming.is_some() {
             return;
         }
@@ -1747,10 +1579,6 @@ impl Workspace {
             .is_some_and(|root| is_same_or_descendant(root, path))
     }
 
-    /// Expand all loaded ancestors of a directory. If an ancestor has not
-    /// been opened yet, load its first level now so a new item has a visible
-    /// insertion point. Directory scans are shallow and are only performed for
-    /// the path the user is actively editing.
     fn ensure_directory_visible(&mut self, dir: &Path) {
         let Some(root) = self.root.clone() else {
             return;
@@ -1794,9 +1622,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Starting another edit commits neither operation. This mirrors the
-        // explorer's one-inline-editor rule and avoids two recycled list rows
-        // sharing focus.
+
         self.inline_creating = None;
         self.inline_renaming = None;
 
@@ -2016,9 +1842,6 @@ impl Workspace {
         self.rebuild_explorer_rows();
     }
 
-    /// Update editor tabs, diagnostics and selection for a move or directory
-    /// rename. `path_after_move` is component-aware, so `src2/file` is not
-    /// rewritten when only `src` moved.
     fn update_paths_after_move(&mut self, source: &Path, destination: &Path) {
         let workspace_root = self.root.clone();
         for tab in &mut self.tabs {
@@ -2060,7 +1883,6 @@ impl Workspace {
         }
     }
 
-    /// Move a dropped explorer entry into `destination_dir`.
     pub(crate) fn move_entry(
         &mut self,
         source: &Path,
@@ -2195,8 +2017,7 @@ impl Workspace {
                 self.status = "Pasted explorer item".into();
             }
             Err(error) => {
-                // Do not leave a half-copied folder in the tree after a
-                // permissions or I/O failure.
+
                 if destination.is_dir() {
                     let _ = std::fs::remove_dir_all(&destination);
                 } else {
@@ -2316,15 +2137,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Bring a language server up for `path` and connect `editor` to it.
-    ///
-    /// This is the single entry point every code path uses (open file, save
-    /// as, post-install retry), so a buffer can never end up half-wired —
-    /// e.g. with diagnostics arriving but no completion provider attached.
-    ///
-    /// Returns `false` when no server is available *yet*; the manager will
-    /// have started an install if one is possible, and the buffer gets picked
-    /// up by [`Self::start_server_for_open_buffers`] once it finishes.
     pub(crate) fn attach_language_server(
         &mut self,
         path: &Path,
@@ -2352,11 +2164,6 @@ impl Workspace {
         true
     }
 
-    /// After a server finishes installing, open every buffer it handles.
-    ///
-    /// Without this the user would have to close and reopen the file they
-    /// were already looking at to get diagnostics — the exact papercut Zed
-    /// avoids by re-registering buffers when a server starts.
     pub(crate) fn start_server_for_open_buffers(
         &mut self,
         server: &str,
@@ -2392,9 +2199,7 @@ impl Workspace {
         diagnostics: Vec<lsp_types::Diagnostic>,
         cx: &mut Context<Self>,
     ) {
-        // Wrap once: storing the bundle and copying it into each matching
-        // editor both borrow from the same shared `Arc` payload, so an LSP
-        // publish no longer full-clones the vector at two independent sites.
+
         let shared = Arc::new(diagnostics);
 
         self.diagnostics_by_path
@@ -2458,11 +2263,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Open or focus the VS Code-style Settings tab
-    // -- Git -----------------------------------------------------------------
-
-    /// Refresh the git status immediately (used by the panel's refresh
-    /// button and after external git operations).
     pub(crate) fn git_refresh(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             self.status = "Not a git repository".into();
@@ -2487,7 +2287,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Stage one changed file.
     pub(crate) fn git_stage_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let Some((root, change)) = self.git_change_for(path) else {
             self.status = "Not a changed file".into();
@@ -2503,7 +2302,6 @@ impl Workspace {
         );
     }
 
-    /// Unstage one file.
     pub(crate) fn git_unstage_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let Some((root, change)) = self.git_change_for(path) else {
             self.status = "Not a changed file".into();
@@ -2519,7 +2317,6 @@ impl Workspace {
         );
     }
 
-    /// Discard all worktree changes (or delete, when untracked) of one file.
     pub(crate) fn git_discard_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let Some((root, change)) = self.git_change_for(path) else {
             self.status = "Not a changed file".into();
@@ -2542,7 +2339,6 @@ impl Workspace {
         );
     }
 
-    /// Stage every change.
     pub(crate) fn git_stage_all(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             self.status = "Not a git repository".into();
@@ -2552,7 +2348,6 @@ impl Workspace {
         self.run_git_op(root, Vec::new(), |root, _| git::stage_all(&root), "Staged all changes", cx);
     }
 
-    /// Unstage every change.
     pub(crate) fn git_unstage_all(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             self.status = "Not a git repository".into();
@@ -2578,7 +2373,6 @@ impl Workspace {
         );
     }
 
-    /// Discard every worktree change (untracked files are deleted).
     pub(crate) fn git_discard_all(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             self.status = "Not a git repository".into();
@@ -2614,8 +2408,6 @@ impl Workspace {
         );
     }
 
-    /// Run one git mutation on a background thread, then poke the watcher so
-    /// the panel reflects the new status immediately.
     fn run_git_op(
         &mut self,
         root: PathBuf,
@@ -2666,8 +2458,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The commit-message input of the source-control panel. Created once on
-    /// first use; Enter (or the Commit button) commits the staged changes.
     pub(crate) fn ensure_git_commit_input(
         &mut self,
         window: &mut Window,
@@ -2686,9 +2476,7 @@ impl Workspace {
             InputState::new(window, cx)
                 .placeholder(placeholder_text)
         });
-        // Enter in the commit box commits. The subscribe callback has no
-        // window handle, so it only flags the request; render() (which does
-        // have the window) runs the commit on the next frame.
+
         cx.subscribe(&input, |this, _state, event: &InputEvent, cx| {
             if matches!(event, InputEvent::PressEnter { .. }) {
                 this.git_commit_pending = true;
@@ -2700,7 +2488,6 @@ impl Workspace {
         input
     }
 
-    /// Commit the staged changes with the message from the commit box.
     pub(crate) fn git_commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             self.status = "Not a git repository — open a folder to commit".into();
@@ -2750,8 +2537,7 @@ impl Workspace {
                 }
                 cx.notify();
             });
-            // Clear the commit input on success. `set_value` needs the window
-            // handle, so this runs through the async window context.
+
             if is_ok {
                 if let Some(input) = &commit_input {
                     let _ = input.downgrade().update_in(cx, |state, window, cx| {
@@ -2763,8 +2549,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Open the diff of a changed file in a new editor tab. The diff text is
-    /// produced on a background thread; the tab shows a spinner meanwhile.
     pub(crate) fn open_diff(&mut self, path: &Path, cx: &mut Context<Self>) {
         let Some((root, change)) = self.git_change_for(path) else {
             self.status = "Not a changed file".into();
@@ -2773,7 +2557,6 @@ impl Workspace {
         };
         let staged = change.is_staged();
 
-        // Already open? Just switch to it.
         if let Some(idx) = self
             .tabs
             .iter()
@@ -2809,9 +2592,6 @@ impl Workspace {
             format!("Diff: {}", display_name(path))
         };
 
-        // Load the diff text in the background and parse it there too —
-        // the word-level intra-line diff is the expensive part, and the UI
-        // thread only ever needs the finished row snapshot.
         let tab_path = path.to_path_buf();
         cx.spawn(async move |this, cx| {
             let tab_path_bg = tab_path.clone();
@@ -2821,8 +2601,7 @@ impl Workspace {
                     let text = if !raw.trim().is_empty() {
                         Some(raw)
                     } else {
-                        // Untracked files have no git diff yet — show the
-                        // full content as one big addition.
+
                         std::fs::read_to_string(&tab_path_bg)
                             .ok()
                             .map(|content| git::new_file_diff(&rel, &content))
@@ -2851,7 +2630,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Re-load the active diff tab's text (after git status changes).
     fn refresh_active_diff(&mut self, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(self.active_tab) else {
             return;
@@ -2900,10 +2678,6 @@ impl Workspace {
         .detach();
     }
 
-    // -- LSP -----------------------------------------------------------------
-
-    /// Format the active document with its language server
-    /// (`textDocument/formatting`), then apply the returned edits.
     pub(crate) fn format_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (path, editor, lang_id) = {
             let Some(tab) = self.tabs.get(self.active_tab) else {
@@ -2939,8 +2713,7 @@ impl Workspace {
                 .await;
             match edits {
                 Some(edits) if !edits.is_empty() => {
-                    // Apply on the UI thread; the window handle comes from
-                    // the async window context.
+
                     let _ = editor_weak.update_in(cx, |state, window, cx| {
                         state.apply_lsp_edits(&edits, window, cx);
                     });
@@ -2986,7 +2759,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Open user settings.json directly in an editor tab.
     pub(crate) fn open_settings_json(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = crate::settings::settings_file_path();
         if !path.exists() {
@@ -2995,7 +2767,6 @@ impl Workspace {
         self.open_file(path, window, cx);
     }
 
-    /// Reloads settings from disk (e.g. after user edits settings.json).
     pub(crate) fn reload_settings(&mut self, cx: &mut Context<Self>) {
         self.settings = crate::settings::Settings::load();
         let themes = theme::all();
@@ -3014,9 +2785,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Quietly saves a single tab by index if dirty and has a valid path.
-    /// The disk write itself runs in the background (see
-    /// [`Self::write_file_async`]); returns `true` when a save was started.
     pub(crate) fn save_tab_quiet(&mut self, idx: usize, cx: &mut Context<Self>) -> bool {
         let Some(tab) = self.tabs.get_mut(idx) else {
             return false;
@@ -3033,7 +2801,6 @@ impl Workspace {
         true
     }
 
-    /// Saves all dirty tabs that have a file path on disk.
     pub(crate) fn save_all_dirty_quiet(&mut self, cx: &mut Context<Self>) {
         let mut saved_any = false;
         for i in 0..self.tabs.len() {
@@ -3046,13 +2813,6 @@ impl Workspace {
         }
     }
 
-    /// Triggers auto-save after debounce delay when typing stops.
-    ///
-    /// The wait uses the executor's async `timer` (Zed-style) instead of a
-    /// blocking `thread::sleep` inside a background task: sleeping tasks
-    /// occupy a worker thread for the whole delay, so a fast typist could
-    /// pile up a dozen of them and starve the pool that also runs LSP
-    /// requests and file scans.
     pub(crate) fn trigger_auto_save_after_delay(&mut self, _tab_idx: usize, cx: &mut Context<Self>) {
         if self.settings.editor_auto_save != crate::settings::AutoSaveMode::AfterDelay {
             return;
@@ -3073,7 +2833,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Triggers auto-save on focus change / tab switch.
     pub(crate) fn trigger_auto_save_on_focus_change(&mut self, cx: &mut Context<Self>) {
         if self.settings.editor_auto_save != crate::settings::AutoSaveMode::OnFocusChange {
             return;
@@ -3081,9 +2840,6 @@ impl Workspace {
         self.save_all_dirty_quiet(cx);
     }
 
-    // Tab management methods
-
-    /// Switch to a specific tab by index
     #[allow(dead_code)]
     pub(crate) fn switch_tab(&mut self, index: usize) {
         if index < self.tabs.len() {
@@ -3091,7 +2847,6 @@ impl Workspace {
         }
     }
 
-    /// Close a tab by index
     pub(crate) fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(closed_tab) = self.tabs.get(index) {
             if let Some(p) = &closed_tab.path {
@@ -3101,21 +2856,17 @@ impl Workspace {
             }
         }
 
-        // Don't close if only one tab and it's clean (just show welcome)
         if self.tabs.len() == 1 {
             self.tabs.remove(0);
             self.active_tab = 0;
-            // The closed editor held focus — restore it so keybindings keep
-            // working on the welcome screen.
+
             window.focus(&self.focus_handle);
             cx.notify();
             return;
         }
 
-        // Remove the tab
         self.tabs.remove(index);
 
-        // Adjust active tab index
         if index <= self.active_tab && self.active_tab > 0 {
             self.active_tab -= 1;
         }
@@ -3123,17 +2874,15 @@ impl Workspace {
             self.active_tab = self.tabs.len().saturating_sub(1);
         }
 
-        // Hand keyboard focus to the editor that is now active.
         self.focus_active_editor_or_self(window, cx);
         cx.notify();
     }
 
-    /// Switch to a specific tab by index (called from tab bar click)
     pub(crate) fn switch_tab_to(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.tabs.len() {
             self.trigger_auto_save_on_focus_change(cx);
             self.active_tab = index;
-            // Clicking a tab also promotes it from preview to permanent (VS Code behavior)
+
             if let Some(tab) = self.tabs.get_mut(index) {
                 tab.preview = false;
             }
@@ -3141,7 +2890,6 @@ impl Workspace {
         }
     }
 
-    /// Close a tab at a specific index (called from tab close button click)
     pub(crate) fn close_tab_at_index(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.tabs.len() {
             if let Some(closed_tab) = self.tabs.get(index) {
@@ -3152,14 +2900,13 @@ impl Workspace {
                 }
             }
 
-            // Don't close if only one tab - just show welcome
             if self.tabs.len() == 1 {
                 self.tabs.remove(0);
                 self.active_tab = 0;
             } else {
-                // Remove the tab
+
                 self.tabs.remove(index);
-                // Adjust active tab index
+
                 if index <= self.active_tab && self.active_tab > 0 {
                     self.active_tab -= 1;
                 }
@@ -3170,8 +2917,6 @@ impl Workspace {
             cx.notify();
         }
     }
-
-    /// Action handlers for tab operations
 
     pub(crate) fn handle_close_tab(&mut self, _: &crate::actions::CloseTab, window: &mut Window, cx: &mut Context<Self>) {
         self.close_tab(self.active_tab, window, cx);
@@ -3193,7 +2938,6 @@ impl Workspace {
         }
     }
 
-    /// Switch to a specific tab by index (called when tab is clicked)
     pub(crate) fn handle_switch_tab(&mut self, action: &crate::actions::SwitchTab, window: &mut Window, cx: &mut Context<Self>) {
         if action.index < self.tabs.len() {
             self.active_tab = action.index;
@@ -3202,7 +2946,6 @@ impl Workspace {
         }
     }
 
-    /// Close a specific tab by index (called when close button is clicked)
     pub(crate) fn handle_close_tab_at(&mut self, action: &crate::actions::CloseTabAt, window: &mut Window, cx: &mut Context<Self>) {
         if action.index < self.tabs.len() {
             self.close_tab(action.index, window, cx);

@@ -1,6 +1,3 @@
-//! VS Code-style tab bar component with connected tabs, top accent indicators,
-//! Git status markers, and clean hover interactions.
-
 use gpui::prelude::*;
 use gpui::{div, px, rgba, Context, FontWeight, IntoElement, MouseButton, SharedString};
 
@@ -10,10 +7,8 @@ use crate::theme::Colors;
 use crate::ui::common::icon_img;
 use crate::workspace::{OpenTab, Workspace};
 
-/// Tab bar height in pixels (matches VS Code's standard 35px tab height)
 const TAB_HEIGHT: f32 = 35.0;
 
-/// VS Code color for a Git change kind
 fn kind_color(kind: ChangeKind, t: &Colors) -> u32 {
     match kind {
         ChangeKind::Modified => t.vc_modified,
@@ -25,7 +20,6 @@ fn kind_color(kind: ChangeKind, t: &Colors) -> u32 {
     }
 }
 
-/// Renders a single tab matching VS Code's connected rectangular tab styling
 fn render_tab_content(
     tab: &OpenTab,
     index: usize,
@@ -64,7 +58,6 @@ fn render_tab_content(
         "file_icons/default_file.svg"
     };
 
-    // Check Git status for this file (e.g. Modified 'M', Untracked 'U')
     let git_change = tab.path.as_ref().and_then(|p| {
         git_repo.and_then(|r| r.changes.iter().find(|c| &c.path == p))
     });
@@ -83,7 +76,6 @@ fn render_tab_content(
         (None, None)
     };
 
-    // Label color: active tab uses active foreground; inactive uses git color if modified, else muted
     let text_color = if is_active {
         t.tab_active_fg
     } else if let Some(color) = git_color {
@@ -123,7 +115,7 @@ fn render_tab_content(
     if is_active {
         tab_div = tab_div
             .bg(rgba(t.tab_active_bg))
-            // VS Code top accent line indicator
+
             .child(
                 div()
                     .absolute()
@@ -141,7 +133,6 @@ fn render_tab_content(
             .hover(|h| h.bg(rgba(t.element_hover)));
     }
 
-    // Tab content (icon + file name)
     let content = div()
         .flex()
         .flex_row()
@@ -162,7 +153,6 @@ fn render_tab_content(
 
     tab_div = tab_div.child(content);
 
-    // Git change indicator (e.g. 'M' for modified)
     if let Some((letter, color)) = git_letter.zip(git_color) {
         tab_div = tab_div.child(
             div()
@@ -173,10 +163,6 @@ fn render_tab_content(
         );
     }
 
-    // Close button & dirty indicator (VS Code behavior:
-    // - Dirty file: shows a dot that transforms to ✕ on hover.
-    // - Clean file: active tab always shows ✕; inactive tab shows ✕ on hover.
-    // - Transparent background, subtle hover highlight.)
     let mut close_btn = div()
         .id(("close-tab", index))
         .relative()
@@ -234,7 +220,6 @@ fn render_tab_content(
     tab_div.child(close_btn)
 }
 
-/// Renders the tab bar container
 pub fn render_tab_bar(
     tabs: &[OpenTab],
     active_tab: usize,
@@ -255,7 +240,7 @@ pub fn render_tab_bar(
             let is_active = idx == active_tab;
             render_tab_content(tab, idx, is_active, git_repo, t, cx)
         }))
-        // Trailing empty space has a bottom border to match VS Code
+
         .child(
             div()
                 .flex_1()

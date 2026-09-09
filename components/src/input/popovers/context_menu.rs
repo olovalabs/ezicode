@@ -11,7 +11,6 @@ use crate::{
     menu::PopupMenu,
 };
 
-/// Context menu for mouse right clicks.
 pub(crate) struct MouseContextMenu {
     editor: Entity<InputState>,
     menu: Entity<PopupMenu>,
@@ -29,7 +28,7 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Show Mouse context menu
+
         if !self.selected_range.contains(offset) {
             self.move_to(offset, None, cx);
         }

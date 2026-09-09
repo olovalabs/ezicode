@@ -1,6 +1,3 @@
-//! View layer, split by screen region. Widgets here are "dumb": they take
-//! colors + data and emit callbacks/actions; all state lives in `workspace`.
-
 pub mod activity_bar;
 pub mod app_icon;
 pub mod common;

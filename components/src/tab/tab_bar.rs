@@ -11,7 +11,6 @@ use crate::button::{Button, ButtonVariants as _};
 use crate::menu::{DropdownMenu as _, PopupMenuItem};
 use crate::{h_flex, ActiveTheme, IconName, Selectable, Sizable, Size, StyledExt};
 
-/// A TabBar element that contains multiple [`Tab`] items.
 #[derive(IntoElement)]
 pub struct TabBar {
     base: Stateful<Div>,

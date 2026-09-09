@@ -6,7 +6,6 @@ use tree_sitter::Point;
 
 use crate::input::Position;
 
-/// An iterator over the lines of a `Rope`.
 pub struct RopeLines<'a> {
     rope: &'a Rope,
     row: usize,
@@ -14,7 +13,7 @@ pub struct RopeLines<'a> {
 }
 
 impl<'a> RopeLines<'a> {
-    /// Create a new `RopeLines` iterator.
+
     pub fn new(rope: &'a Rope) -> Self {
         let end_row = rope.lines_len();
         Self {
@@ -54,43 +53,12 @@ impl<'a> Iterator for RopeLines<'a> {
 impl std::iter::ExactSizeIterator for RopeLines<'_> {}
 impl std::iter::FusedIterator for RopeLines<'_> {}
 
-/// An extension trait for [`Rope`] to provide additional utility methods.
 pub trait RopeExt {
-    /// Start offset of the line at the given row (0-based) index.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use gpui_component::{Rope, RopeExt};
-    ///
-    /// let rope = Rope::from("Hello\nWorld\r\nThis is a test 中文\nRope");
-    /// assert_eq!(rope.line_start_offset(0), 0);
-    /// assert_eq!(rope.line_start_offset(1), 6);
-    /// ```
+
     fn line_start_offset(&self, row: usize) -> usize;
 
-    /// Line the end offset (including `\n`) of the line at the given row (0-based) index.
-    ///
-    /// Return the end of the rope if the row is out of bounds.
-    ///
-    /// ```
-    /// use gpui_component::{Rope, RopeExt};
-    /// let rope = Rope::from("Hello\nWorld\r\nThis is a test 中文\nRope");
-    /// assert_eq!(rope.line_end_offset(0), 5); // "Hello\n"
-    /// assert_eq!(rope.line_end_offset(1), 12); // "World\r\n"
-    /// ```
     fn line_end_offset(&self, row: usize) -> usize;
 
-    /// Return a line slice at the given row (0-based) index. including `\r` if present, but not `\n`.
-    ///
-    /// ```
-    /// use gpui_component::{Rope, RopeExt};
-    /// let rope = Rope::from("Hello\nWorld\r\nThis is a test 中文\nRope");
-    /// assert_eq!(rope.slice_line(0).to_string(), "Hello");
-    /// assert_eq!(rope.slice_line(1).to_string(), "World\r");
-    /// assert_eq!(rope.slice_line(2).to_string(), "This is a test 中文");
-    /// assert_eq!(rope.slice_line(6).to_string(), ""); // out of bounds
-    /// ```
     fn slice_line(&self, row: usize) -> RopeSlice<'_>;
 
     /// Return a slice of rows in the given range (0-based, end exclusive).
@@ -108,16 +76,6 @@ pub trait RopeExt {
     /// ```
     fn slice_lines(&self, rows_range: Range<usize>) -> RopeSlice<'_>;
 
-    /// Return an iterator over all lines in the rope.
-    ///
-    /// Each line slice includes `\r` if present, but not `\n`.
-    ///
-    /// ```
-    /// use gpui_component::{Rope, RopeExt};
-    /// let rope = Rope::from("Hello\nWorld\r\nThis is a test 中文\nRope");
-    /// let lines: Vec<_> = rope.iter_lines().map(|r| r.to_string()).collect();
-    /// assert_eq!(lines, vec!["Hello", "World\r", "This is a test 中文", "Rope"]);
-    /// ```
     fn iter_lines(&self) -> RopeLines<'_>;
 
     /// Return the number of lines in the rope.
@@ -447,10 +405,8 @@ mod tests {
         assert_eq!(rope.slice_line(2).to_string(), "This is a test 中文");
         assert_eq!(rope.slice_line(3).to_string(), "Rope");
 
-        // over bounds
         assert_eq!(rope.slice_line(6).to_string(), "");
 
-        // only have \r end
         let rope = Rope::from("Hello\r");
         assert_eq!(rope.slice_line(0).to_string(), "Hello\r");
         assert_eq!(rope.slice_line(1).to_string(), "");
@@ -465,7 +421,6 @@ mod tests {
         let rope = Rope::from("Single line");
         assert_eq!(rope.lines_len(), 1);
 
-        // only have \r end
         let rope = Rope::from("Hello\r");
         assert_eq!(rope.lines_len(), 1);
     }
@@ -639,10 +594,9 @@ mod tests {
             "Hi\nUniverse\r\nThis is a test 中文\nString"
         );
 
-        // Test for not on a char boundary
         let mut rope = Rope::from("中文");
         rope.replace(0..1, "New");
-        // autocorrect-disable
+
         assert_eq!(rope.to_string(), "New文");
         let mut rope = Rope::from("中文");
         rope.replace(0..2, "New");
@@ -650,7 +604,7 @@ mod tests {
         let mut rope = Rope::from("中文");
         rope.replace(0..3, "New");
         assert_eq!(rope.to_string(), "New文");
-        // autocorrect-enable
+
         let mut rope = Rope::from("中文");
         rope.replace(1..4, "New");
         assert_eq!(rope.to_string(), "New");
@@ -659,22 +613,19 @@ mod tests {
     #[test]
     fn test_clip_offset() {
         let rope = Rope::from("Hello 中文🎉 test\nRope");
-        // Inside multi-byte character '中' (3 bytes)
+
         assert_eq!(rope.clip_offset(5, Bias::Left), 5);
         assert_eq!(rope.clip_offset(7, Bias::Left), 6);
         assert_eq!(rope.clip_offset(7, Bias::Right), 9);
         assert_eq!(rope.clip_offset(9, Bias::Left), 9);
 
-        // Inside multi-byte character '🎉' (4 bytes)
         assert_eq!(rope.clip_offset(13, Bias::Left), 12);
         assert_eq!(rope.clip_offset(13, Bias::Right), 16);
         assert_eq!(rope.clip_offset(16, Bias::Left), 16);
 
-        // At character boundary
         assert_eq!(rope.clip_offset(5, Bias::Left), 5);
         assert_eq!(rope.clip_offset(5, Bias::Right), 5);
 
-        // Out of bounds
         assert_eq!(rope.clip_offset(26, Bias::Left), 26);
         assert_eq!(rope.clip_offset(100, Bias::Left), 26);
     }

@@ -20,7 +20,6 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-/// A number input element with increment and decrement buttons.
 #[derive(IntoElement)]
 pub struct NumberInput {
     state: Entity<InputState>,
@@ -34,7 +33,7 @@ pub struct NumberInput {
 }
 
 impl NumberInput {
-    /// Create a new [`NumberInput`] element bind to the [`InputState`].
+
     pub fn new(state: &Entity<InputState>) -> Self {
         Self {
             state: state.clone(),
@@ -48,25 +47,21 @@ impl NumberInput {
         }
     }
 
-    /// Set the placeholder text of the number input.
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
-    /// Set the prefix element of the number input.
     pub fn prefix(mut self, prefix: impl IntoElement) -> Self {
         self.prefix = Some(prefix.into_any_element());
         self
     }
 
-    /// Set the suffix element of the number input.
     pub fn suffix(mut self, suffix: impl IntoElement) -> Self {
         self.suffix = Some(suffix.into_any_element());
         self
     }
 
-    /// Set the appearance of the number input, if false will no border and background.
     pub fn appearance(mut self, appearance: bool) -> Self {
         self.appearance = appearance;
         self

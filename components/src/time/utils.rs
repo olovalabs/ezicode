@@ -44,29 +44,19 @@ pub(crate) fn days_in_month(year: i32, month: u32) -> Vec<Vec<NaiveDate>> {
     let num_days = date.days_in_month();
     let start_weekday = date.weekday().num_days_from_sunday();
 
-    // Get the days in the month, 2023-02 will returns
-    // "29|30|31| 1| 2| 3| 4",
-    // " 5| 6| 7| 8| 9|10|11",
-    // "12|13|14|15|16|17|18",
-    // "19|20|21|22|23|24|25",
-    // "26|27|28| 1| 2| 3| 4",
     let mut days = vec![];
     for n in 0..5 {
         let mut week_days = vec![];
         for weekday in 0..7 {
             let (mut y, mut m) = (year, month);
 
-            // If the day is less than the start weekday, we need to go back to the previous month.
             if n == 0 && weekday < start_weekday {
                 m = if m == 1 { 12 } else { m - 1 };
                 y = if m == 1 { year - 1 } else { y };
             }
 
-            // If start_weekday is 3, and n is 0 and weekday is 3, then day is 1.
-            // If start_weekday is 3, and n is 1 and weekday is 4, then day is 9.
             let day = n * 7 + weekday as i32 - start_weekday as i32;
 
-            // If the day is greater than the number of days in the month, we need to go to the next month.
             if day > num_days {
                 m = if m == 12 { 1 } else { m + 1 };
                 y = if m == 1 { year + 1 } else { y };

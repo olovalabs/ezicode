@@ -35,7 +35,6 @@ impl<T> Bar<T> {
         Self::default()
     }
 
-    /// Set the data of the Bar.
     pub fn data<I>(mut self, data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -44,7 +43,6 @@ impl<T> Bar<T> {
         self
     }
 
-    /// Set the x of the Bar.
     pub fn x<F>(mut self, x: F) -> Self
     where
         F: Fn(&T) -> Option<f32> + 'static,
@@ -68,7 +66,6 @@ impl<T> Bar<T> {
         self
     }
 
-    /// Set the y1 of the Bar.
     pub fn y1<F>(mut self, y: F) -> Self
     where
         F: Fn(&T) -> Option<f32> + 'static,
@@ -87,7 +84,6 @@ impl<T> Bar<T> {
         self
     }
 
-    /// Set the label of the Bar.
     pub fn label<F>(mut self, label: F) -> Self
     where
         F: Fn(&T, Point<Pixels>) -> Vec<Text> + 'static,

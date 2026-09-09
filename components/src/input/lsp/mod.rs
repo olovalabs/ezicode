@@ -17,19 +17,16 @@ pub use definitions::*;
 pub use document_colors::*;
 pub use hover::*;
 
-/// LSP ServerCapabilities
-///
-/// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities
 pub struct Lsp {
-    /// The completion provider.
+
     pub completion_provider: Option<Rc<dyn CompletionProvider>>,
-    /// The code action providers.
+
     pub code_action_providers: Vec<Rc<dyn CodeActionProvider>>,
-    /// The hover provider.
+
     pub hover_provider: Option<Rc<dyn HoverProvider>>,
-    /// The definition provider.
+
     pub definition_provider: Option<Rc<dyn DefinitionProvider>>,
-    /// The document color provider.
+
     pub document_color_provider: Option<Rc<dyn DocumentColorProvider>>,
 
     document_colors: Vec<(lsp_types::Range, Hsla)>,
@@ -53,7 +50,7 @@ impl Default for Lsp {
 }
 
 impl Lsp {
-    /// Update the LSP when the text changes.
+
     pub(crate) fn update(
         &mut self,
         text: &Rope,
@@ -63,7 +60,6 @@ impl Lsp {
         self.update_document_colors(text, window, cx);
     }
 
-    /// Reset all LSP states.
     pub(crate) fn reset(&mut self) {
         self.document_colors.clear();
         self._hover_task = Task::ready(Ok(()));
@@ -86,9 +82,6 @@ impl InputState {
         menu.is_open(cx)
     }
 
-    /// Handles an action for the completion menu, if it exists.
-    ///
-    /// Return true if the action was handled, otherwise false.
     pub fn handle_action_for_context_menu(
         &mut self,
         action: Box<dyn gpui::Action>,
@@ -118,7 +111,6 @@ impl InputState {
         handled
     }
 
-    /// Apply a list of [`lsp_types::TextEdit`] to mutate the text.
     pub fn apply_lsp_edits(
         &mut self,
         text_edits: &Vec<lsp_types::TextEdit>,

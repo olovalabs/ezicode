@@ -6,11 +6,6 @@ use gpui::{
 
 use crate::AxisExt;
 
-/// Make a scrollable mask element to cover the parent view with the mouse wheel event listening.
-///
-/// When the mouse wheel is scrolled, will move the `scroll_handle` scrolling with the `axis` direction.
-/// You can use this `scroll_handle` to control what you want to scroll.
-/// This is only can handle once axis scrolling.
 pub struct ScrollableMask {
     axis: Axis,
     scroll_handle: ScrollHandle,
@@ -18,7 +13,7 @@ pub struct ScrollableMask {
 }
 
 impl ScrollableMask {
-    /// Create a new scrollable mask element.
+
     pub fn new(axis: Axis, scroll_handle: &ScrollHandle) -> Self {
         Self {
             scroll_handle: scroll_handle.clone(),
@@ -27,7 +22,6 @@ impl ScrollableMask {
         }
     }
 
-    /// Enable the debug border, to show the mask bounds.
     #[allow(dead_code)]
     pub fn debug(mut self) -> Self {
         self.debug = Some(gpui::yellow());
@@ -63,7 +57,7 @@ impl Element for ScrollableMask {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
-        // Set the layout style relative to the table view to get same size.
+
         style.position = Position::Absolute;
         style.flex_grow = 1.0;
         style.flex_shrink = 1.0;
@@ -82,7 +76,7 @@ impl Element for ScrollableMask {
         window: &mut Window,
         _: &mut App,
     ) -> Self::PrepaintState {
-        // Move y to bounds height to cover the parent view.
+
         let cover_bounds = Bounds {
             origin: Point {
                 x: bounds.origin.x,
@@ -132,9 +126,6 @@ impl Element for ScrollableMask {
                     let mut offset = scroll_handle.offset();
                     let mut delta = event.delta.pixel_delta(line_height);
 
-                    // Limit for only one way scrolling at same time.
-                    // When use MacBook touchpad we may get both x and y delta,
-                    // only allows the one that more to scroll.
                     if !delta.x.is_zero() && !delta.y.is_zero() {
                         if delta.x.abs() > delta.y.abs() {
                             delta.y = px(0.);

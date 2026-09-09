@@ -228,26 +228,16 @@ impl ColorPicker {
         self
     }
 
-    /// Set the icon to the color picker button.
-    ///
-    /// If this is set the color picker button will display the icon.
-    /// Else it will display the square color of the current value.
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.icon = Some(icon.into());
         self
     }
 
-    /// Set the label to be displayed above the color picker.
-    ///
-    /// Default is `None`.
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    /// Set the anchor corner of the color picker.
-    ///
-    /// Default is `Corner::TopLeft`.
     pub fn anchor(mut self, anchor: Corner) -> Self {
         self.anchor = anchor;
         self
@@ -310,7 +300,7 @@ impl ColorPicker {
         ]);
 
         let state = self.state.clone();
-        // If the input value is empty, fill it with the current value.
+
         let input_value = state.read(cx).state.read(cx).value();
         if input_value.is_empty()
             && let Some(value) = state.read(cx).value

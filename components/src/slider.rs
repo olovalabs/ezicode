@@ -26,17 +26,10 @@ impl Render for DragSlider {
     }
 }
 
-/// Events emitted by the [`SliderState`].
 pub enum SliderEvent {
     Change(SliderValue),
 }
 
-/// The value of the slider, can be a single value or a range of values.
-///
-/// - Can from a f32 value, which will be treated as a single value.
-/// - Or from a (f32, f32) tuple, which will be treated as a range of values.
-///
-/// The default value is `SliderValue::Single(0.0)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SliderValue {
     Single(f32),
@@ -297,8 +290,6 @@ impl SliderState {
         }
     }
 
-    /// Converts a value between the minimum and maximum value to a value between 0.0 and 1.0,
-    /// depending on the chosen scale.
     fn value_to_percentage(&self, value: f32) -> f32 {
         match self.scale {
             SliderScale::Linear => {
@@ -331,7 +322,6 @@ impl SliderState {
         }
     }
 
-    /// Update value by mouse position
     fn update_value_by_position(
         &mut self,
         axis: Axis,
@@ -379,7 +369,6 @@ impl Render for SliderState {
     }
 }
 
-/// A Slider element.
 #[derive(IntoElement)]
 pub struct Slider {
     state: Entity<SliderState>,
@@ -389,7 +378,7 @@ pub struct Slider {
 }
 
 impl Slider {
-    /// Create a new [`Slider`] element bind to the [`SliderState`].
+
     pub fn new(state: &Entity<SliderState>) -> Self {
         Self {
             axis: Axis::Horizontal,
@@ -399,19 +388,16 @@ impl Slider {
         }
     }
 
-    /// As a horizontal slider.
     pub fn horizontal(mut self) -> Self {
         self.axis = Axis::Horizontal;
         self
     }
 
-    /// As a vertical slider.
     pub fn vertical(mut self) -> Self {
         self.axis = Axis::Vertical;
         self
     }
 
-    /// Set the disabled state of the slider, default: false
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -477,7 +463,6 @@ impl Slider {
                                 return;
                             }
 
-                            // set value by mouse position
                             view.update_value_by_position(
                                 axis,
                                 e.event.position,

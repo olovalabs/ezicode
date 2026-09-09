@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-scale/band
-
 use itertools::Itertools;
 use num_traits::Zero;
 
@@ -32,29 +30,24 @@ impl<T> ScaleBand<T> {
         }
     }
 
-    /// Get the width of the band.
     pub fn band_width(&self) -> f32 {
         (self.avg_width * (1. - self.padding_inner)).min(30.)
     }
 
-    /// Set the padding inner of the band.
     pub fn padding_inner(mut self, padding_inner: f32) -> Self {
         self.padding_inner = padding_inner;
         self
     }
 
-    /// Set the padding outer of the band.
     pub fn padding_outer(mut self, padding_outer: f32) -> Self {
         self.padding_outer = padding_outer;
         self
     }
 
-    /// Get the ratio of the band.
     fn ratio(&self) -> f32 {
         1. + self.padding_inner / (self.domain.len() - 1) as f32
     }
 
-    /// Get the average width of the band for display.
     fn display_avg_width(&self) -> f32 {
         let padding_outer_width = self.avg_width * self.padding_outer;
         (self.range_diff - padding_outer_width * 2.) / self.domain.len() as f32
@@ -69,7 +62,6 @@ where
         let index = self.domain.iter().position(|v| v == value)?;
         let domain_len = self.domain.len();
 
-        // When there's only one element, place it in the center.
         if domain_len == 1 {
             return Some((self.range_diff - self.band_width()) / 2.);
         }
@@ -86,7 +78,6 @@ where
 
         let domain_len = self.domain.len();
 
-        // Handle single element case
         if domain_len == 1 {
             return 0;
         }

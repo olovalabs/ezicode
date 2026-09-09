@@ -20,38 +20,23 @@ pub type DiagnosticTag = lsp_types::DiagnosticTag;
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct Diagnostic {
-    /// The range [`Position`] at which the message applies.
-    ///
-    /// This is the column, character range within a single line.
+
     pub range: Range<Position>,
 
-    /// The diagnostic's severity. Can be omitted. If omitted it is up to the
-    /// client to interpret diagnostics as error, warning, info or hint.
     pub severity: DiagnosticSeverity,
 
-    /// The diagnostic's code. Can be omitted.
     pub code: Option<SharedString>,
 
     pub code_description: Option<CodeDescription>,
 
-    /// A human-readable string describing the source of this
-    /// diagnostic, e.g. 'typescript' or 'super lint'.
     pub source: Option<SharedString>,
 
-    /// The diagnostic's message.
     pub message: SharedString,
 
-    /// An array of related diagnostic information, e.g. when symbol-names within
-    /// a scope collide all definitions can be marked via this property.
     pub related_information: Option<Vec<DiagnosticRelatedInformation>>,
 
-    /// Additional metadata about the diagnostic.
     pub tags: Option<Vec<DiagnosticTag>>,
 
-    /// A data entry field that is preserved between a `textDocument/publishDiagnostics`
-    /// notification and `textDocument/codeAction` request.
-    ///
-    /// @since 3.16.0
     pub data: Option<serde_json::Value>,
 }
 
@@ -93,7 +78,7 @@ impl From<lsp_types::DiagnosticSeverity> for DiagnosticSeverity {
             lsp_types::DiagnosticSeverity::WARNING => Self::Warning,
             lsp_types::DiagnosticSeverity::INFORMATION => Self::Info,
             lsp_types::DiagnosticSeverity::HINT => Self::Hint,
-            _ => Self::Info, // Default to Info if unknown
+            _ => Self::Info,
         }
     }
 }
@@ -179,7 +164,7 @@ impl Diagnostic {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct DiagnosticEntry {
-    /// The byte range of the diagnostic in the rope.
+
     pub range: Range<usize>,
     pub diagnostic: Diagnostic,
 }
@@ -227,7 +212,6 @@ impl sum_tree::Summary for DiagnosticSummary {
     }
 }
 
-/// For seeking by byte range.
 impl SeekTarget<'_, DiagnosticSummary, DiagnosticSummary> for usize {
     fn cmp(&self, other: &DiagnosticSummary, _: &()) -> Ordering {
         if *self < other.start {

@@ -8,7 +8,6 @@ use gpui::{
 
 use crate::{h_flex, v_flex, ActiveTheme as _, Icon, IconName, Sizable, Size};
 
-/// Accordion element.
 #[derive(IntoElement)]
 pub struct Accordion {
     id: ElementId,
@@ -21,7 +20,7 @@ pub struct Accordion {
 }
 
 impl Accordion {
-    /// Create a new Accordion with the given ID.
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -34,25 +33,21 @@ impl Accordion {
         }
     }
 
-    /// Set whether multiple accordion items can be opened simultaneously, default: false
     pub fn multiple(mut self, multiple: bool) -> Self {
         self.multiple = multiple;
         self
     }
 
-    /// Set whether the accordion items have borders, default: true
     pub fn bordered(mut self, bordered: bool) -> Self {
         self.bordered = bordered;
         self
     }
 
-    /// Set whether the accordion is disabled, default: false
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Adds an AccordionItem to the Accordion.
     pub fn item<F>(mut self, child: F) -> Self
     where
         F: FnOnce(AccordionItem) -> AccordionItem,
@@ -62,9 +57,6 @@ impl Accordion {
         self
     }
 
-    /// Sets the on_toggle_click callback for the AccordionGroup.
-    ///
-    /// The first argument `Vec<usize>` is the indices of the open accordions.
     pub fn on_toggle_click(
         mut self,
         on_toggle_click: impl Fn(&[usize], &mut Window, &mut App) + Send + Sync + 'static,

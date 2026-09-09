@@ -4,7 +4,6 @@ use gpui::{
     prelude::FluentBuilder, px, relative,
 };
 
-/// A Progress bar element.
 #[derive(IntoElement)]
 pub struct Progress {
     style: StyleRefinement,
@@ -13,7 +12,7 @@ pub struct Progress {
 }
 
 impl Progress {
-    /// Create a new Progress bar.
+
     pub fn new() -> Self {
         Progress {
             value: Default::default(),
@@ -22,15 +21,11 @@ impl Progress {
         }
     }
 
-    /// Set the color of the progress bar.
     pub fn bg(mut self, color: impl Into<Hsla>) -> Self {
         self.color = Some(color.into());
         self
     }
 
-    /// Set the percentage value of the progress bar.
-    ///
-    /// The value should be between 0.0 and 100.0.
     pub fn value(mut self, value: f32) -> Self {
         self.value = value.clamp(0., 100.);
         self

@@ -24,74 +24,62 @@ enum SelectionState {
     Row,
 }
 
-/// The Table event.
 #[derive(Clone)]
 pub enum TableEvent {
-    /// Single click or move to selected row.
+
     SelectRow(usize),
-    /// Double click on the row.
+
     DoubleClickedRow(usize),
-    /// Selected column.
+
     SelectColumn(usize),
-    /// The column widths have changed.
-    ///
-    /// The `Vec<Pixels>` contains the new widths of all columns.
+
     ColumnWidthsChanged(Vec<Pixels>),
-    /// A column has been moved.
-    ///
-    /// The first `usize` is the original index of the column,
-    /// and the second `usize` is the new index of the column.
+
     MoveColumn(usize, usize),
 }
 
-/// The visible range of the rows and columns.
 #[derive(Debug, Default)]
 pub struct TableVisibleRange {
-    /// The visible range of the rows.
+
     rows: Range<usize>,
-    /// The visible range of the columns.
+
     cols: Range<usize>,
 }
 
 impl TableVisibleRange {
-    /// Returns the visible range of the rows.
+
     pub fn rows(&self) -> &Range<usize> {
         &self.rows
     }
 
-    /// Returns the visible range of the columns.
     pub fn cols(&self) -> &Range<usize> {
         &self.cols
     }
 }
 
-/// The state for [`Table`].
 pub struct TableState<D: TableDelegate> {
     focus_handle: FocusHandle,
     delegate: D,
     pub(super) options: TableOptions,
-    /// The bounds of the table container.
+
     bounds: Bounds<Pixels>,
-    /// The bounds of the fixed head cols.
+
     fixed_head_cols_bounds: Bounds<Pixels>,
 
     col_groups: Vec<ColGroup>,
 
-    /// Whether the table can loop selection, default is true.
-    ///
-    /// When the prev/next selection is out of the table bounds, the selection will loop to the other side.
     pub loop_selection: bool,
-    /// Whether the table can select column.
+
     pub col_selectable: bool,
-    /// Whether the table can select row.
+
     pub row_selectable: bool,
-    /// Whether the table can sort.
+
     pub sortable: bool,
-    /// Whether the table can resize columns.
+
     pub col_resizable: bool,
-    /// Whether the table can move columns.
+
     pub col_movable: bool,
-    /// Enable/disable fixed columns feature.
+
     pub col_fixed: bool,
 
     pub vertical_scroll_handle: UniformListScrollHandle,
@@ -102,10 +90,8 @@ pub struct TableState<D: TableDelegate> {
     right_clicked_row: Option<usize>,
     selected_col: Option<usize>,
 
-    /// The column index that is being resized.
     resizing_col: Option<usize>,
 
-    /// The visible range of the rows and columns.
     visible_range: TableVisibleRange,
 
     _measure: Vec<Duration>,
@@ -116,7 +102,7 @@ impl<D> TableState<D>
 where
     D: TableDelegate,
 {
-    /// Create a new TableState with the given delegate.
+
     pub fn new(delegate: D, _: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut this = Self {
             focus_handle: cx.focus_handle(),
@@ -148,65 +134,54 @@ where
         this
     }
 
-    /// Returns a reference to the delegate.
     pub fn delegate(&self) -> &D {
         &self.delegate
     }
 
-    /// Returns a mutable reference to the delegate.
     pub fn delegate_mut(&mut self) -> &mut D {
         &mut self.delegate
     }
 
-    /// Set to loop selection, default to true.
     pub fn loop_selection(mut self, loop_selection: bool) -> Self {
         self.loop_selection = loop_selection;
         self
     }
 
-    /// Set to enable/disable column movable, default to true.
     pub fn col_movable(mut self, col_movable: bool) -> Self {
         self.col_movable = col_movable;
         self
     }
 
-    /// Set to enable/disable column resizable, default to true.
     pub fn col_resizable(mut self, col_resizable: bool) -> Self {
         self.col_resizable = col_resizable;
         self
     }
 
-    /// Set to enable/disable column sortable, default true
     pub fn sortable(mut self, sortable: bool) -> Self {
         self.sortable = sortable;
         self
     }
 
-    /// Set to enable/disable row selectable, default true
     pub fn row_selectable(mut self, row_selectable: bool) -> Self {
         self.row_selectable = row_selectable;
         self
     }
 
-    /// Set to enable/disable column selectable, default true
     pub fn col_selectable(mut self, col_selectable: bool) -> Self {
         self.col_selectable = col_selectable;
         self
     }
 
-    /// When we update columns or rows, we need to refresh the table.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.prepare_col_groups(cx);
     }
 
-    /// Scroll to the row at the given index.
     pub fn scroll_to_row(&mut self, row_ix: usize, cx: &mut Context<Self>) {
         self.vertical_scroll_handle
             .scroll_to_item(row_ix, ScrollStrategy::Top);
         cx.notify();
     }
 
-    // Scroll to the column at the given index.
     pub fn scroll_to_col(&mut self, col_ix: usize, cx: &mut Context<Self>) {
         let col_ix = col_ix.saturating_sub(self.fixed_left_cols_count());
 
@@ -215,12 +190,10 @@ where
         cx.notify();
     }
 
-    /// Returns the selected row index.
     pub fn selected_row(&self) -> Option<usize> {
         self.selected_row
     }
 
-    /// Sets the selected row to the given index.
     pub fn set_selected_row(&mut self, row_ix: usize, cx: &mut Context<Self>) {
         let is_down = match self.selected_row {
             Some(selected_row) => row_ix > selected_row,
@@ -244,12 +217,10 @@ where
         cx.notify();
     }
 
-    /// Returns the selected column index.
     pub fn selected_col(&self) -> Option<usize> {
         self.selected_col
     }
 
-    /// Sets the selected col to the given index.
     pub fn set_selected_col(&mut self, col_ix: usize, cx: &mut Context<Self>) {
         self.selection_state = SelectionState::Column;
         self.selected_col = Some(col_ix);
@@ -260,7 +231,6 @@ where
         cx.notify();
     }
 
-    /// Clear the selection of the table.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         self.selection_state = SelectionState::Row;
         self.selected_row = None;
@@ -268,9 +238,6 @@ where
         cx.notify();
     }
 
-    /// Returns the visible range of the rows and columns.
-    ///
-    /// See [`TableVisibleRange`].
     pub fn visible_range(&self) -> &TableVisibleRange {
         &self.visible_range
     }
@@ -437,13 +404,12 @@ where
         self.set_selected_col(selected_col, cx);
     }
 
-    /// Scroll table when mouse position is near the edge of the table bounds.
     fn scroll_table_by_col_resizing(
         &mut self,
         mouse_position: Point<Pixels>,
         col_group: &ColGroup,
     ) {
-        // Do nothing if pos out of the table bounds right for avoid scroll to the right.
+
         if mouse_position.x > self.bounds.right() {
             return;
         }
@@ -464,8 +430,6 @@ where
         self.horizontal_scroll_handle.set_offset(offset);
     }
 
-    /// The `ix`` is the index of the col to resize,
-    /// and the `size` is the new size for the col.
     fn resize_cols(&mut self, ix: usize, size: Pixels, _: &mut Window, cx: &mut Context<Self>) {
         if !self.col_resizable {
             return;
@@ -488,7 +452,7 @@ where
             return;
         }
         let changed_width = new_width - old_width;
-        // If change size is less than 1px, do nothing.
+
         if changed_width > px(-1.0) && changed_width < px(1.0) {
             return;
         }
@@ -548,7 +512,6 @@ where
         cx.notify();
     }
 
-    /// Dispatch delegate's `load_more` method when the visible range is near the end.
     fn load_more_if_need(
         &mut self,
         rows_count: usize,
@@ -557,7 +520,7 @@ where
         cx: &mut Context<Self>,
     ) {
         let threshold = self.delegate.load_more_threshold();
-        // Securely handle subtract logic to prevent attempt to subtract with overflow
+
         if visible_end >= rows_count.saturating_sub(threshold) {
             if !self.delegate.is_eof(cx) {
                 return;
@@ -578,8 +541,7 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Skip when visible range is only 1 item.
-        // The visual_list will use first item to measure.
+
         if visible_range.len() <= 1 {
             return;
         }
@@ -626,7 +588,6 @@ where
             })
     }
 
-    /// Show Column selection style, when the column is selected and the selection state is Column.
     fn render_col_wrap(&self, col_ix: usize, _: &mut Window, cx: &mut Context<Self>) -> Div {
         let el = h_flex().h_full();
         let selectable = self.col_selectable
@@ -692,12 +653,6 @@ where
                                 return;
                             }
 
-                            // sync col widths into real widths
-                            // TODO: Consider to remove this, this may not need now.
-                            // for (_, col_group) in view.col_groups.iter_mut().enumerate() {
-                            //     col_group.width = col_group.bounds.size.width;
-                            // }
-
                             let ix = *ix;
                             view.resizing_col = Some(ix);
 
@@ -714,7 +669,6 @@ where
                                 cx,
                             );
 
-                            // scroll the table if the drag is near the edge
                             view.scroll_table_by_col_resizing(e.event.position, &col_group);
                         }
                     };
@@ -784,10 +738,6 @@ where
         )
     }
 
-    /// Render the column header.
-    /// The children must be one by one items.
-    /// Because the horizontal scroll handle will use the child_item_bounds to
-    /// calculate the item position for itself's `scroll_to_item` method.
     fn render_th(&mut self, col_ix: usize, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let entity_id = cx.entity_id();
         let col_group = self.col_groups.get(col_ix).expect("BUG: invalid col index");
@@ -811,7 +761,7 @@ where
                             .items_center()
                             .child(self.delegate.render_th(col_ix, window, cx))
                             .when_some(paddings, |this, paddings| {
-                                // Leave right space for the sort icon, if this column have custom padding
+
                                 let offset_pr =
                                     self.options.size.table_cell_padding().right - paddings.right;
                                 this.pr(offset_pr.max(px(0.)))
@@ -839,7 +789,7 @@ where
                         })
                         .on_drop(cx.listener(
                             move |table, drag: &DragColumn, window, cx| {
-                                // If the drag col is not the same as the drop col, then swap the cols.
+
                                 if drag.entity_id != cx.entity_id() {
                                     return;
                                 }
@@ -849,9 +799,9 @@ where
                         ))
                     }),
             )
-            // resize handle
+
             .child(self.render_resize_handle(col_ix, window, cx))
-            // to save the bounds of this col.
+
             .child({
                 let view = cx.entity().clone();
                 canvas(
@@ -874,7 +824,6 @@ where
         let view = cx.entity().clone();
         let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
 
-        // Reset fixed head columns bounds, if no fixed columns are present
         if left_columns_count == 0 {
             self.fixed_head_cols_bounds = Bounds::default();
         }
@@ -893,7 +842,7 @@ where
             .refine_style(&style)
             .when(left_columns_count > 0, |this| {
                 let view = view.clone();
-                // Render left fixed columns
+
                 this.child(
                     h_flex()
                         .relative()
@@ -908,7 +857,7 @@ where
                                 .map(|(col_ix, _)| self.render_th(col_ix, window, cx)),
                         )
                         .child(
-                            // Fixed columns border
+
                             div()
                                 .absolute()
                                 .top_0()
@@ -932,7 +881,7 @@ where
                 )
             })
             .child(
-                // Columns
+
                 h_flex()
                     .id("table-head")
                     .size_full()
@@ -999,7 +948,7 @@ where
                     }
                 })
                 .when(left_columns_count > 0, |this| {
-                    // Left fixed columns
+
                     this.child(
                         h_flex()
                             .relative()
@@ -1018,7 +967,7 @@ where
                                 items
                             })
                             .child(
-                                // Fixed columns border
+
                                 div()
                                     .absolute()
                                     .top_0()
@@ -1078,7 +1027,7 @@ where
                         )
                         .child(self.delegate.render_last_empty_col(window, cx)),
                 )
-                // Row selected style
+
                 .when_some(self.selected_row, |this, _| {
                     this.when(
                         is_selected && self.selection_state == SelectionState::Row,
@@ -1097,7 +1046,7 @@ where
                         },
                     )
                 })
-                // Row right click row style
+
                 .when(self.right_clicked_row == Some(row_ix), |this| {
                     this.border_color(gpui::transparent_white()).child(
                         div()
@@ -1120,7 +1069,7 @@ where
                     this.on_row_left_click(e, row_ix, window, cx);
                 }))
         } else {
-            // Render fake rows to fill the rest table space
+
             self.delegate
                 .render_tr(row_ix, window, cx)
                 .h_flex()
@@ -1138,7 +1087,6 @@ where
         }
     }
 
-    /// Calculate the extra rows needed to fill the table empty space when `stripe` is true.
     fn calculate_extra_rows_needed(
         &self,
         total_height: Pixels,
@@ -1181,7 +1129,6 @@ where
             return;
         }
 
-        // Print avg measure time of each td
         if self._measure.len() > 0 {
             let total = self
                 ._measure
@@ -1327,8 +1274,7 @@ where
                                 render_rows_count,
                                 cx.processor(
                                     move |table, visible_range: Range<usize>, window, cx| {
-                                        // We must calculate the col sizes here, because the col sizes
-                                        // need render_th first, then that method will set the bounds of each col.
+
                                         let col_sizes: Rc<Vec<gpui::Size<Pixels>>> = Rc::new(
                                             table
                                                 .col_groups
@@ -1365,9 +1311,8 @@ where
                                             visible_range.end.saturating_sub(visible_range.start),
                                         );
 
-                                        // Render fake rows to fill the table
                                         visible_range.for_each(|row_ix| {
-                                            // Render real rows for available data
+
                                             items.push(table.render_table_row(
                                                 row_ix,
                                                 rows_count,

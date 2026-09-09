@@ -1,10 +1,3 @@
-//! VS Code & Zed-style persistent settings system.
-//!
-//! Stores user configuration in a platform-standard `settings.json`:
-//! - Windows: `%APPDATA%/ezicode/settings.json`
-//! - macOS:   `~/Library/Application Support/ezicode/settings.json`
-//! - Linux:   `~/.config/ezicode/settings.json`
-
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 

@@ -12,7 +12,6 @@ use crate::{
     ActiveTheme as _, Icon, IconName, Sizable, Size, StyledExt,
 };
 
-/// The variant of the [`Alert`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AlertVariant {
     #[default]
@@ -55,7 +54,6 @@ impl AlertVariant {
     }
 }
 
-/// Alert used to display a message to the user.
 #[derive(IntoElement)]
 pub struct Alert {
     id: ElementId,

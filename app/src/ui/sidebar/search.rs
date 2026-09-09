@@ -1,5 +1,3 @@
-//! Search panel placeholder (real search lives in the editor via Ctrl+F).
-
 use gpui::{div, prelude::*, px, rgba, AnyElement, Div, SharedString};
 
 use crate::theme::Colors;

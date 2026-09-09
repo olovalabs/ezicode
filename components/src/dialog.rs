@@ -30,7 +30,6 @@ type RenderButtonFn = Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement>;
 type FooterFn =
     Box<dyn Fn(RenderButtonFn, RenderButtonFn, &mut Window, &mut App) -> Vec<AnyElement>>;
 
-/// Dialog button props.
 pub struct DialogButtonProps {
     ok_text: Option<SharedString>,
     ok_variant: ButtonVariant,
@@ -50,32 +49,28 @@ impl Default for DialogButtonProps {
 }
 
 impl DialogButtonProps {
-    /// Sets the text of the OK button. Default is `OK`.
+
     pub fn ok_text(mut self, ok_text: impl Into<SharedString>) -> Self {
         self.ok_text = Some(ok_text.into());
         self
     }
 
-    /// Sets the variant of the OK button. Default is `ButtonVariant::Primary`.
     pub fn ok_variant(mut self, ok_variant: ButtonVariant) -> Self {
         self.ok_variant = ok_variant;
         self
     }
 
-    /// Sets the text of the Cancel button. Default is `Cancel`.
     pub fn cancel_text(mut self, cancel_text: impl Into<SharedString>) -> Self {
         self.cancel_text = Some(cancel_text.into());
         self
     }
 
-    /// Sets the variant of the Cancel button. Default is `ButtonVariant::default()`.
     pub fn cancel_variant(mut self, cancel_variant: ButtonVariant) -> Self {
         self.cancel_variant = cancel_variant;
         self
     }
 }
 
-/// A modal to display content in a dialog box.
 #[derive(IntoElement)]
 pub struct Dialog {
     style: StyleRefinement,
@@ -162,33 +157,23 @@ impl Dialog {
         self
     }
 
-    /// Set to use confirm dialog, with OK and Cancel buttons.
-    ///
-    /// See also [`Self::alert`]
     pub fn confirm(self) -> Self {
         self.footer(|ok, cancel, window, cx| vec![cancel(window, cx), ok(window, cx)])
             .overlay_closable(false)
             .close_button(false)
     }
 
-    /// Set to as a alter dialog, with OK button.
-    ///
-    /// See also [`Self::confirm`]
     pub fn alert(self) -> Self {
         self.footer(|ok, _, window, cx| vec![ok(window, cx)])
             .overlay_closable(false)
             .close_button(false)
     }
 
-    /// Set the button props of the dialog.
     pub fn button_props(mut self, button_props: DialogButtonProps) -> Self {
         self.button_props = button_props;
         self
     }
 
-    /// Sets the callback for when the dialog is closed.
-    ///
-    /// Called after [`Self::on_ok`] or [`Self::on_cancel`] callback.
     pub fn on_close(
         mut self,
         on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -208,9 +193,6 @@ impl Dialog {
         self
     }
 
-    /// Sets the callback for when the dialog is has been canceled.
-    ///
-    /// The callback should return `true` to close the dialog, if return `false` the dialog will not be closed.
     pub fn on_cancel(
         mut self,
         on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static,
@@ -527,7 +509,7 @@ impl RenderOnce for Dialog {
                             })
                             .with_animation("slide-down", animation.clone(), move |this, delta| {
                                 let y_offset = px(0.) + delta * px(30.);
-                                // This is equivalent to `shadow_xl` with an extra opacity.
+
                                 let shadow = vec![
                                     BoxShadow {
                                         color: hsla(0., 0., 0., 0.1 * delta),

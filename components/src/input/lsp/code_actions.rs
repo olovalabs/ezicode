@@ -9,14 +9,9 @@ use crate::input::{
 };
 
 pub trait CodeActionProvider {
-    /// The id for this CodeAction.
+
     fn id(&self) -> SharedString;
 
-    /// Fetches code actions for the specified range.
-    ///
-    /// textDocument/codeAction
-    ///
-    /// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_codeAction
     fn code_actions(
         &self,
         state: Entity<InputState>,
@@ -25,7 +20,6 @@ pub trait CodeActionProvider {
         cx: &mut App,
     ) -> Task<Result<Vec<CodeAction>>>;
 
-    /// Performs the specified code action.
     fn perform_code_action(
         &self,
         state: Entity<InputState>,
@@ -46,7 +40,6 @@ impl InputState {
         self.handle_code_action_trigger(window, cx)
     }
 
-    /// Show code actions for the cursor.
     pub(crate) fn handle_code_action_trigger(
         &mut self,
         window: &mut Window,

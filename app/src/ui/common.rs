@@ -1,11 +1,7 @@
-//! Small building blocks shared across panels.
-
 use gpui::{div, img, prelude::*, px, rgba, Div, FontWeight, IntoElement, SharedString};
 
 use crate::theme::Colors;
 
-/// Renders an embedded SVG asset at a fixed size, preserving its own colors.
-/// (`img()` rasterizes full-color; `svg()` would tint everything one color.)
 pub(crate) fn icon_img(path: &'static str, size: f32) -> impl IntoElement {
     div()
         .flex_none()
@@ -27,7 +23,6 @@ pub(crate) fn panel_header(label: &'static str, t: &Colors) -> Div {
         .child(SharedString::from(label))
 }
 
-/// Non-interactive stand-in for a text input (placeholder panels).
 pub(crate) fn mock_input(text: &'static str, h: f32, t: &Colors) -> Div {
     div()
         .h(px(h))

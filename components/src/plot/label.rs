@@ -37,19 +37,16 @@ impl Text {
         }
     }
 
-    /// Set the font size of the Text.
     pub fn font_size(mut self, font_size: impl Into<Pixels>) -> Self {
         self.font_size = font_size.into();
         self
     }
 
-    /// Set the font weight of the Text.
     pub fn font_weight(mut self, font_weight: FontWeight) -> Self {
         self.font_weight = font_weight;
         self
     }
 
-    /// Set the alignment of the Text.
     pub fn align(mut self, align: TextAlign) -> Self {
         self.align = align;
         self
@@ -73,7 +70,6 @@ impl PlotLabel {
         Self(items)
     }
 
-    /// Paint the Label.
     pub fn paint(&self, bounds: &Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         for Text {
             text,

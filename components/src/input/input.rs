@@ -17,7 +17,6 @@ use crate::{Sizable, StyleSized};
 
 use super::InputState;
 
-/// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
     state: Entity<InputState>,
@@ -55,7 +54,7 @@ impl Selectable for Input {
 }
 
 impl Input {
-    /// Create a new [`Input`] element bind to the [`InputState`].
+
     pub fn new(state: &Entity<InputState>) -> Self {
         Self {
             state: state.clone(),
@@ -85,55 +84,46 @@ impl Input {
         self
     }
 
-    /// Set full height of the input (Multi-line only).
     pub fn h_full(mut self) -> Self {
         self.height = Some(relative(1.));
         self
     }
 
-    /// Set height of the input (Multi-line only).
     pub fn h(mut self, height: impl Into<DefiniteLength>) -> Self {
         self.height = Some(height.into());
         self
     }
 
-    /// Set the appearance of the input field, if false the input field will no border, background.
     pub fn appearance(mut self, appearance: bool) -> Self {
         self.appearance = appearance;
         self
     }
 
-    /// Set the bordered for the input, default: true
     pub fn bordered(mut self, bordered: bool) -> Self {
         self.bordered = bordered;
         self
     }
 
-    /// Set focus border for the input, default is true.
     pub fn focus_bordered(mut self, bordered: bool) -> Self {
         self.focus_bordered = bordered;
         self
     }
 
-    /// Set whether to show the clear button when the input field is not empty, default is false.
     pub fn cleanable(mut self, cleanable: bool) -> Self {
         self.cleanable = cleanable;
         self
     }
 
-    /// Set to enable toggle button for password mask state.
     pub fn mask_toggle(mut self) -> Self {
         self.mask_toggle = true;
         self
     }
 
-    /// Set to disable the input field.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Set the tab index for the input, default is 0.
     pub fn tab_index(mut self, index: isize) -> Self {
         self.tab_index = index;
         self
@@ -163,7 +153,6 @@ impl Input {
             })
     }
 
-    /// This method must after the refine_style.
     fn render_editor(
         paddings: EdgesRefinement<DefiniteLength>,
         input_state: &Entity<InputState>,
@@ -201,7 +190,7 @@ impl Input {
                     let left = if last_layout.line_number_width.is_zero() {
                         px(0.)
                     } else {
-                        // Align left edge to the Line number.
+
                         paddings.left + last_layout.line_number_width - LINE_NUMBER_RIGHT_MARGIN
                     };
 

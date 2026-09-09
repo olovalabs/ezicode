@@ -14,7 +14,6 @@ use crate::{
     v_flex,
 };
 
-/// A setting page that can contain multiple setting groups.
 #[derive(Clone)]
 pub struct SettingPage {
     resettable: bool,
@@ -35,39 +34,31 @@ impl SettingPage {
         }
     }
 
-    /// Set the title of the setting page.
     pub fn title(mut self, title: impl Into<SharedString>) -> Self {
         self.title = title.into();
         self
     }
 
-    /// Set the description of the setting page, default is None.
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = Some(description.into());
         self
     }
 
-    /// Set the default open state of the setting page, default is false.
     pub fn default_open(mut self, default_open: bool) -> Self {
         self.default_open = default_open;
         self
     }
 
-    /// Set whether the setting page is resettable, default is true.
-    ///
-    /// If true and the items in this page has changed, the reset button will appear.
     pub fn resettable(mut self, resettable: bool) -> Self {
         self.resettable = resettable;
         self
     }
 
-    /// Add a setting group to the page.
     pub fn group(mut self, group: SettingGroup) -> Self {
         self.groups.push(group);
         self
     }
 
-    /// Add multiple setting groups to the page.
     pub fn groups(mut self, groups: impl IntoIterator<Item = SettingGroup>) -> Self {
         self.groups.extend(groups);
         self

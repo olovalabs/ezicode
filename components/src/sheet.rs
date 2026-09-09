@@ -23,7 +23,6 @@ pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Cancel, Some(CONTEXT))])
 }
 
-/// Sheet component that slides in from the side of the window.
 #[derive(IntoElement)]
 pub struct Sheet {
     pub(crate) focus_handle: FocusHandle,
@@ -181,7 +180,7 @@ impl RenderOnce for Sheet {
                             .border_color(cx.theme().border)
                             .shadow_xl()
                             .map(|this| {
-                                // Set the size of the sheet.
+
                                 if placement.is_horizontal() {
                                     this.h_full().w(self.size)
                                 } else {
@@ -197,7 +196,7 @@ impl RenderOnce for Sheet {
                                 Placement::Left => this.top_0().left_0().bottom_0().border_r_1(),
                             })
                             .child(
-                                // TitleBar
+
                                 h_flex()
                                     .justify_between()
                                     .pl_4()
@@ -218,11 +217,11 @@ impl RenderOnce for Sheet {
                                     ),
                             )
                             .child(
-                                // Body
+
                                 div().flex_1().overflow_scrollbar().child(self.content),
                             )
                             .when_some(self.footer, |this, footer| {
-                                // Footer
+
                                 this.child(
                                     h_flex()
                                         .justify_between()

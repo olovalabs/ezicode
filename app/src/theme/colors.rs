@@ -1,8 +1,3 @@
-//! Color tokens extracted from Zed theme JSON files, named after Zed's theme
-//! keys. Extend [`Colors`], [`KEY_MAP`] and [`Colors::get_mut`] as the UI
-//! grows.
-
-/// The color tokens used by the app, named after Zed's theme keys.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Colors {
     pub background: u32,
@@ -41,7 +36,7 @@ pub struct Colors {
 }
 
 impl Colors {
-    /// Sentinel for "key missing in theme file" so gaps are loud, not silent.
+
     pub(crate) const MISSING: u32 = 0xFF00FF;
 
     pub(crate) fn all_missing() -> Self {
@@ -166,7 +161,6 @@ impl Colors {
     }
 }
 
-/// Field name → Zed theme key.
 pub(crate) const KEY_MAP: &[(&str, &str)] = &[
     ("background", "background"),
     ("surface", "surface.background"),
@@ -203,16 +197,12 @@ pub(crate) const KEY_MAP: &[(&str, &str)] = &[
     ("vc_deleted", "version_control.deleted"),
 ];
 
-/// Defaults for keys some upstream files omit (e.g. Ayu ships without
-/// version_control.*). Zed does the same via its fallback themes.
 pub(crate) const FALLBACKS: &[(&str, u32)] = &[
     ("vc_added", 0x27a657ff),
     ("vc_modified", 0xd3b020ff),
     ("vc_deleted", 0xe06c76ff),
 ];
 
-
-/// Parse `#RRGGBB` and `#RRGGBBAA` (Zed files use the latter) into RGBA8+alpha.
 pub(crate) fn parse_hex(s: &str) -> Option<u32> {
     let hex = s.strip_prefix('#')?;
     if hex.len() == 6 {

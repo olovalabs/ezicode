@@ -57,12 +57,8 @@ impl From<(TypeId, ElementId)> for NotificationId {
     }
 }
 
-/// A notification element.
 pub struct Notification {
-    /// The id is used make the notification unique.
-    /// Then you push a notification with the same id, the previous notification will be replaced.
-    ///
-    /// None means the notification will be added to the end of the list.
+
     id: NotificationId,
     style: StyleRefinement,
     type_: Option<NotificationType>,
@@ -109,9 +105,7 @@ impl From<(NotificationType, SharedString)> for Notification {
 struct DefaultIdType;
 
 impl Notification {
-    /// Create a new notification.
-    ///
-    /// The default id is a random UUID.
+
     pub fn new() -> Self {
         let id: SharedString = uuid::Uuid::new_v4().to_string().into();
         let id = (TypeId::of::<DefaultIdType>(), id.into());
@@ -131,46 +125,35 @@ impl Notification {
         }
     }
 
-    /// Set the message of the notification, default is None.
     pub fn message(mut self, message: impl Into<SharedString>) -> Self {
         self.message = Some(message.into());
         self
     }
 
-    /// Create an info notification with the given message.
     pub fn info(message: impl Into<SharedString>) -> Self {
         Self::new()
             .message(message)
             .with_type(NotificationType::Info)
     }
 
-    /// Create a success notification with the given message.
     pub fn success(message: impl Into<SharedString>) -> Self {
         Self::new()
             .message(message)
             .with_type(NotificationType::Success)
     }
 
-    /// Create a warning notification with the given message.
     pub fn warning(message: impl Into<SharedString>) -> Self {
         Self::new()
             .message(message)
             .with_type(NotificationType::Warning)
     }
 
-    /// Create an error notification with the given message.
     pub fn error(message: impl Into<SharedString>) -> Self {
         Self::new()
             .message(message)
             .with_type(NotificationType::Error)
     }
 
-    /// Set the type for unique identification of the notification.
-    ///
-    /// ```rs
-    /// struct MyNotificationKind;
-    /// let notification = Notification::new("Hello").id::<MyNotificationKind>();
-    /// ```
     pub fn id<T: Sized + 'static>(mut self) -> Self {
         self.id = TypeId::of::<T>().into();
         self
@@ -182,35 +165,26 @@ impl Notification {
         self
     }
 
-    /// Set the title of the notification, default is None.
-    ///
-    /// If title is None, the notification will not have a title.
     pub fn title(mut self, title: impl Into<SharedString>) -> Self {
         self.title = Some(title.into());
         self
     }
 
-    /// Set the icon of the notification.
-    ///
-    /// If icon is None, the notification will use the default icon of the type.
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.icon = Some(icon.into());
         self
     }
 
-    /// Set the type of the notification, default is NotificationType::Info.
     pub fn with_type(mut self, type_: NotificationType) -> Self {
         self.type_ = Some(type_);
         self
     }
 
-    /// Set the auto hide of the notification, default is true.
     pub fn autohide(mut self, autohide: bool) -> Self {
         self.autohide = autohide;
         self
     }
 
-    /// Set the click callback of the notification.
     pub fn on_click(
         mut self,
         on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -228,7 +202,6 @@ impl Notification {
         self
     }
 
-    /// Dismiss the notification.
     pub fn dismiss(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if self.closing {
             return;
@@ -236,7 +209,6 @@ impl Notification {
         self.closing = true;
         cx.notify();
 
-        // Dismiss the notification after 0.15s to show the animation.
         cx.spawn(async move |view, cx| {
             Timer::after(Duration::from_secs_f32(0.15)).await;
             cx.update(|cx| {
@@ -251,7 +223,6 @@ impl Notification {
         .detach()
     }
 
-    /// Set the content of the notification.
     pub fn content(
         mut self,
         content: impl Fn(&mut Self, &mut Window, &mut Context<Self>) -> AnyElement + 'static,

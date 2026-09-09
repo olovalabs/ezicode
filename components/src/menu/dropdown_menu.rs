@@ -7,7 +7,6 @@ use gpui::{
 
 use crate::{button::Button, menu::PopupMenu, popover::Popover, Selectable};
 
-/// A dropdown menu trait for buttons and other interactive elements
 pub trait DropdownMenu: Styled + Selectable + InteractiveElement + IntoElement + 'static {
     /// Create a dropdown menu with the given items, anchored to the TopLeft corner
     fn dropdown_menu(
@@ -17,7 +16,6 @@ pub trait DropdownMenu: Styled + Selectable + InteractiveElement + IntoElement +
         self.dropdown_menu_with_anchor(Corner::TopLeft, f)
     }
 
-    /// Create a dropdown menu with the given items, anchored to the given corner
     fn dropdown_menu_with_anchor(
         mut self,
         anchor: impl Into<Corner>,
@@ -60,13 +58,11 @@ where
         }
     }
 
-    /// Set the anchor corner for the dropdown menu popover.
     pub fn anchor(mut self, anchor: impl Into<Corner>) -> Self {
         self.anchor = anchor.into();
         self
     }
 
-    /// Set the style refinement for the dropdown menu trigger.
     fn trigger_style(mut self, style: StyleRefinement) -> Self {
         self.style = style;
         self

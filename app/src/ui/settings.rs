@@ -1,11 +1,3 @@
-//! VS Code-style Settings Tab.
-//!
-//! Provides a full preferences interface inside an editor tab, featuring:
-//! - Visual Color Theme picker with color swatch previews and real-time switching
-//! - Editor font size zoom controls and tab configuration
-//! - Integrated terminal shell settings
-//! - Filesystem & watcher status
-
 use gpui::{
     div, prelude::*, px, rgba, svg, Context, FontWeight, IntoElement, SharedString, Window,
 };
@@ -15,7 +7,6 @@ use crate::settings::{AutoSaveMode, Settings};
 use crate::theme::{self, Colors};
 use crate::workspace::Workspace;
 
-/// Render the VS Code-style settings interface
 pub(crate) fn render_settings(
     settings: &Settings,
     t: &Colors,
@@ -33,9 +24,9 @@ pub(crate) fn render_settings(
         .flex()
         .flex_col()
         .overflow_hidden()
-        // Top Header bar
+
         .child(render_header(t, cx))
-        // Scrollable content area
+
         .child(
             div()
                 .id("settings-scroll")
@@ -51,19 +42,18 @@ pub(crate) fn render_settings(
                         .flex()
                         .flex_col()
                         .gap(px(28.0))
-                        // Section 1: Themes (Primary feature)
+
                         .child(render_theme_section(t, active_theme_ix, cx))
-                        // Section 2: Editor settings
+
                         .child(render_editor_section(settings, t, font_size, cx))
-                        // Section 3: Terminal settings
+
                         .child(render_terminal_section(t, cx))
-                        // Section 4: Files & System
+
                         .child(render_system_section(t)),
                 ),
         )
 }
 
-/// Header with Title, Settings path, and Open Settings (JSON) button
 fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
     let settings_path_display = crate::settings::settings_file_path().to_string_lossy().into_owned();
     div()
@@ -143,7 +133,6 @@ fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
         )
 }
 
-/// Section 1: Appearance & Color Themes
 fn render_theme_section(
     t: &Colors,
     active_theme_ix: usize,
@@ -222,7 +211,7 @@ fn render_theme_section(
                         ),
                 ),
         )
-        // Grid of theme cards
+
         .child(
             div()
                 .flex()
@@ -263,7 +252,7 @@ fn render_theme_section(
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.apply_theme(idx, window, cx);
                         }))
-                        // Top row: Name & Badge
+
                         .child(
                             div()
                                 .flex()
@@ -308,7 +297,7 @@ fn render_theme_section(
                                         }),
                                 ),
                         )
-                        // Color Palette Swatches Preview
+
                         .child(
                             div()
                                 .flex()
@@ -848,4 +837,3 @@ fn btn_pill(
         .child(SharedString::from(label))
         .on_click(on_click)
 }
-

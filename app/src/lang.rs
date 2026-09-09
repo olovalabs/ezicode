@@ -1,18 +1,5 @@
-//! Language identification for open buffers plus LSP server selection.
-//!
-//! `language_for` returns the tree-sitter language id used by the highlighter
-//! (gpui-component's `LanguageRegistry` — see its `Language` enum for the
-//! exact id list) and by the LSP layer. Detection is extension + filename
-//! based, with a shebang fallback for extension-less scripts.
-//!
-//! `lsp_server_for` maps a language to the language server that handles it;
-//! the full per-server description (how to install it, how to configure it,
-//! which LSP `languageId` to use) lives in `crate::lsp::adapter`.
-
 use std::path::Path;
 
-/// Tree-sitter language id used by the highlighter for this file
-/// (`"rust"`, `"python"`, …), or `None` for unrecognized files.
 pub fn language_for(path: &Path) -> Option<&'static str> {
     let ext_raw = path
         .extension()
@@ -21,7 +8,7 @@ pub fn language_for(path: &Path) -> Option<&'static str> {
     // Extensions are almost always lowercase; only allocate when an
     // uppercase letter actually needs folding (this runs on every render
     // for the status bar's language label).
-    let mut folded = String::new();
+    let folded: String;
     let ext = if ext_raw.bytes().any(|b| b.is_ascii_uppercase()) {
         folded = ext_raw.to_ascii_lowercase();
         folded.as_str()
@@ -40,7 +27,7 @@ pub fn language_for(path: &Path) -> Option<&'static str> {
     if let Some(lang) = by_extension(ext) {
         return Some(lang);
     }
-    // Extension-less scripts: sniff the shebang from the first line.
+
     shebang_language(path)
 }
 
@@ -139,11 +126,6 @@ fn shebang_language(path: &Path) -> Option<&'static str> {
     }
 }
 
-/// The name of the language server that handles this language, if any.
-///
-/// The authoritative table lives in [`crate::lsp::adapter::ADAPTERS`], which
-/// also knows how to install and configure each server (Zed keeps the same
-/// information in one `LspAdapter` per server rather than in a name map).
 #[allow(dead_code)]
 pub fn lsp_server_for(lang: &str) -> Option<&'static str> {
     crate::lsp::adapter::adapter_for_language(lang).map(|a| a.name)

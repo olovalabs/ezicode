@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-shape/area
-
 use gpui::{px, Background, Bounds, Path, PathBuilder, Pixels, Point, Window};
 
 use crate::plot::{origin_point, StrokeStyle};
@@ -34,7 +32,6 @@ impl<T> Area<T> {
         Self::default()
     }
 
-    /// Set the data of the Area.
     pub fn data<I>(mut self, data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -43,7 +40,6 @@ impl<T> Area<T> {
         self
     }
 
-    /// Set the x of the Area.
     pub fn x<F>(mut self, x: F) -> Self
     where
         F: Fn(&T) -> Option<f32> + 'static,
@@ -67,19 +63,16 @@ impl<T> Area<T> {
         self
     }
 
-    /// Set the fill color of the Area.
     pub fn fill(mut self, fill: impl Into<Background>) -> Self {
         self.fill = fill.into();
         self
     }
 
-    /// Set the stroke color of the Area.
     pub fn stroke(mut self, stroke: impl Into<Background>) -> Self {
         self.stroke = stroke.into();
         self
     }
 
-    /// Set the stroke style of the Area.
     pub fn stroke_style(mut self, stroke_style: StrokeStyle) -> Self {
         self.stroke_style = stroke_style;
         self
@@ -128,7 +121,6 @@ impl<T> Area<T> {
                         points[n - 1]
                     };
 
-                    // Catmull-Rom to Bezier
                     let c1 = Point::new(p1.x + (p2.x - p0.x) / 6.0, p1.y + (p2.y - p0.y) / 6.0);
                     let c2 = Point::new(p2.x - (p3.x - p1.x) / 6.0, p2.y - (p3.y - p1.y) / 6.0);
 
@@ -156,7 +148,6 @@ impl<T> Area<T> {
             }
         }
 
-        // Close path
         if let Some(last) = self.data.last() {
             let x_tick = (self.x)(last);
             if let (Some(x), Some(y)) = (x_tick, self.y0) {
@@ -169,7 +160,6 @@ impl<T> Area<T> {
         (area_builder.build().ok(), line_builder.build().ok())
     }
 
-    /// Paint the Area.
     pub fn paint(&self, bounds: &Bounds<Pixels>, window: &mut Window) {
         let (area, line) = self.path(bounds);
 

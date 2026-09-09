@@ -8,7 +8,6 @@ use gpui::{
 };
 use std::{rc::Rc, time::Duration};
 
-/// A Switch element that can be toggled on or off.
 #[derive(IntoElement)]
 pub struct Switch {
     id: ElementId,
@@ -23,7 +22,7 @@ pub struct Switch {
 }
 
 impl Switch {
-    /// Create a new Switch element.
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id: ElementId = id.into();
         Self {
@@ -39,19 +38,16 @@ impl Switch {
         }
     }
 
-    /// Set the checked state of the switch.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
         self
     }
 
-    /// Set the label of the switch.
     pub fn label(mut self, label: impl Into<Text>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    /// Add a click handler for the switch.
     pub fn on_click<F>(mut self, handler: F) -> Self
     where
         F: Fn(&bool, &mut Window, &mut App) + 'static,

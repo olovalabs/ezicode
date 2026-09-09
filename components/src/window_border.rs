@@ -1,5 +1,3 @@
-// From:
-// https://github.com/zed-industries/zed/blob/a8afc63a91f6b75528540dcffe73dc8ce0c92ad8/crates/gpui/examples/window_shadow.rs
 use gpui::{
     canvas, div, point, prelude::FluentBuilder as _, px, AnyElement, App, Bounds, CursorStyle,
     Decorations, Edges, HitboxBehavior, Hsla, InteractiveElement as _, IntoElement, MouseButton,
@@ -15,12 +13,10 @@ const SHADOW_SIZE: Pixels = px(12.0);
 const BORDER_SIZE: Pixels = px(1.0);
 pub(crate) const BORDER_RADIUS: Pixels = px(0.0);
 
-/// Create a new window border.
 pub fn window_border() -> WindowBorder {
     WindowBorder::new()
 }
 
-/// Window border use to render a custom window border and shadow for Linux.
 #[derive(IntoElement, Default)]
 pub struct WindowBorder {
     children: Vec<AnyElement>,
@@ -34,7 +30,6 @@ impl WindowBorder {
     }
 }
 
-/// Get the window paddings.
 pub fn window_paddings(window: &Window) -> Edges<Pixels> {
     match window.window_decorations() {
         Decorations::Server => Edges::all(px(0.0)),

@@ -8,14 +8,12 @@ use gpui::{
 
 use crate::{h_flex, ActiveTheme, Icon, IconName, StyledExt};
 
-/// A breadcrumb navigation element.
 #[derive(IntoElement)]
 pub struct Breadcrumb {
     style: StyleRefinement,
     items: Vec<BreadcrumbItem>,
 }
 
-/// Item for the [`Breadcrumb`].
 #[derive(IntoElement)]
 pub struct BreadcrumbItem {
     id: ElementId,
@@ -27,7 +25,7 @@ pub struct BreadcrumbItem {
 }
 
 impl BreadcrumbItem {
-    /// Create a new BreadcrumbItem with the given id and label.
+
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self {
             id: ElementId::Integer(0),

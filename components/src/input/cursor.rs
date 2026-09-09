@@ -1,6 +1,5 @@
 use std::ops::{Range, RangeBounds};
 
-/// A selection in the text, represented by start and end byte indices.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct Selection {
     pub start: usize,
@@ -20,13 +19,11 @@ impl Selection {
         self.start == self.end
     }
 
-    /// Clears the selection, setting start and end to 0.
     pub fn clear(&mut self) {
         self.start = 0;
         self.end = 0;
     }
 
-    /// Checks if the given offset is within the selection range.
     pub fn contains(&self, offset: usize) -> bool {
         offset >= self.start && offset < self.end
     }

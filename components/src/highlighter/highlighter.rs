@@ -22,25 +22,19 @@ struct CompiledLanguageQuery {
     query: Arc<Query>,
     injection_queries: HashMap<SharedString, Arc<Query>>,
     injection_content_capture_index: Option<u32>,
-    /// Capture name per capture index, interned once per language.
-    /// Highlighting runs this for every visible token on every repaint;
-    /// without interning, each capture allocated a fresh `String` +
-    /// `SharedString`.
+
     capture_names: Vec<SharedString>,
 }
 
-/// A syntax highlighter that supports incremental parsing, multiline text,
-/// and caching of highlight results.
 #[allow(unused)]
 pub struct SyntaxHighlighter {
     language: SharedString,
     compiled: Option<Arc<CompiledLanguageQuery>>,
     cursor: RefCell<QueryCursor>,
 
-    /// The last parsed source text.
     text: Rope,
     parser: Parser,
-    /// The last parsed tree.
+
     tree: Option<Tree>,
 }
 
@@ -312,7 +306,6 @@ impl SyntaxHighlighter {
         self.text = text.clone();
     }
 
-    /// Match the visible ranges of nodes in the Tree for highlighting.
     fn match_styles(&self, range: Range<usize>) -> Vec<HighlightItem> {
         let mut highlights = vec![];
         let Some(tree) = &self.tree else {
@@ -332,8 +325,7 @@ impl SyntaxHighlighter {
         let mut matches = cursor.matches(query, root_node, TextProvider(&source));
 
         while let Some(query_match) = matches.next() {
-            // Ref:
-            // https://github.com/tree-sitter/tree-sitter/blob/460118b4c82318b083b4d527c9c750426730f9c0/highlight/src/lib.rs#L556
+
             if let (Some(language_name), Some(content_node), _) =
                 self.injection_for_match(None, query, query_match)
             {
@@ -355,7 +347,6 @@ impl SyntaxHighlighter {
                 let node_range: Range<usize> = node.start_byte()..node.end_byte();
                 let highlight_name = highlight_name.clone();
 
-                // Merge near range and same highlight name
                 let last_item = highlights.last();
                 let last_range = last_item.map(|item| &item.range).unwrap_or(&(0..0));
                 let last_highlight_name = last_item.map(|item| item.name.clone());
@@ -368,9 +359,7 @@ impl SyntaxHighlighter {
                         highlight_name.clone(),
                     ));
                 } else if last_range == &node_range {
-                    // case:
-                    // last_range: 213..220, last_highlight_name: Some("property")
-                    // last_range: 213..220, last_highlight_name: Some("string")
+
                     highlights.push(HighlightItem::new(
                         node_range,
                         last_highlight_name.unwrap_or(highlight_name),
@@ -381,21 +370,15 @@ impl SyntaxHighlighter {
             }
         }
 
-        // DO NOT REMOVE THIS PRINT, it's useful for debugging
-        // for item in highlights {
-        //     println!("item: {:?}", item);
-        // }
-
         highlights
     }
 
-    /// TODO: Use incremental parsing to handle the injection.
     fn handle_injection(
         &self,
         injection_language: &str,
         node: Node,
     ) -> Vec<(Range<usize>, String)> {
-        // Ensure byte offsets are on char boundaries for UTF-8 safety
+
         let start_offset = self.text.clip_offset(node.start_byte(), Bias::Left);
         let end_offset = self.text.clip_offset(node.end_byte(), Bias::Right);
 
@@ -411,7 +394,7 @@ impl SyntaxHighlighter {
         if content.len() == 0 {
             return cache;
         };
-        // FIXME: Avoid to_string.
+
         let content = content.to_string();
 
         let Some(config) = LanguageRegistry::singleton().language(injection_language) else {
@@ -455,13 +438,6 @@ impl SyntaxHighlighter {
         cache
     }
 
-    /// Ref:
-    /// https://github.com/tree-sitter/tree-sitter/blob/v0.25.5/highlight/src/lib.rs#L1229
-    ///
-    /// Returns:
-    /// - `language_name`: The language name of the injection.
-    /// - `content_node`: The content node of the injection.
-    /// - `include_children`: Whether to include the children of the content node.
     fn injection_for_match<'a>(
         &self,
         parent_name: Option<SharedString>,

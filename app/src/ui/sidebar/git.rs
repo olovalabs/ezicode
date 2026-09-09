@@ -1,14 +1,3 @@
-//! Source Control panel — 100% authentic VS Code Git UI.
-//!
-//! Shows the actual `git status` of the opened repository:
-//! - "Source Control" header with `...` action menu
-//! - Collapsible "Changes" repository root section
-//! - Commit input with `Message (Ctrl+Enter to commit on "main"...)`
-//! - Split blue `✓ Commit | ⌵` button
-//! - Collapsible `Staged Changes` section with blue badge count and official file icons
-//! - Collapsible `Changes` section with blue badge count and official file icons
-//! - File rows showing: File Icon, File Name, Subpath in muted text, and status letter (M, U, A, D)
-
 use std::path::Path;
 
 use gpui::{
@@ -35,7 +24,6 @@ use crate::workspace::Workspace;
 
 const ROW_HEIGHT: f32 = 24.0;
 
-/// VS Code color for a change kind.
 fn kind_color(kind: ChangeKind, t: &Colors) -> u32 {
     match kind {
         ChangeKind::Modified => t.vc_modified,
@@ -96,7 +84,6 @@ pub(crate) fn render_git_panel(
                 .cloned()
                 .collect();
 
-            // Top "Changes" collapsible section containing Commit Input & Commit button
             let repo_chevron = if repo_section_expanded {
                 "ui_icons/chevron-down_tint.svg"
             } else {
@@ -137,7 +124,6 @@ pub(crate) fn render_git_panel(
                 body = body.child(commit_box(commit_input, &branch, t, window, cx));
             }
 
-            // Staged Changes section (only shown when there are staged files, like VS Code)
             if !staged.is_empty() {
                 let staged_chevron = if staged_expanded {
                     "ui_icons/chevron-down_tint.svg"
@@ -215,7 +201,6 @@ pub(crate) fn render_git_panel(
                 }
             }
 
-            // Changes section
             let changes_chevron = if changes_expanded {
                 "ui_icons/chevron-down_tint.svg"
             } else {
@@ -311,7 +296,6 @@ pub(crate) fn render_git_panel(
     col.into_any_element()
 }
 
-/// Panel header: "Source Control" + "..." action menu.
 fn header(
     t: &Colors,
     _window: &mut Window,
@@ -386,7 +370,6 @@ fn section_action(
         }))
 }
 
-/// Blue pill badge for change count.
 fn badge(count: usize) -> impl IntoElement {
     div()
         .min_w(px(16.0))
@@ -403,7 +386,6 @@ fn badge(count: usize) -> impl IntoElement {
         .child(SharedString::from(count.to_string()))
 }
 
-/// Commit message box + Split Commit button.
 fn commit_box(
     input: Option<&Entity<InputState>>,
     branch: &str,
@@ -451,7 +433,6 @@ fn commit_box(
             .into_any_element(),
     };
 
-    // Split Commit Button: [ ✓ Commit | ⌵ ]
     let commit_split_btn = div()
         .h(px(28.0))
         .rounded(px(3.0))
@@ -531,7 +512,6 @@ fn commit_box(
         .child(commit_split_btn)
 }
 
-/// One changed file row. `staged_section` selects the letter/actions shown.
 fn change_row(
     change: &GitChange,
     staged_section: bool,

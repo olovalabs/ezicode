@@ -11,7 +11,6 @@ use crate::{
     v_flex,
 };
 
-/// A setting group that can contain multiple setting items.
 #[derive(Clone)]
 pub struct SettingGroup {
     style: StyleRefinement,
@@ -28,7 +27,7 @@ impl Styled for SettingGroup {
 }
 
 impl SettingGroup {
-    /// Create a new setting group.
+
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -38,25 +37,21 @@ impl SettingGroup {
         }
     }
 
-    /// Set the label of the setting group, default is None.
     pub fn title(mut self, title: impl Into<SharedString>) -> Self {
         self.title = Some(title.into());
         self
     }
 
-    /// Set the description of the setting group, default is None.
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = Some(description.into());
         self
     }
 
-    /// Add a setting item to the group.
     pub fn item(mut self, item: SettingItem) -> Self {
         self.items.push(item);
         self
     }
 
-    /// Add multiple setting items to the group.
     pub fn items<I>(mut self, items: I) -> Self
     where
         I: IntoIterator<Item = SettingItem>,
@@ -65,7 +60,6 @@ impl SettingGroup {
         self
     }
 
-    /// Return true if any of the setting items in the group match the given query.
     pub(super) fn is_match(&self, query: &str) -> bool {
         self.items.iter().any(|item| item.is_match(query))
     }

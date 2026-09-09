@@ -5,7 +5,6 @@ use crate::{
     list::{ListState, loading::Loading},
 };
 
-/// A delegate for the List.
 #[allow(unused)]
 pub trait ListDelegate: Sized + 'static {
     type Item: Selectable + IntoElement;
@@ -118,40 +117,18 @@ pub trait ListDelegate: Sized + 'static {
         cx: &mut Context<ListState<Self>>,
     );
 
-    /// Set the confirm and give the selected index,
-    /// this is means user have clicked the item or pressed Enter.
-    ///
-    /// This will always to `set_selected_index` before confirm.
     fn confirm(&mut self, secondary: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
     }
 
-    /// Cancel the selection, e.g.: Pressed ESC.
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {}
 
-    /// Return true to enable load more data when scrolling to the bottom.
-    ///
-    /// Default: true
     fn is_eof(&self, cx: &App) -> bool {
         true
     }
 
-    /// Returns a threshold value (n entities), of course,
-    /// when scrolling to the bottom, the remaining number of rows
-    /// triggers `load_more`.
-    ///
-    /// This should smaller than the total number of first load rows.
-    ///
-    /// Default: 20 entities (section header, footer and row)
     fn load_more_threshold(&self) -> usize {
         20
     }
 
-    /// Load more data when the table is scrolled to the bottom.
-    ///
-    /// This will performed in a background task.
-    ///
-    /// This is always called when the table is near the bottom,
-    /// so you must check if there is more data to load or lock
-    /// the loading state.
     fn load_more(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {}
 }

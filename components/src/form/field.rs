@@ -76,7 +76,6 @@ impl From<SharedString> for FieldBuilder {
     }
 }
 
-/// Form field element.
 #[derive(IntoElement)]
 pub struct Field {
     id: ElementId,
@@ -84,11 +83,11 @@ pub struct Field {
     label: Option<FieldBuilder>,
     label_indent: bool,
     description: Option<FieldBuilder>,
-    /// Used to render the actual form field, e.g.: Input, Switch...
+
     children: Vec<AnyElement>,
     visible: bool,
     required: bool,
-    /// Alignment of the form field.
+
     align_items: Option<AlignItems>,
     col_span: u16,
     col_start: Option<i16>,
@@ -113,23 +112,16 @@ impl Field {
         }
     }
 
-    /// Sets the label for the form field.
     pub fn label(mut self, label: impl Into<FieldBuilder>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    /// Sets indent with the label width (in Horizontal layout), default is `true`.
-    ///
-    /// Sometimes you want to align the input form left (Default is align after the label width in Horizontal layout).
-    ///
-    /// This is only work when the `label` is not set.
     pub fn label_indent(mut self, indent: bool) -> Self {
         self.label_indent = indent;
         self
     }
 
-    /// Sets the label for the form field using a function.
     pub fn label_fn<F, E>(mut self, label: F) -> Self
     where
         E: IntoElement,
@@ -159,60 +151,47 @@ impl Field {
         self
     }
 
-    /// Set the visibility of the form field, default is `true`.
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
     }
 
-    /// Set the required status of the form field, default is `false`.
     pub fn required(mut self, required: bool) -> Self {
         self.required = required;
         self
     }
 
-    /// Set the properties for the form field.
-    ///
-    /// This is internal API for sync props from From.
     pub(super) fn props(mut self, ix: usize, props: FieldProps) -> Self {
         self.id = ix.into();
         self.props = props;
         self
     }
 
-    /// Align the form field items to the start, this is the default.
     pub fn items_start(mut self) -> Self {
         self.align_items = Some(AlignItems::Start);
         self
     }
 
-    /// Align the form field items to the end.
     pub fn items_end(mut self) -> Self {
         self.align_items = Some(AlignItems::End);
         self
     }
 
-    /// Align the form field items to the center.
     pub fn items_center(mut self) -> Self {
         self.align_items = Some(AlignItems::Center);
         self
     }
 
-    /// Sets the column span for the form field.
-    ///
-    /// Default is 1.
     pub fn col_span(mut self, col_span: u16) -> Self {
         self.col_span = col_span;
         self
     }
 
-    /// Sets the column start of this form field.
     pub fn col_start(mut self, col_start: i16) -> Self {
         self.col_start = Some(col_start);
         self
     }
 
-    /// Sets the column end of this form field.
     pub fn col_end(mut self, col_end: i16) -> Self {
         self.col_end = Some(col_end);
         self
@@ -268,7 +247,7 @@ impl RenderOnce for Field {
             .when_some(self.col_start, |this, start| this.col_start(start))
             .when_some(self.col_end, |this, end| this.col_end(end))
             .child(
-                // This warp for aligning the Label + Input
+
                 wrap_div(layout)
                     .id(self.id)
                     .gap(inner_gap)
@@ -282,7 +261,7 @@ impl RenderOnce for Field {
                         })
                     })
                     .when(has_label, |this| {
-                        // Label
+
                         this.child(
                             wrap_label(label_width)
                                 .text_sm()
@@ -319,12 +298,12 @@ impl RenderOnce for Field {
                     ),
             )
             .child(
-                // Other
+
                 wrap_div(layout)
                     .gap(inner_gap)
                     .when(has_label && layout.is_horizontal(), |this| {
                         this.child(
-                            // Empty for spacing to align with the input
+
                             wrap_label(label_width),
                         )
                     })

@@ -56,19 +56,16 @@ impl PlotAxis {
         }
     }
 
-    /// Set the x-axis of the Axis.
     pub fn x(mut self, x: impl Into<Pixels>) -> Self {
         self.x = Some(x.into());
         self
     }
 
-    /// Hide the x-axis of the Axis.
     pub fn hide_x_axis(mut self) -> Self {
         self.show_x_axis = false;
         self
     }
 
-    /// Set the x-label of the Axis.
     pub fn x_label(mut self, label: impl IntoIterator<Item = AxisText>) -> Self {
         if let Some(x) = self.x {
             self.x_label = label
@@ -86,19 +83,16 @@ impl PlotAxis {
         self
     }
 
-    /// Set the y-axis of the Axis.
     pub fn y(mut self, y: impl Into<Pixels>) -> Self {
         self.y = Some(y.into());
         self
     }
 
-    /// Hide the y-axis of the Axis.
     pub fn hide_y_axis(mut self) -> Self {
         self.show_y_axis = false;
         self
     }
 
-    /// Set the y-label of the Axis.
     pub fn y_label(mut self, label: impl IntoIterator<Item = AxisText>) -> Self {
         if let Some(y) = self.y {
             self.y_label = label
@@ -116,7 +110,6 @@ impl PlotAxis {
         self
     }
 
-    /// Set the stroke color of the Axis.
     pub fn stroke(mut self, stroke: impl Into<Hsla>) -> Self {
         self.stroke = stroke.into();
         self
@@ -131,11 +124,9 @@ impl PlotAxis {
         }
     }
 
-    /// Paint the Axis.
     pub fn paint(&self, bounds: &Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let origin = bounds.origin;
 
-        // X axis
         if let Some(x) = self.x {
             if self.show_x_axis {
                 self.draw_axis(
@@ -147,7 +138,6 @@ impl PlotAxis {
         }
         self.x_label.paint(bounds, window, cx);
 
-        // Y axis
         if let Some(y) = self.y {
             if self.show_y_axis {
                 self.draw_axis(

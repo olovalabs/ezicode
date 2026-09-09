@@ -10,7 +10,6 @@ use crate::{
     IconName, Sizable as _,
 };
 
-/// An element that provides clipboard copy functionality.
 #[derive(IntoElement)]
 pub struct Clipboard {
     id: ElementId,
@@ -20,7 +19,7 @@ pub struct Clipboard {
 }
 
 impl Clipboard {
-    /// Create a new Clipboard element with the given ID.
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -30,15 +29,11 @@ impl Clipboard {
         }
     }
 
-    /// Set the value for copying to the clipboard. Default is an empty string.
     pub fn value(mut self, value: impl Into<SharedString>) -> Self {
         self.value = value.into();
         self
     }
 
-    /// Set the value of the clipboard to the result of the given function. Default is None.
-    ///
-    /// When used this, the copy value will use the result of the function.
     pub fn value_fn(
         mut self,
         value: impl Fn(&mut Window, &mut App) -> SharedString + 'static,

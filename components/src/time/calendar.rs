@@ -17,13 +17,11 @@ use crate::{
 
 use super::utils::days_in_month;
 
-/// Events emitted by the calendar.
 pub enum CalendarEvent {
-    /// The user selected a date.
+
     Selected(Date),
 }
 
-/// The date of the calendar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Date {
     Single(Option<NaiveDate>),
@@ -213,17 +211,15 @@ where
 }
 
 impl Matcher {
-    /// Create a new interval matcher.
+
     pub fn interval(before: Option<NaiveDate>, after: Option<NaiveDate>) -> Self {
         Matcher::Interval(IntervalMatcher { before, after })
     }
 
-    /// Create a new range matcher.
     pub fn range(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Self {
         Matcher::Range(RangeMatcher { from, to })
     }
 
-    /// Create a new custom matcher.
     pub fn custom<F>(f: F) -> Self
     where
         F: Fn(&NaiveDate) -> bool + Send + Sync + 'static,

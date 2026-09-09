@@ -2,30 +2,25 @@ use gpui::SharedString;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum MaskToken {
-    /// 0 Digit, equivalent to `[0]`
-    // Digit0,
-    /// Digit, equivalent to `[0-9]`
+
     Digit,
-    /// Letter, equivalent to `[a-zA-Z]`
+
     Letter,
-    /// Letter or digit, equivalent to `[a-zA-Z0-9]`
+
     LetterOrDigit,
-    /// Separator
+
     Sep(char),
-    /// Any character
+
     Any,
 }
 
 #[allow(unused)]
 impl MaskToken {
-    /// Check if the token is any character.
+
     pub fn is_any(&self) -> bool {
         matches!(self, MaskToken::Any)
     }
 
-    /// Check if the token is a match for the given character.
-    ///
-    /// The separator is always a match any input character.
     fn is_match(&self, ch: char) -> bool {
         match self {
             MaskToken::Digit => ch.is_ascii_digit(),
@@ -36,12 +31,10 @@ impl MaskToken {
         }
     }
 
-    /// Is the token a separator (Can be ignored)
     fn is_sep(&self) -> bool {
         matches!(self, MaskToken::Sep(_))
     }
 
-    /// Check if the token is a number.
     pub fn is_number(&self) -> bool {
         matches!(self, MaskToken::Digit)
     }
@@ -81,9 +74,9 @@ pub enum MaskPattern {
         tokens: Vec<MaskToken>,
     },
     Number {
-        /// Group separator, e.g. "," or " "
+
         separator: Option<char>,
-        /// Number of fraction digits, e.g. 2 for 123.45
+
         fraction: Option<usize>,
     },
 }
@@ -95,25 +88,12 @@ impl From<&str> for MaskPattern {
 }
 
 impl MaskPattern {
-    /// Create a new mask pattern
-    ///
-    /// - `9` - Digit
-    /// - `A` - Letter
-    /// - `#` - Letter or Digit
-    /// - `*` - Any character
-    /// - other characters - Separator
-    ///
-    /// For example:
-    ///
-    /// - `(999)999-9999` - US phone number: (123)456-7890
-    /// - `99999-9999` - ZIP code: 12345-6789
-    /// - `AAAA-99-####` - Custom pattern: ABCD-12-3AB4
-    /// - `*999*` - Custom pattern: (123) or [123]
+
     pub fn new(pattern: &str) -> Self {
         let tokens = pattern
             .chars()
             .map(|ch| match ch {
-                // '0' => MaskToken::Digit0,
+
                 '9' => MaskToken::Digit,
                 'A' => MaskToken::Letter,
                 '#' => MaskToken::LetterOrDigit,
@@ -137,7 +117,6 @@ impl MaskPattern {
         }
     }
 
-    /// Create a new mask pattern with group separator, e.g. "," or " "
     pub fn number(sep: Option<char>) -> Self {
         Self::Number {
             separator: sep,
@@ -155,7 +134,6 @@ impl MaskPattern {
         }
     }
 
-    /// Return true if the mask pattern is None or no any pattern.
     pub fn is_none(&self) -> bool {
         match self {
             Self::Pattern { tokens, .. } => tokens.is_empty(),
@@ -164,9 +142,6 @@ impl MaskPattern {
         }
     }
 
-    /// Check is the mask text is valid.
-    ///
-    /// If the mask pattern is None, always return true.
     pub fn is_valid(&self, mask_text: &str) -> bool {
         if self.is_none() {
             return true;
@@ -193,7 +168,6 @@ impl MaskPattern {
                     return true;
                 }
 
-                // check if the text is valid number
                 let mut parts = mask_text.split('.');
                 let int_part = parts.next().unwrap_or("");
                 let frac_part = parts.next();
@@ -211,20 +185,16 @@ impl MaskPattern {
                     })
                     .collect();
 
-                // only one sign is valid
-                // sign is only valid at the beginning of the string
                 if sign_positions.len() > 1 || sign_positions.first() > Some(&0) {
                     return false;
                 }
 
-                // check if the integer part is valid
                 if !int_part.chars().enumerate().all(|(i, ch)| {
                     ch.is_ascii_digit() || is_sign(&ch) && i == 0 || Some(ch) == *separator
                 }) {
                     return false;
                 }
 
-                // check if the fraction part is valid
                 if let Some(frac) = frac_part {
                     if !frac
                         .chars()
@@ -240,7 +210,6 @@ impl MaskPattern {
         }
     }
 
-    /// Check if valid input char at the given position.
     pub fn is_valid_at(&self, ch: char, pos: usize) -> bool {
         if self.is_none() {
             return true;
@@ -254,7 +223,7 @@ impl MaskPattern {
                     }
 
                     if token.is_sep() {
-                        // If next token is match, it's valid
+
                         if let Some(next_token) = tokens.get(pos + 1) {
                             if next_token.is_match(ch) {
                                 return true;
@@ -270,13 +239,6 @@ impl MaskPattern {
         }
     }
 
-    /// Format the text according to the mask pattern
-    ///
-    /// For example:
-    ///
-    /// - pattern: (999)999-999
-    /// - text: 123456789
-    /// - mask_text: (123)456-789
     pub fn mask(&self, text: &str) -> SharedString {
         if self.is_none() {
             return text.to_owned().into();
@@ -288,23 +250,20 @@ impl MaskPattern {
                 fraction,
             } => {
                 if let Some(sep) = *separator {
-                    // Remove the existing group separator
+
                     let text = text.replace(sep, "");
 
                     let mut parts = text.split('.');
                     let int_part = parts.next().unwrap_or("");
 
-                    // Limit the fraction part to the given range, if not enough, pad with 0
                     let frac_part = parts.next().map(|part| {
                         part.chars()
                             .take(fraction.unwrap_or(usize::MAX))
                             .collect::<String>()
                     });
 
-                    // Reverse the integer part for easier grouping
                     let mut chars: Vec<char> = int_part.chars().rev().collect();
 
-                    // Removing the sign from formatting to avoid cases such as: -,123
                     let maybe_signed = if let Some(pos) = chars.iter().position(is_sign) {
                         Some(chars.remove(pos))
                     } else {
@@ -350,7 +309,7 @@ impl MaskPattern {
                         break;
                     }
                     let ch = text_chars[text_index];
-                    // Break if expected char is not match
+
                     if !token.is_sep() && !self.is_valid_at(ch, pos) {
                         break;
                     }
@@ -367,7 +326,6 @@ impl MaskPattern {
         }
     }
 
-    /// Extract original text from masked text
     pub fn unmask(&self, mask_text: &str) -> String {
         match self {
             Self::Number { separator, .. } => {
@@ -538,7 +496,7 @@ mod tests {
 
     #[test]
     fn test_number_with_group_separator() {
-        // Use comma as group separator
+
         let mask = MaskPattern::number(Some(','));
         assert_eq!(mask.mask("1234567"), "1,234,567");
         assert_eq!(mask.mask("1,234,567"), "1,234,567");
@@ -547,7 +505,6 @@ mod tests {
         assert_eq!(mask.mask("1234567.89"), "1,234,567.89");
         assert_eq!(mask.unmask("1,234,567.89"), "1234567.89");
 
-        // Use space as group separator
         let mask = MaskPattern::number(Some(' '));
         assert_eq!(mask.mask("1234567"), "1 234 567");
         assert_eq!(mask.unmask("1 234 567"), "1234567");
@@ -555,7 +512,6 @@ mod tests {
         assert_eq!(mask.mask("1234567.89"), "1 234 567.89");
         assert_eq!(mask.unmask("1 234 567.89"), "1234567.89");
 
-        // No group separator
         let mask = MaskPattern::number(None);
         assert_eq!(mask.mask("1234567"), "1234567");
         assert_eq!(mask.unmask("1234567"), "1234567");
@@ -613,19 +569,15 @@ mod tests {
         assert_eq!(mask.is_valid("+1234567."), true);
         assert_eq!(mask.is_valid("+1234567.89"), true);
 
-        // Only one sign is valid
         assert_eq!(mask.is_valid("+-"), false);
         assert_eq!(mask.is_valid("-+"), false);
         assert_eq!(mask.is_valid("+-1234567"), false);
 
-        // No sign is valid in the middle of the number
         assert_eq!(mask.is_valid("1,-234,567"), false);
         assert_eq!(mask.is_valid("12-34567.89"), false);
 
-        // Signs in fractions are invalid
         assert_eq!(mask.is_valid("+1234567.-"), false);
 
-        // The separator does not show up before the sign i.e. -,123
         assert_eq!(mask.mask("-123"), "-123");
 
         assert_eq!(mask.mask("-1234567"), "-1,234,567");

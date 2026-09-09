@@ -134,7 +134,6 @@ impl RenderOnce for ResizablePanelGroup {
             v_flex()
         };
 
-        // Sync panels to the state
         let panels_count = self.children.len();
         state.update(cx, |state, cx| {
             state.sync_panels_count(self.axis, panels_count, cx);
@@ -184,22 +183,21 @@ impl RenderOnce for ResizablePanelGroup {
     }
 }
 
-/// A resizable panel inside a [`ResizablePanelGroup`].
 #[derive(IntoElement)]
 pub struct ResizablePanel {
     axis: Axis,
     panel_ix: usize,
     state: Option<Entity<ResizableState>>,
-    /// Initial size is the size that the panel has when it is created.
+
     initial_size: Option<Pixels>,
-    /// size range limit of this panel.
+
     size_range: Range<Pixels>,
     children: Vec<AnyElement>,
     visible: bool,
 }
 
 impl ResizablePanel {
-    /// Create a new resizable panel.
+
     pub(super) fn new() -> Self {
         Self {
             panel_ix: 0,
@@ -212,21 +210,16 @@ impl ResizablePanel {
         }
     }
 
-    /// Set the visibility of the panel, default is true.
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
     }
 
-    /// Set the initial size of the panel.
     pub fn size(mut self, size: impl Into<Pixels>) -> Self {
         self.initial_size = Some(size.into());
         self
     }
 
-    /// Set the size range to limit panel resize.
-    ///
-    /// Default is [`PANEL_MIN_SIZE`] to [`Pixels::MAX`].
     pub fn size_range(mut self, range: impl Into<Range<Pixels>>) -> Self {
         self.size_range = range.into();
         self
@@ -267,13 +260,10 @@ impl RenderOnce for ResizablePanel {
             .when(self.axis.is_horizontal(), |this| {
                 this.min_w(size_range.start).max_w(size_range.end)
             })
-            // 1. initial_size is None, to use auto size.
-            // 2. initial_size is Some and size is none, to use the initial size of the panel for first time render.
-            // 3. initial_size is Some and size is Some, use `size`.
+
             .when(self.initial_size.is_none(), |this| this.flex_shrink())
             .when_some(self.initial_size, |this, initial_size| {
-                // The `self.size` is None, that mean the initial size for the panel,
-                // so we need set `flex_shrink_0` To let it keep the initial size.
+
                 this.when(
                     panel_state.size.is_none() && !initial_size.is_zero(),
                     |this| this.flex_none(),
@@ -306,7 +296,7 @@ impl RenderOnce for ResizablePanel {
                     DragPanel,
                     move |drag_panel, _, _, cx| {
                         cx.stop_propagation();
-                        // Set current resizing panel ix
+
                         state.update(cx, |state, _| {
                             state.resizing_panel_ix = Some(ix);
                         });
@@ -401,7 +391,6 @@ impl Element for ResizePanelGroupElement {
             }
         });
 
-        // When any mouse up, stop dragging
         window.on_mouse_event({
             let state = self.state.clone();
             let current_ix = state.read(cx).resizing_panel_ix;

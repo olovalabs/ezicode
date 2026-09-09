@@ -16,11 +16,11 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct NumberFieldOptions {
-    /// The minimum value for the number input, default is `f64::MIN`.
+
     pub min: f64,
-    /// The maximum value for the number input, default is `f64::MAX`.
+
     pub max: f64,
-    /// The step value for the number input, default is `1.0`.
+
     pub step: f64,
 }
 

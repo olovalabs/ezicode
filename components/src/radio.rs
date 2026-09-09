@@ -10,9 +10,6 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window,
 };
 
-/// A Radio element.
-///
-/// This is not included the Radio group implementation, you can manage the group by yourself.
 #[derive(IntoElement)]
 pub struct Radio {
     base: Div,
@@ -257,25 +254,19 @@ impl RadioGroup {
         }
     }
 
-    /// Create a new Radio group with default Vertical layout.
     pub fn vertical(id: impl Into<ElementId>) -> Self {
         Self::new(id)
     }
 
-    /// Create a new Radio group with Horizontal layout.
     pub fn horizontal(id: impl Into<ElementId>) -> Self {
         Self::new(id).layout(Axis::Horizontal)
     }
 
-    /// Set the layout of the Radio group. Default is `Axis::Vertical`.
     pub fn layout(mut self, layout: Axis) -> Self {
         self.layout = layout;
         self
     }
 
-    // Add on_click handler when selected index changes.
-    //
-    // The `&usize` parameter is the selected index.
     pub fn on_click(mut self, handler: impl Fn(&usize, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Rc::new(handler));
         self

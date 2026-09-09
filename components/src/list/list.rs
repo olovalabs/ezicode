@@ -37,11 +37,11 @@ pub(crate) fn init(cx: &mut App) {
 
 #[derive(Clone)]
 pub enum ListEvent {
-    /// Move to select item.
+
     Select(IndexPath),
-    /// Click on item or pressed Enter.
+
     Confirm(IndexPath),
-    /// Pressed ESC to deselect the item.
+
     Cancel,
 }
 
@@ -65,9 +65,6 @@ impl Default for ListOptions {
     }
 }
 
-/// The state for List.
-///
-/// List required all items has the same height.
 pub struct ListState<D: ListDelegate> {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) query_input: Entity<InputState>,
@@ -120,9 +117,6 @@ where
         }
     }
 
-    /// Sets whether the list is searchable, default is `false`.
-    ///
-    /// When `true`, there will be a search input at the top of the list.
     pub fn searchable(mut self, searchable: bool) -> Self {
         self.searchable = searchable;
         self
@@ -133,13 +127,11 @@ where
         cx.notify();
     }
 
-    /// Sets whether the list is selectable, default is true.
     pub fn selectable(mut self, selectable: bool) -> Self {
         self.selectable = selectable;
         self
     }
 
-    /// Sets whether the list is selectable, default is true.
     pub fn set_selectable(&mut self, selectable: bool, cx: &mut Context<Self>) {
         self.selectable = selectable;
         cx.notify();
@@ -153,18 +145,14 @@ where
         &mut self.delegate
     }
 
-    /// Focus the list, if the list is searchable, focus the search input.
     pub fn focus(&mut self, window: &mut Window, cx: &mut App) {
         self.focus_handle(cx).focus(window);
     }
 
-    /// Return true if either the list or the search input is focused.
     pub(crate) fn is_focused(&self, window: &Window, cx: &App) -> bool {
         self.focus_handle.is_focused(window) || self.query_input.focus_handle(cx).is_focused(window)
     }
 
-    /// Set the selected index of the list,
-    /// this will also scroll to the selected item.
     pub(crate) fn _set_selected_index(
         &mut self,
         ix: Option<IndexPath>,
@@ -180,8 +168,6 @@ where
         self.scroll_to_selected_item(window, cx);
     }
 
-    /// Set the selected index of the list,
-    /// this method will not scroll to the selected item.
     pub fn set_selected_index(
         &mut self,
         ix: Option<IndexPath>,
@@ -196,7 +182,6 @@ where
         self.selected_index
     }
 
-    /// Set a specific list item for measurement.
     pub fn set_item_to_measure_index(
         &mut self,
         ix: IndexPath,
@@ -207,7 +192,6 @@ where
         cx.notify();
     }
 
-    /// Scroll to the item at the given index.
     pub fn scroll_to_item(
         &mut self,
         ix: IndexPath,
@@ -216,7 +200,7 @@ where
         cx: &mut Context<Self>,
     ) {
         if ix.section == 0 && ix.row == 0 {
-            // If the item is the first item, scroll to the top.
+
             let mut offset = self.scroll_handle.base_handle().offset();
             offset.y = px(0.);
             self.scroll_handle.base_handle().set_offset(offset);
@@ -227,7 +211,6 @@ where
         cx.notify();
     }
 
-    /// Get scroll handle
     pub fn scroll_handle(&self) -> &VirtualListScrollHandle {
         &self.scroll_handle
     }
@@ -271,7 +254,6 @@ where
                         this.last_query = Some(text);
                     });
 
-                    // Always wait 100ms to avoid flicker
                     Timer::after(Duration::from_millis(100)).await;
                     _ = this.update_in(window, |this, window, cx| {
                         this.set_searching(false, window, cx);
@@ -294,8 +276,6 @@ where
             .update(cx, |input, cx| input.set_loading(searching, window, cx));
     }
 
-    /// Dispatch delegate's `load_more` method when the
-    /// visible range is near the end.
     fn load_more_if_need(
         &mut self,
         entities_count: usize,
@@ -303,11 +283,9 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // FIXME: Here need void sections items count.
 
         let threshold = self.delegate.load_more_threshold();
-        // Securely handle subtract logic to prevent attempt
-        // to subtract with overflow
+
         if visible_end >= entities_count.saturating_sub(threshold) {
             if !self.delegate.is_eof(cx) {
                 return;
@@ -403,7 +381,6 @@ where
 
         let mut measured_size = MeasuredEntrySize::default();
 
-        // Measure the item_height and section header/footer height.
         let available_space = size(AvailableSpace::MinContent, AvailableSpace::MinContent);
         measured_size.item_size = self
             .render_list_item(self.item_to_measure_index, window, cx)
@@ -511,10 +488,6 @@ where
                                     cx,
                                 );
 
-                                // NOTE: Here the v_virtual_list would not able to have gap_y,
-                                // because the section header, footer is always have rendered as a empty child item,
-                                // even the delegate give a None result.
-
                                 visible_range
                                     .map(|ix| {
                                         let Some(entry) = rows_cache.get(ix) else {
@@ -574,7 +547,6 @@ where
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.prepare_items_if_needed(window, cx);
 
-        // Scroll to the selected item if it is set.
         if let Some((ix, strategy)) = self.deferred_scroll_to_index.take() {
             if let Some(item_ix) = self.rows_cache.position_of(&ix) {
                 self.scroll_handle.scroll_to_item(item_ix, strategy);
@@ -583,7 +555,7 @@ where
 
         let loading = self.delegate().loading(cx);
         let query_input = if self.searchable {
-            // sync placeholder
+
             if let Some(placeholder) = &self.options.search_placeholder {
                 self.query_input.update(cx, |input, cx| {
                     input.set_placeholder(placeholder.clone(), window, cx);
@@ -653,7 +625,7 @@ where
                             this.child(self.render_items(items_count, entities_count, window, cx))
                         }
                     })
-                    // Click out to cancel right clicked row
+
                     .when(mouse_right_clicked_index.is_some(), |this| {
                         this.on_mouse_down_out(cx.listener(|this, _, _, cx| {
                             this.mouse_right_clicked_index = None;
@@ -665,7 +637,6 @@ where
     }
 }
 
-/// The List element.
 #[derive(IntoElement)]
 pub struct List<D: ListDelegate + 'static> {
     state: Entity<ListState<D>>,
@@ -677,7 +648,7 @@ impl<D> List<D>
 where
     D: ListDelegate + 'static,
 {
-    /// Create a new List element with the given ListState entity.
+
     pub fn new(state: &Entity<ListState<D>>) -> Self {
         Self {
             state: state.clone(),
@@ -686,13 +657,11 @@ where
         }
     }
 
-    /// Set whether the scrollbar is visible, default is `true`.
     pub fn scrollbar_visible(mut self, visible: bool) -> Self {
         self.options.scrollbar_visible = visible;
         self
     }
 
-    /// Sets the placeholder text for the search input.
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
         self

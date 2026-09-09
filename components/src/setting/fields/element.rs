@@ -3,9 +3,6 @@ use std::rc::Rc;
 
 use crate::setting::{fields::SettingFieldRender, AnySettingField, RenderOptions};
 
-/// A trait for rendering custom setting field elements.
-///
-/// For [`crate::setting::SettingField::element`] method.
 pub trait SettingFieldElement {
     type Element: IntoElement + 'static;
 

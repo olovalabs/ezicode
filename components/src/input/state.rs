@@ -1,7 +1,3 @@
-//! A text input field that allows the user to enter text.
-//!
-//! Based on the `Input` example from the `gpui` crate.
-//! https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/input.rs
 use anyhow::Result;
 use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Entity, EntityInputHandler,
@@ -38,7 +34,7 @@ use crate::{highlighter::DiagnosticSet, input::text_wrapper::LineItem};
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = input, no_json)]
 pub struct Enter {
-    /// Is confirm with secondary.
+
     pub secondary: bool,
 }
 
@@ -224,30 +220,26 @@ pub(crate) fn init(cx: &mut App) {
 
 #[derive(Clone)]
 pub(super) struct LastLayout {
-    /// The visible range (no wrap) of lines in the viewport, the value is row (0-based) index.
+
     pub(super) visible_range: Range<usize>,
-    /// The first visible line top position in scroll viewport.
+
     pub(super) visible_top: Pixels,
-    /// The range of byte offset of the visible lines.
+
     pub(super) visible_range_offset: Range<usize>,
-    /// The last layout lines (Only have visible lines).
+
     pub(super) lines: Rc<Vec<LineLayout>>,
-    /// The line_height of text layout, this will change will InputElement painted.
+
     pub(super) line_height: Pixels,
-    /// The wrap width of text layout, this will change will InputElement painted.
+
     pub(super) wrap_width: Option<Pixels>,
-    /// The line number area width of text layout, if not line number, this will be 0px.
+
     pub(super) line_number_width: Pixels,
-    /// The cursor position (top, left) in pixels.
+
     pub(super) cursor_bounds: Option<Bounds<Pixels>>,
 }
 
 impl LastLayout {
-    /// Get the line layout for the given row (0-based).
-    ///
-    /// 0 is the viewport first visible line.
-    ///
-    /// Returns None if the row is out of range.
+
     pub(crate) fn line(&self, row: usize) -> Option<&LineLayout> {
         if row < self.visible_range.start || row >= self.visible_range.end {
             return None;
@@ -257,7 +249,6 @@ impl LastLayout {
     }
 }
 
-/// InputState to keep editing state of the [`super::Input`].
 pub struct InputState {
     pub(super) focus_handle: FocusHandle,
     pub(super) mode: InputMode,
@@ -266,23 +257,20 @@ pub struct InputState {
     pub(super) history: History<Change>,
     pub(super) blink_cursor: Entity<BlinkCursor>,
     pub(super) loading: bool,
-    /// Range in UTF-8 length for the selected text.
-    ///
-    /// - "Hello 世界💝" = 16
-    /// - "💝" = 4
+
     pub(super) selected_range: Selection,
     pub(super) search_panel: Option<Entity<SearchPanel>>,
     pub(super) searchable: bool,
-    /// Range for save the selected word, use to keep word range when drag move.
+
     pub(super) selected_word_range: Option<Selection>,
     pub(super) selection_reversed: bool,
-    /// The marked range is the temporary insert text on IME typing.
+
     pub(super) ime_marked_range: Option<Selection>,
     pub(super) last_layout: Option<LastLayout>,
     pub(super) last_cursor: Option<usize>,
-    /// The input container bounds
+
     pub(super) input_bounds: Bounds<Pixels>,
-    /// The text bounds
+
     pub(super) last_bounds: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<Selection>,
     pub(super) selecting: bool,
@@ -414,41 +402,16 @@ impl InputState {
         }
     }
 
-    /// Set Input to use multi line mode.
-    ///
-    /// Default rows is 2.
     pub fn multi_line(mut self, multi_line: bool) -> Self {
         self.mode = self.mode.multi_line(multi_line);
         self
     }
 
-    /// Set Input to use [`InputMode::AutoGrow`] mode with min, max rows limit.
     pub fn auto_grow(mut self, min_rows: usize, max_rows: usize) -> Self {
         self.mode = InputMode::auto_grow(min_rows, max_rows);
         self
     }
 
-    /// Set Input to use [`InputMode::CodeEditor`] mode.
-    ///
-    /// Default options:
-    ///
-    /// - line_number: true
-    /// - tab_size: 2
-    /// - hard_tabs: false
-    /// - height: 100%
-    /// - multi_line: true
-    /// - indent_guides: true
-    ///
-    /// If `highlighter` is None, will use the default highlighter.
-    ///
-    /// Code Editor aim for help used to simple code editing or display, not a full-featured code editor.
-    ///
-    /// ## Features
-    ///
-    /// - Syntax Highlighting
-    /// - Auto Indent
-    /// - Line Number
-    /// - Large Text support, up to 50K lines.
     pub fn code_editor(mut self, language: impl Into<SharedString>) -> Self {
         let language: SharedString = language.into();
         self.mode = InputMode::code_editor(language);
@@ -456,20 +419,17 @@ impl InputState {
         self
     }
 
-    /// Set this input is searchable, default is false (Default true for Code Editor).
     pub fn searchable(mut self, searchable: bool) -> Self {
         debug_assert!(self.mode.is_multi_line());
         self.searchable = searchable;
         self
     }
 
-    /// Set placeholder
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
-    /// Set enable/disable line number, only for [`InputMode::CodeEditor`] mode.
     pub fn line_number(mut self, line_number: bool) -> Self {
         debug_assert!(self.mode.is_code_editor() && self.mode.is_multi_line());
         if let InputMode::CodeEditor { line_number: l, .. } = &mut self.mode {
@@ -478,7 +438,6 @@ impl InputState {
         self
     }
 
-    /// Set line number, only for [`InputMode::CodeEditor`] mode.
     pub fn set_line_number(&mut self, line_number: bool, _: &mut Window, cx: &mut Context<Self>) {
         debug_assert!(self.mode.is_code_editor() && self.mode.is_multi_line());
         if let InputMode::CodeEditor { line_number: l, .. } = &mut self.mode {
@@ -487,11 +446,6 @@ impl InputState {
         cx.notify();
     }
 
-    /// Set the number of rows for the multi-line Textarea.
-    ///
-    /// This is only used when `multi_line` is set to true.
-    ///
-    /// default: 2
     pub fn rows(mut self, rows: usize) -> Self {
         match &mut self.mode {
             InputMode::PlainText { rows: r, .. } | InputMode::CodeEditor { rows: r, .. } => {
@@ -509,7 +463,6 @@ impl InputState {
         self
     }
 
-    /// Set highlighter language for for [`InputMode::CodeEditor`] mode.
     pub fn set_highlighter(
         &mut self,
         new_language: impl Into<SharedString>,
@@ -549,7 +502,6 @@ impl InputState {
         self.mode.diagnostics_mut()
     }
 
-    /// Set placeholder
     pub fn set_placeholder(
         &mut self,
         placeholder: impl Into<SharedString>,
@@ -560,13 +512,6 @@ impl InputState {
         cx.notify();
     }
 
-    /// Find which line and sub-line the given offset belongs to, along with the position within that sub-line.
-    ///
-    /// Returns:
-    ///
-    /// - The index of the line (zero-based) containing the offset.
-    /// - The index of the sub-line (zero-based) within the line containing the offset.
-    /// - The position of the offset.
     #[allow(unused)]
     pub(super) fn line_and_position_for_offset(
         &self,
@@ -593,9 +538,6 @@ impl InputState {
         (0, 0, None)
     }
 
-    /// Set the text of the input field.
-    ///
-    /// And the selection_range will be reset to 0..0.
     pub fn set_value(
         &mut self,
         value: impl Into<SharedString>,
@@ -609,7 +551,6 @@ impl InputState {
         self.disabled = was_disabled;
         self.history.ignore = false;
 
-        // Ensure cursor to start when set text
         if self.mode.is_single_line() {
             self.selected_range = (self.text.len()..self.text.len()).into();
         } else {
@@ -621,15 +562,11 @@ impl InputState {
             self.lsp.reset();
         }
 
-        // Move scroll to top
         self.scroll_handle.set_offset(point(px(0.), px(0.)));
 
         cx.notify();
     }
 
-    /// Insert text at the current cursor position.
-    ///
-    /// And the cursor will be moved to the end of inserted text.
     pub fn insert(
         &mut self,
         text: impl Into<SharedString>,
@@ -642,9 +579,6 @@ impl InputState {
         self.selected_range = (self.selected_range.end..self.selected_range.end).into();
     }
 
-    /// Replace text at the current cursor position.
-    ///
-    /// And the cursor will be moved to the end of replaced text.
     pub fn replace(
         &mut self,
         text: impl Into<SharedString>,
@@ -668,47 +602,35 @@ impl InputState {
         self.reset_highlighter(cx);
     }
 
-    /// Set with disabled mode.
-    ///
-    /// See also: [`Self::set_disabled`], [`Self::is_disabled`].
     #[allow(unused)]
     pub(crate) fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    /// Set with password masked state.
-    ///
-    /// Only for [`InputMode::SingleLine`] mode.
     pub fn masked(mut self, masked: bool) -> Self {
         debug_assert!(self.mode.is_single_line());
         self.masked = masked;
         self
     }
 
-    /// Set the password masked state of the input field.
-    ///
-    /// Only for [`InputMode::SingleLine`] mode.
     pub fn set_masked(&mut self, masked: bool, _: &mut Window, cx: &mut Context<Self>) {
         debug_assert!(self.mode.is_single_line());
         self.masked = masked;
         cx.notify();
     }
 
-    /// Set true to clear the input by pressing Escape key.
     pub fn clean_on_escape(mut self) -> Self {
         self.clean_on_escape = true;
         self
     }
 
-    /// Set the soft wrap mode for multi-line input, default is true.
     pub fn soft_wrap(mut self, wrap: bool) -> Self {
         debug_assert!(self.mode.is_multi_line());
         self.soft_wrap = wrap;
         self
     }
 
-    /// Update the soft wrap mode for multi-line input, default is true.
     pub fn set_soft_wrap(&mut self, wrap: bool, _: &mut Window, cx: &mut Context<Self>) {
         debug_assert!(self.mode.is_multi_line());
         self.soft_wrap = wrap;
@@ -721,7 +643,6 @@ impl InputState {
 
             self.text_wrapper.set_wrap_width(Some(wrap_width), cx);
 
-            // Reset scroll to left 0
             let mut offset = self.scroll_handle.offset();
             offset.x = px(0.);
             self.scroll_handle.set_offset(offset);
@@ -731,18 +652,12 @@ impl InputState {
         cx.notify();
     }
 
-    /// Set the regular expression pattern of the input field.
-    ///
-    /// Only for [`InputMode::SingleLine`] mode.
     pub fn pattern(mut self, pattern: regex::Regex) -> Self {
         debug_assert!(self.mode.is_single_line());
         self.pattern = Some(pattern);
         self
     }
 
-    /// Set the regular expression pattern of the input field with reference.
-    ///
-    /// Only for [`InputMode::SingleLine`] mode.
     pub fn set_pattern(
         &mut self,
         pattern: regex::Regex,
@@ -753,9 +668,6 @@ impl InputState {
         self.pattern = Some(pattern);
     }
 
-    /// Set the validation function of the input field.
-    ///
-    /// Only for [`InputMode::SingleLine`] mode.
     pub fn validate(mut self, f: impl Fn(&str, &mut Context<Self>) -> bool + 'static) -> Self {
         debug_assert!(self.mode.is_single_line());
         self.validate = Some(Box::new(f));
@@ -1212,11 +1124,9 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Clear inline completion on any mouse interaction
+
         self.clear_inline_completion(cx);
 
-        // If there have IME marked range and is empty (Means pressed Esc to abort IME typing)
-        // Clear the marked range.
         if let Some(ime_marked_range) = &self.ime_marked_range {
             if ime_marked_range.len() == 0 {
                 self.ime_marked_range = None;
@@ -1230,13 +1140,11 @@ impl InputState {
             return;
         }
 
-        // Double click to select word
         if event.button == MouseButton::Left && event.click_count == 2 {
             self.select_word(offset, window, cx);
             return;
         }
 
-        // Show Mouse context menu
         if event.button == MouseButton::Right {
             self.handle_right_click_menu(event, offset, window, cx);
             return;
@@ -1268,7 +1176,7 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Show diagnostic popover on mouse move
+
         let offset = self.index_for_mouse_position(event.position);
         self.handle_mouse_move(offset, event, window, cx);
 
@@ -1316,7 +1224,6 @@ impl InputState {
         let old_offset = self.scroll_handle.offset();
         self.update_scroll_offset(Some(old_offset + delta), cx);
 
-        // Only stop propagation if the offset actually changed
         if self.scroll_handle.offset() != old_offset {
             cx.stop_propagation();
         }
@@ -1346,9 +1253,6 @@ impl InputState {
         cx.notify();
     }
 
-    /// Scroll to make the given offset visible.
-    ///
-    /// If `direction` is Some, will keep edges at the same side.
     pub(crate) fn scroll_to(
         &mut self,
         offset: usize,
@@ -1383,13 +1287,13 @@ impl InputState {
             .lines
             .get(row.saturating_sub(last_layout.visible_range.start))
         {
-            // Check to scroll horizontally and soft wrap lines
+
             if let Some(pos) = line.position_for_index(point.column, line_height) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
                 row_offset_y += pos.y;
                 if col_offset_x - RIGHT_MARGIN < -scroll_offset.x {
-                    // If the position is out of the visible area, scroll to make it visible
+
                     scroll_offset.x = -col_offset_x + RIGHT_MARGIN;
                 } else if col_offset_x + RIGHT_MARGIN > -scroll_offset.x + bounds_width {
                     scroll_offset.x = -(col_offset_x - bounds_width + RIGHT_MARGIN);
@@ -1397,22 +1301,19 @@ impl InputState {
             }
         }
 
-        // Check if row_offset_y is out of the viewport
-        // If row offset is not in the viewport, scroll to make it visible
         let edge_height = if direction.is_some() && self.mode.is_code_editor() {
             3 * line_height
         } else {
             line_height
         };
         if row_offset_y - edge_height + line_height < -scroll_offset.y {
-            // Scroll up
+
             scroll_offset.y = -row_offset_y + edge_height - line_height;
         } else if row_offset_y + edge_height > -scroll_offset.y + bounds.size.height {
-            // Scroll down
+
             scroll_offset.y = -(row_offset_y - bounds.size.height + edge_height);
         }
 
-        // Avoid necessary scroll, when it was already in the correct position.
         if direction == Some(MoveDirection::Up) {
             scroll_offset.y = scroll_offset.y.max(was_offset.y);
         } else if direction == Some(MoveDirection::Down) {
@@ -1500,9 +1401,6 @@ impl InputState {
         self.history.ignore = false;
     }
 
-    /// Get byte offset of the cursor.
-    ///
-    /// The offset is the UTF-8 offset.
     pub fn cursor(&self) -> usize {
         if let Some(ime_marked_range) = &self.ime_marked_range {
             return ime_marked_range.end;
@@ -1516,7 +1414,7 @@ impl InputState {
     }
 
     pub(crate) fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
-        // If the text is empty, always return 0
+
         if self.text.len() == 0 {
             return 0;
         }
@@ -1530,16 +1428,6 @@ impl InputState {
         let line_height = last_layout.line_height;
         let line_number_width = last_layout.line_number_width;
 
-        // TIP: About the IBeam cursor
-        //
-        // If cursor style is IBeam, the mouse mouse position is in the middle of the cursor (This is special in OS)
-
-        // The position is relative to the bounds of the text input
-        //
-        // bounds.origin:
-        //
-        // - included the input padding.
-        // - included the scroll offset.
         let inner_position = position - bounds.origin - point(line_number_width, px(0.));
 
         let mut index = last_layout.visible_range_offset.start;
@@ -1562,7 +1450,6 @@ impl InputState {
                 continue;
             };
 
-            // Return offset by use closest_index_for_x if is single line mode.
             if self.mode.is_single_line() {
                 index = line_layout.closest_index_for_x(pos.x);
                 break;
@@ -1575,7 +1462,6 @@ impl InputState {
                 break;
             }
 
-            // +1 for `\n`
             index += line_layout.len() + 1;
         }
 
@@ -1586,24 +1472,20 @@ impl InputState {
         };
 
         if self.masked {
-            // When is masked, the index is char index, need convert to byte index.
+
             self.text.char_index_to_offset(index)
         } else {
             index
         }
     }
 
-    /// Returns a y offsetted point for the line origin.
     fn line_origin_with_y_offset(
         &self,
         y_offset: &mut Pixels,
         line: &LineItem,
         line_height: Pixels,
     ) -> Point<Pixels> {
-        // NOTE: About line.wrap_boundaries.len()
-        //
-        // If only 1 line, the value is 0
-        // If have 2 line, the value is 1
+
         if self.mode.is_multi_line() {
             let p = point(px(0.), *y_offset);
             *y_offset += line.height(line_height);
@@ -1613,11 +1495,6 @@ impl InputState {
         }
     }
 
-    /// Select the text from the current cursor position to the given offset.
-    ///
-    /// The offset is the UTF-8 offset.
-    ///
-    /// Ensure the offset use self.next_boundary or self.previous_boundary to get the correct offset.
     pub(crate) fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.clear_inline_completion(cx);
 
@@ -1633,7 +1510,6 @@ impl InputState {
             self.selected_range = (self.selected_range.end..self.selected_range.start).into();
         }
 
-        // Ensure keep word selected range
         if let Some(word_range) = self.selected_word_range.as_ref() {
             if self.selected_range.start > word_range.start {
                 self.selected_range.start = word_range.start;
@@ -1648,7 +1524,6 @@ impl InputState {
         cx.notify()
     }
 
-    /// Unselects the currently selected text.
     pub fn unselect(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         let offset = self.cursor();
         self.selected_range = (offset..offset).into();
@@ -1697,7 +1572,6 @@ impl InputState {
         offset
     }
 
-    /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
         (self.focus_handle.is_focused(window) || self.is_context_menu_open(cx))
             && self.blink_cursor.read(cx).visible()
@@ -1715,9 +1589,6 @@ impl InputState {
         if self.is_context_menu_open(cx) {
             return;
         }
-
-        // NOTE: Do not cancel select, when blur.
-        // Because maybe user want to copy the selected text by AppMenuBar (will take focus handle).
 
         self.hover_popover = None;
         self.diagnostic_popover = None;
@@ -1791,15 +1662,6 @@ impl InputState {
         pattern.is_match(new_text)
     }
 
-    /// Set the mask pattern for formatting the input text.
-    ///
-    /// The pattern can contain:
-    /// - 9: Any digit or dot
-    /// - A: Any letter
-    /// - *: Any character
-    /// - Other characters will be treated as literal mask characters
-    ///
-    /// Example: "(999)999-999" for phone numbers
     pub fn mask_pattern(mut self, pattern: impl Into<MaskPattern>) -> Self {
         self.mask_pattern = pattern.into();
         if let Some(placeholder) = self.mask_pattern.placeholder() {
@@ -1825,11 +1687,10 @@ impl InputState {
         let wrap_width_changed = self.input_bounds.size.width != new_bounds.size.width;
         self.input_bounds = new_bounds;
 
-        // Update text_wrapper wrap_width if changed.
         if let Some(last_layout) = self.last_layout.as_ref() {
             if wrap_width_changed {
                 let wrap_width = if !self.soft_wrap {
-                    // None to disable wrapping (will use Pixels::MAX)
+
                     None
                 } else {
                     last_layout.wrap_width

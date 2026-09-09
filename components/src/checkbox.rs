@@ -10,7 +10,6 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window,
 };
 
-/// A Checkbox element.
 #[derive(IntoElement)]
 pub struct Checkbox {
     id: ElementId,
@@ -64,13 +63,11 @@ impl Checkbox {
         self
     }
 
-    /// Set the tab stop for the checkbox, default is true.
     pub fn tab_stop(mut self, tab_stop: bool) -> Self {
         self.tab_stop = tab_stop;
         self
     }
 
-    /// Set the tab index for the checkbox, default is 0.
     pub fn tab_index(mut self, tab_index: isize) -> Self {
         self.tab_index = tab_index;
         self

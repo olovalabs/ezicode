@@ -1,19 +1,6 @@
-//! Real Git integration.
-//!
-//! Talks to the system `git` binary (the same one the user already has)
-//! through `std::process::Command` — no new dependencies. Every function is
-//! pure (process in, data out) so the porcelain/diff parsers can be unit
-//! tested without a repository.
-//!
-//! The status format parsed here is `git status --porcelain=v1 -z`, which is
-//! stable and machine friendly (NUL-separated records, raw paths, rename
-//! destinations on their own record). Verified against git 2.x.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Worktree / index change kinds, mirroring the letters of `git status
-/// --porcelain`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChangeKind {
     Modified,
@@ -27,7 +14,7 @@ pub enum ChangeKind {
 }
 
 impl ChangeKind {
-    /// One-letter label shown in the source-control list (VS Code style).
+
     pub fn letter(self) -> &'static str {
         match self {
             ChangeKind::Modified => "M",
@@ -73,7 +60,6 @@ impl GitChange {
         self.index.map(ChangeKind::letter).unwrap_or(" ")
     }
 
-    /// Letter shown next to the file in the CHANGES section.
     pub fn worktree_letter(&self) -> &'static str {
         if self.untracked {
             "U"
@@ -508,8 +494,7 @@ mod tests {
 
     #[test]
     fn branch_header_is_skipped_in_change_list() {
-        // `git status --porcelain=v1 -z --branch` prepends a `## <branch>`
-        // record. It must not appear as a change entry.
+
         let raw = "## main\0 M a.rs\0";
         let changes = parse_porcelain(raw, root());
         assert_eq!(changes.len(), 1);
@@ -522,19 +507,19 @@ mod tests {
             branch_from_porcelain("## main\0 M a.rs\0"),
             Some("main".to_string())
         );
-        // Local branch with an upstream + tracking info.
+
         assert_eq!(
             branch_from_porcelain("## main...origin/main [ahead 1]\0"),
             Some("main".to_string())
         );
-        // Fresh repository with no commits yet.
+
         assert_eq!(
             branch_from_porcelain("## No commits yet on main\0"),
             Some("main".to_string())
         );
-        // Detached HEAD falls back to rev-parse (None here).
+
         assert_eq!(branch_from_porcelain("## HEAD (no branch)\0"), None);
-        // No header at all.
+
         assert_eq!(branch_from_porcelain(" M a.rs\0"), None);
     }
 
@@ -643,7 +628,7 @@ index 7898192..c1827f0 100644
                 DiffLineKind::Add,
             ]
         );
-        // `@@ -1 +1,2 @@`: old starts at 1, new starts at 1.
+
         assert_eq!(lines[4].text, "@@ -1 +1,2 @@");
         assert_eq!(lines[5].old_no, Some(1));
         assert_eq!(lines[5].new_no, None);
@@ -684,5 +669,3 @@ index 7898192..c1827f0 100644
         assert_eq!(lines[7].new_no, Some(33));
     }
 }
-
-

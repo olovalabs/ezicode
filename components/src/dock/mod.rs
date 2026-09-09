@@ -29,79 +29,68 @@ pub(crate) fn init(cx: &mut App) {
 actions!(dock, [ToggleZoom, ClosePanel]);
 
 pub enum DockEvent {
-    /// The layout of the dock has changed, subscribers this to save the layout.
-    ///
-    /// This event is emitted when every time the layout of the dock has changed,
-    /// So it emits may be too frequently, you may want to debounce the event.
+
     LayoutChanged,
 
-    /// The drag item drop event.
     DragDrop(AnyDrag),
 }
 
-/// The main area of the dock.
 pub struct DockArea {
     id: SharedString,
-    /// The version is used to special the default layout, this is like the `panel_version` in [`Panel`](Panel).
+
     version: Option<usize>,
     pub(crate) bounds: Bounds<Pixels>,
 
-    /// The center view of the dockarea.
     items: DockItem,
 
-    /// The entity_id of the [`TabPanel`](TabPanel) where each toggle button should be displayed,
     toggle_button_panels: Edges<Option<EntityId>>,
 
-    /// Whether to show the toggle button.
     toggle_button_visible: bool,
-    /// The left dock of the dock_area.
+
     left_dock: Option<Entity<Dock>>,
-    /// The bottom dock of the dock_area.
+
     bottom_dock: Option<Entity<Dock>>,
-    /// The right dock of the dock_area.
+
     right_dock: Option<Entity<Dock>>,
-    /// The top zoom view of the dock_area, if any.
+
     zoom_view: Option<AnyView>,
 
-    /// Lock panels layout, but allow to resize.
     locked: bool,
 
-    /// The panel style, default is [`PanelStyle::Default`](PanelStyle::Default).
     pub(crate) panel_style: PanelStyle,
 
     _subscriptions: Vec<Subscription>,
 }
 
-/// DockItem is a tree structure that represents the layout of the dock.
 #[derive(Clone)]
 pub enum DockItem {
-    /// Split layout
+
     Split {
         axis: Axis,
-        /// Self size, only used for build split panels
+
         size: Option<Pixels>,
         items: Vec<DockItem>,
-        /// Items sizes
+
         sizes: Vec<Option<Pixels>>,
         view: Entity<StackPanel>,
     },
-    /// Tab layout
+
     Tabs {
-        /// Self size, only used for build split panels
+
         size: Option<Pixels>,
         items: Vec<Arc<dyn PanelView>>,
         active_ix: usize,
         view: Entity<TabPanel>,
     },
-    /// Panel layout
+
     Panel {
-        /// Self size, only used for build split panels
+
         size: Option<Pixels>,
         view: Arc<dyn PanelView>,
     },
-    /// Tiles layout
+
     Tiles {
-        /// Self size, only used for build split panels
+
         size: Option<Pixels>,
         items: Vec<TileItem>,
         view: Entity<Tiles>,
@@ -980,15 +969,14 @@ impl DockArea {
                 // We subscribe to the tab panel event in StackPanel's insert_panel
             }
             DockItem::Tiles { .. } => {
-                // We subscribe to the tab panel event in Tiles's [`add_item`](Tiles::add_item)
+
             }
             DockItem::Panel { .. } => {
-                // Not supported
+
             }
         }
     }
 
-    /// Subscribe zoom event on the panel
     pub(crate) fn subscribe_panel<P: Panel>(
         &mut self,
         view: &Entity<P>,
@@ -1032,7 +1020,6 @@ impl DockArea {
         self._subscriptions.push(subscription);
     }
 
-    /// Returns the ID of the dock area.
     pub fn id(&self) -> SharedString {
         self.id.clone()
     }
@@ -1062,19 +1049,17 @@ impl DockArea {
     }
 
     pub fn update_toggle_button_tab_panels(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        // Left toggle button
+
         self.toggle_button_panels.left = self
             .items
             .left_top_tab_panel(cx)
             .map(|view| view.entity_id());
 
-        // Right toggle button
         self.toggle_button_panels.right = self
             .items
             .right_top_tab_panel(cx)
             .map(|view| view.entity_id());
 
-        // Bottom toggle button
         self.toggle_button_panels.bottom = self
             .bottom_dock
             .as_ref()
@@ -1106,40 +1091,40 @@ impl Render for DockArea {
                 } else {
                     match &self.items {
                         DockItem::Tiles { view, .. } => {
-                            // render tiles
+
                             this.child(view.clone())
                         }
                         _ => {
-                            // render dock
+
                             this.child(
                                 div()
                                     .flex()
                                     .flex_row()
                                     .h_full()
-                                    // Left dock
+
                                     .when_some(self.left_dock.clone(), |this, dock| {
                                         this.child(div().flex().flex_none().child(dock))
                                     })
-                                    // Center
+
                                     .child(
                                         div()
                                             .flex()
                                             .flex_1()
                                             .flex_col()
                                             .overflow_hidden()
-                                            // Top center
+
                                             .child(
                                                 div()
                                                     .flex_1()
                                                     .overflow_hidden()
                                                     .child(self.render_items(window, cx)),
                                             )
-                                            // Bottom Dock
+
                                             .when_some(self.bottom_dock.clone(), |this, dock| {
                                                 this.child(dock)
                                             }),
                                     )
-                                    // Right Dock
+
                                     .when_some(self.right_dock.clone(), |this, dock| {
                                         this.child(div().flex().flex_none().child(dock))
                                     }),

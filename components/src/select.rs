@@ -32,23 +32,20 @@ pub(crate) fn init(cx: &mut App) {
     ])
 }
 
-/// A trait for items that can be displayed in a select.
 pub trait SelectItem: Clone {
     type Value: Clone;
     fn title(&self) -> SharedString;
-    /// Customize the display title used to selected item in Select Input.
-    ///
-    /// If return None, the title will be used.
+
     fn display_title(&self) -> Option<AnyElement> {
         None
     }
-    /// Render the item for the select dropdown menu, default is to render the title.
+
     fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
         self.title().into_element()
     }
-    /// Get the value of the item.
+
     fn value(&self) -> &Self::Value;
-    /// Check if the item matches the query for search, default is to match the title.
+
     fn matches(&self, query: &str) -> bool {
         self.title().to_lowercase().contains(&query.to_lowercase())
     }
@@ -338,7 +335,6 @@ impl Default for SelectOptions {
     }
 }
 
-/// State of the [`Select`].
 pub struct SelectState<D: SelectDelegate + 'static> {
     focus_handle: FocusHandle,
     options: SelectOptions,
@@ -361,7 +357,6 @@ pub struct Select<D: SelectDelegate + 'static> {
     options: SelectOptions,
 }
 
-/// A built-in searchable vector for select items.
 #[derive(Debug, Clone)]
 pub struct SearchableVec<T> {
     items: Vec<T>,
@@ -502,7 +497,6 @@ impl<I: SelectItem> SelectDelegate for SearchableVec<SelectGroup<I>> {
     }
 }
 
-/// A group of select items with a title.
 #[derive(Debug, Clone)]
 pub struct SelectGroup<I: SelectItem> {
     pub title: SharedString,
@@ -513,7 +507,7 @@ impl<I> SelectGroup<I>
 where
     I: SelectItem,
 {
-    /// Create a new SelectGroup with the given title.
+
     pub fn new(title: impl Into<SharedString>) -> Self {
         Self {
             title: title.into(),
@@ -521,13 +515,11 @@ where
         }
     }
 
-    /// Add an item to the group.
     pub fn item(mut self, item: I) -> Self {
         self.items.push(item);
         self
     }
 
-    /// Add multiple items to the group.
     pub fn items(mut self, items: impl IntoIterator<Item = I>) -> Self {
         self.items.extend(items);
         self
@@ -633,17 +625,14 @@ where
         });
     }
 
-    /// Get the selected index of the select.
     pub fn selected_index(&self, cx: &App) -> Option<IndexPath> {
         self.list.read(cx).selected_index()
     }
 
-    /// Get the selected value of the select.
     pub fn selected_value(&self) -> Option<&<D::Item as SelectItem>::Value> {
         self.selected_value.as_ref()
     }
 
-    /// Focus the select input.
     pub fn focus(&self, window: &mut Window, _: &mut App) {
         self.focus_handle.focus(window);
     }
@@ -656,12 +645,11 @@ where
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // When the select and dropdown menu are both not focused, close the dropdown menu.
+
         if self.list.read(cx).is_focused(window, cx) || self.focus_handle.is_focused(window) {
             return;
         }
 
-        // If the selected index is not the final selected index, we need to restore it.
         let final_selected_index = self.final_selected_index;
         let selected_index = self.selected_index(cx);
         if final_selected_index != selected_index {
@@ -693,7 +681,7 @@ where
     }
 
     fn enter(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
-        // Propagate the event to the parent view, for example to the Dialog to support ENTER to confirm.
+
         cx.propagate();
 
         if !self.open {
@@ -729,7 +717,6 @@ where
         cx.emit(SelectEvent::Confirm(None));
     }
 
-    /// Returns the title element for the select input.
     fn display_title(&mut self, _: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let default_title = div()
             .text_color(cx.theme().accent_foreground)
@@ -929,59 +916,46 @@ where
         }
     }
 
-    /// Set the width of the dropdown menu, default: Length::Auto
     pub fn menu_width(mut self, width: impl Into<Length>) -> Self {
         self.options.menu_width = width.into();
         self
     }
 
-    /// Set the placeholder for display when select value is empty.
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.placeholder = Some(placeholder.into());
         self
     }
 
-    /// Set the right icon for the select input, instead of the default arrow icon.
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.options.icon = Some(icon.into());
         self
     }
 
-    /// Set title prefix for the select.
-    ///
-    /// e.g.: Country: United States
-    ///
-    /// You should set the label is `Country: `
     pub fn title_prefix(mut self, prefix: impl Into<SharedString>) -> Self {
         self.options.title_prefix = Some(prefix.into());
         self
     }
 
-    /// Set whether to show the clear button when the input field is not empty, default is false.
     pub fn cleanable(mut self, cleanable: bool) -> Self {
         self.options.cleanable = cleanable;
         self
     }
 
-    /// Sets the placeholder text for the search input.
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
         self
     }
 
-    /// Set the disable state for the select.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.options.disabled = disabled;
         self
     }
 
-    /// Set the element to display when the select list is empty.
     pub fn empty(mut self, el: impl IntoElement) -> Self {
         self.options.empty = Some(el.into_any_element());
         self
     }
 
-    /// Set the appearance of the select, if false the select input will no border, background.
     pub fn appearance(mut self, appearance: bool) -> Self {
         self.options.appearance = appearance;
         self
@@ -1029,7 +1003,7 @@ where
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let disabled = self.options.disabled;
         let focus_handle = self.state.focus_handle(cx);
-        // If the size has change, set size to self.list, to change the QueryInput size.
+
         self.state.update(cx, |this, _| {
             this.options = self.options;
         });

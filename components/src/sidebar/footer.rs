@@ -5,7 +5,6 @@ use gpui::{
 
 use crate::{h_flex, menu::DropdownMenu, ActiveTheme as _, Collapsible, Selectable};
 
-/// Footer for the [`super::Sidebar`].
 #[derive(IntoElement)]
 pub struct SidebarFooter {
     base: Div,
@@ -14,7 +13,7 @@ pub struct SidebarFooter {
 }
 
 impl SidebarFooter {
-    /// Create a new [`SidebarFooter`].
+
     pub fn new() -> Self {
         Self {
             base: h_flex().gap_2().w_full(),

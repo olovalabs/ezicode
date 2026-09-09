@@ -251,7 +251,6 @@ impl StackPanel {
             ix
         };
 
-        // Get avg size of all panels to insert new panel, if size is None.
         let size = match size {
             Some(size) => size,
             None => {
@@ -268,9 +267,6 @@ impl StackPanel {
         cx.notify();
     }
 
-    /// Remove panel from the stack.
-    ///
-    /// If `ix` is not found, do nothing.
     pub fn remove_panel(
         &mut self,
         panel: Arc<dyn PanelView>,
@@ -290,7 +286,6 @@ impl StackPanel {
         self.remove_self_if_empty(window, cx);
     }
 
-    /// Replace the old panel with the new panel at same index.
     pub(super) fn replace_panel(
         &mut self,
         old_panel: Arc<dyn PanelView>,
@@ -309,7 +304,6 @@ impl StackPanel {
         }
     }
 
-    /// If children is empty, remove self from parent view.
     pub(crate) fn remove_self_if_empty(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_root() {
             return;
@@ -330,7 +324,6 @@ impl StackPanel {
         cx.notify();
     }
 
-    /// Find the first top left in the stack.
     pub(super) fn left_top_tab_panel(
         &self,
         check_parent: bool,
@@ -358,7 +351,6 @@ impl StackPanel {
         }
     }
 
-    /// Find the first top right in the stack.
     pub(super) fn right_top_tab_panel(
         &self,
         check_parent: bool,
@@ -391,7 +383,6 @@ impl StackPanel {
         }
     }
 
-    /// Remove all panels from the stack.
     pub(super) fn remove_all_panels(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.panels.clear();
         self.state.update(cx, |state, cx| {
@@ -400,7 +391,6 @@ impl StackPanel {
         });
     }
 
-    /// Change the axis of the stack panel.
     pub(super) fn set_axis(&mut self, axis: Axis, _: &mut Window, cx: &mut Context<Self>) {
         self.axis = axis;
         cx.notify();

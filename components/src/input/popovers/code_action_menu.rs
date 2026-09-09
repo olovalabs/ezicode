@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct CodeActionItem {
-    /// The `id` of the `CodeActionProvider` that provided this item.
+
     pub(crate) provider_id: SharedString,
     pub(crate) action: CodeAction,
 }
@@ -140,7 +140,6 @@ impl ListDelegate for MenuDelegate {
     }
 }
 
-/// A context menu for code completions and code actions.
 pub struct CodeActionMenu {
     offset: usize,
     state: Entity<InputState>,
@@ -152,9 +151,7 @@ pub struct CodeActionMenu {
 }
 
 impl CodeActionMenu {
-    /// Creates a new `CompletionMenu` with the given offset and completion items.
-    ///
-    /// NOTE: This element should not call from InputState::new, unless that will stack overflow.
+
     pub(crate) fn new(
         state: Entity<InputState>,
         window: &mut Window,
@@ -263,7 +260,6 @@ impl CodeActionMenu {
         self.open
     }
 
-    /// Hide the completion menu and reset the trigger start offset.
     pub(crate) fn hide(&mut self, cx: &mut Context<Self>) {
         self.open = false;
         cx.notify();

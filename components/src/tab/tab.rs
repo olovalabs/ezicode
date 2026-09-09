@@ -8,7 +8,6 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window,
 };
 
-/// Tab variants.
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)]
 pub enum TabVariant {
     #[default]
@@ -94,7 +93,6 @@ impl TabVariant {
         }
     }
 
-    /// Default px(12) to match panel px_3, See [`crate::dock::TabPanel`]
     fn inner_paddings(&self, size: Size) -> Edges<Pixels> {
         let mut padding_x = match size {
             Size::XSmall => px(8.),
@@ -379,7 +377,6 @@ impl TabVariant {
     }
 }
 
-/// A Tab element for the [`super::TabBar`].
 #[derive(IntoElement)]
 pub struct Tab {
     id: ElementId,
@@ -520,7 +517,6 @@ impl Tab {
         self
     }
 
-    /// Set id to the tab.
     pub(super) fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
         self

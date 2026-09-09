@@ -1,8 +1,3 @@
-//! App icon (ezicode logo) rendering utilities.
-//!
-//! Renders the embedded logo wherever the app needs branding — welcome
-//! screen, title bar, about dialog, etc.
-
 use std::path::PathBuf;
 
 use gpui::prelude::*;
@@ -11,10 +6,8 @@ use gpui_component::IconName;
 
 use crate::theme::Colors;
 
-/// Get the path to the app logo PNG (if it exists on disk).
-/// We use a path-based image so the GPUI image cache can handle it.
 fn logo_path() -> Option<PathBuf> {
-    // Check common locations
+
     let candidates = [
         "assets/logo/ezicode.png",
         "app/assets/logo/ezicode.png",
@@ -32,10 +25,6 @@ fn logo_path() -> Option<PathBuf> {
     None
 }
 
-/// Render the app icon at a specific size.
-///
-/// Uses the disk logo or embedded asset if available. If not, falls back to a
-/// colored circle with a stylized "E" — still recognizable as branding.
 pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
     if let Some(path) = logo_path() {
         return img(path)
@@ -44,7 +33,6 @@ pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
             .into_any_element();
     }
 
-    // Try embedded asset from rust-embed (assets/logo/ezicode.png)
     if crate::assets::AppAssets::get("logo/ezicode.png").is_some() {
         return img("logo/ezicode.png")
             .w(px(size))
@@ -52,7 +40,6 @@ pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
             .into_any_element();
     }
 
-    // Fallback: colored circle with "E"
     div()
         .w(px(size))
         .h(px(size))
@@ -68,7 +55,6 @@ pub fn render_app_icon(size: f32, t: &Colors) -> AnyElement {
         .into_any_element()
 }
 
-/// Render the app icon next to a title — for use in headers/badges.
 #[allow(dead_code)]
 pub fn render_app_icon_with_label(
     size: f32,
@@ -91,9 +77,7 @@ pub fn render_app_icon_with_label(
         .into_any_element()
 }
 
-/// Just the icon glyph name (for menu items / buttons).
-/// This makes the app identifiable in dropdowns.
 #[allow(dead_code)]
 pub fn app_icon_name() -> IconName {
-    IconName::Star  // Placeholder; will use a custom ezicode glyph if added
+    IconName::Star
 }

@@ -26,7 +26,6 @@ use crate::{
 
 actions!(inspector, [ToggleInspector]);
 
-/// Initialize the inspector and register the action to toggle it.
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys(vec![
         #[cfg(target_os = "macos")]
@@ -60,11 +59,11 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 struct EditorState {
-    /// The input state for the editor.
+
     state: Entity<InputState>,
-    /// Error to display from parsing the input, or if serialization errors somehow occur.
+
     error: Option<SharedString>,
-    /// Whether the editor is currently being edited.
+
     editing: bool,
 }
 
@@ -73,9 +72,9 @@ pub struct DivInspector {
     inspector_state: Option<DivInspectorState>,
     rust_state: EditorState,
     json_state: EditorState,
-    /// Initial style before any edits
+
     initial_style: StyleRefinement,
-    /// Part of the initial style that could not be converted to Rust code
+
     unconvertible_style: StyleRefinement,
     _subscriptions: Vec<Subscription>,
 }
@@ -158,7 +157,7 @@ impl DivInspector {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Skip updating if the inspector ID hasn't changed
+
         if self.inspector_id.as_ref() == Some(&inspector_id) {
             return;
         }
@@ -371,7 +370,6 @@ fn rust_to_style(mut style: StyleRefinement, source: &str) -> (StyleRefinement, 
             }
         }
 
-        // +1 \n
         offset += 1;
     }
 

@@ -14,7 +14,7 @@ use crate::{
 
 pub struct HoverPopover {
     editor: Entity<InputState>,
-    /// The symbol range byte of the hover trigger.
+
     pub(crate) symbol_range: Range<usize>,
     pub(crate) hover: Rc<lsp_types::Hover>,
 }

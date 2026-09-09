@@ -1,29 +1,17 @@
-//! The explorer's in-memory snapshot of the opened folder. Directory levels
-//! are loaded lazily as the user expands nodes.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// A node of the explorer tree; children are loaded on first expand.
 #[derive(Clone, Debug)]
 pub struct TreeNode {
     pub name: String,
     pub path: PathBuf,
     pub is_dir: bool,
     pub expanded: bool,
-    /// Distinguishes an empty directory from a directory that has not been
-    /// opened yet. Without this bit, expanding an empty folder performed a
-    /// new directory scan every time it was collapsed and expanded.
+
     pub children_loaded: bool,
     pub children: Vec<TreeNode>,
 }
 
-/// The small, render-ready representation of one visible row.
-///
-/// Keeping this separate from [`TreeNode`] is important: the UI should not
-/// walk a recursive tree or borrow the whole snapshot just to render a single
-/// virtualized row. These rows are rebuilt only when the tree structure or
-/// expansion state changes, not on every paint.
 #[derive(Clone, Debug)]
 pub struct VisibleTreeRow {
     pub name: String,
@@ -33,7 +21,6 @@ pub struct VisibleTreeRow {
     pub depth: usize,
 }
 
-/// Directories / hidden system files never shown in the explorer by default.
 const SKIP: &[&str] = &[
     "target",
     "node_modules",
@@ -43,21 +30,14 @@ const SKIP: &[&str] = &[
     "Thumbs.db",
 ];
 
-/// One directory entry with every field the sort needs, precomputed once.
-///
-/// The old implementation called `Path::is_dir()` (a syscall) *inside the
-/// sort comparator* — O(n·log n) syscalls — plus allocated two lowercase
-/// `String`s per comparison. Materializing the entries once keeps the total
-/// probe count at O(n) and makes the comparator allocation-free.
 struct Entry {
     name: String,
-    /// Case-insensitive sort key: the lowercased name, computed once.
+
     sort_key: String,
     path: PathBuf,
     is_dir: bool,
 }
 
-/// Read one directory level: dirs first, then files, both case-insensitively alphabetically.
 pub fn load_dir(dir: &Path) -> Vec<TreeNode> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else {
@@ -69,10 +49,7 @@ pub fn load_dir(dir: &Path) -> Vec<TreeNode> {
         if SKIP.iter().any(|s| *s == name) {
             continue;
         }
-        // `DirEntry::file_type` is served by the directory's `d_type` field
-        // on most platforms (no syscall); it only falls back to `stat()`
-        // where the OS leaves the type unknown. Crucially it runs once per
-        // entry, never per sort comparison.
+
         let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
         entries.push(Entry {
             sort_key: name.to_lowercase(),
@@ -82,9 +59,6 @@ pub fn load_dir(dir: &Path) -> Vec<TreeNode> {
         });
     }
 
-    // Dirs first, then files; each group case-insensitively alphabetical.
-    // The comparator only reads precomputed fields — no filesystem probes,
-    // no per-comparison allocations.
     entries.sort_by(|a, b| {
         if a.is_dir != b.is_dir {
             return b.is_dir.cmp(&a.is_dir);
@@ -105,26 +79,11 @@ pub fn load_dir(dir: &Path) -> Vec<TreeNode> {
     out
 }
 
-/// Reload one directory level while retaining all already-loaded descendants.
-///
-/// This is deliberately shallow. The previous implementation recursively
-/// rescanned every expanded descendant when the root was refreshed, turning a
-/// small edit in a large workspace into an O(visible-tree) burst of blocking
-/// filesystem work. A watcher only needs the changed directory level. Existing
-/// child snapshots remain valid until that directory is explicitly reloaded.
-///
-/// `previous` is consumed so unchanged child vectors move into the new
-/// snapshot instead of being cloned.
 #[allow(dead_code)]
 pub fn reload_dir_preserving_shallow(dir: &Path, previous: Vec<TreeNode>) -> Vec<TreeNode> {
     merge_loaded_dir(dir, previous, load_dir(dir))
 }
 
-/// Merges an already-scanned directory into the previous snapshot.
-///
-/// Keeping scanning and merging separate lets the filesystem watcher perform
-/// the blocking `read_dir` work on its background executor and keeps the UI
-/// thread responsible only for a short in-memory state merge.
 pub fn merge_loaded_dir(
     _dir: &Path,
     previous: Vec<TreeNode>,
@@ -147,12 +106,6 @@ pub fn merge_loaded_dir(
     current
 }
 
-/// Reloads a directory from disk while preserving the expanded state of
-/// subdirectories.
-///
-/// Kept as a compatibility helper for callers that need the old eager,
-/// recursive behavior. Explorer refreshes and filesystem notifications use
-/// [`reload_dir_preserving_shallow`] so they do not rescan unrelated folders.
 #[allow(dead_code)]
 pub fn reload_dir_preserving(dir: &Path, prev_nodes: &[TreeNode]) -> Vec<TreeNode> {
     let mut previous_by_path: HashMap<&Path, &TreeNode> = HashMap::with_capacity(prev_nodes.len());
@@ -178,7 +131,6 @@ pub fn reload_dir_preserving(dir: &Path, prev_nodes: &[TreeNode]) -> Vec<TreeNod
     current
 }
 
-/// Appends the currently visible part of a tree to a flat row buffer.
 pub fn flatten_visible(nodes: &[TreeNode], depth: usize, out: &mut Vec<VisibleTreeRow>) {
     for node in nodes {
         out.push(VisibleTreeRow {
@@ -194,7 +146,6 @@ pub fn flatten_visible(nodes: &[TreeNode], depth: usize, out: &mut Vec<VisibleTr
     }
 }
 
-/// Recursively collapses all open folders.
 pub fn collapse_all(nodes: &mut [TreeNode]) {
     for node in nodes {
         node.expanded = false;
@@ -202,20 +153,12 @@ pub fn collapse_all(nodes: &mut [TreeNode]) {
     }
 }
 
-/// Last path component ("src" for C:\...\project\src).
 pub fn display_name(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.display().to_string())
 }
 
-/// Validate a name entered in the explorer's create/rename editor.
-///
-/// The filesystem APIs accept absolute paths and `..` components, but the
-/// explorer must never let a filename field escape the workspace or silently
-/// address a sibling directory. Separators are intentionally rejected here;
-/// creating nested directories is done by choosing the destination folder (or
-/// by an explicit move), just like the native VS Code explorer.
 pub fn valid_entry_name(name: &str) -> bool {
     let name = name.trim();
     !name.is_empty()
@@ -227,17 +170,10 @@ pub fn valid_entry_name(name: &str) -> bool {
         && !name.chars().any(|ch| ch == '\0' || ch.is_control())
 }
 
-/// Return whether `candidate` is the same path as, or inside, `parent`.
-///
-/// `Path::starts_with` is component-aware (unlike string prefix checks), so
-/// `src2` cannot accidentally be treated as a child of `src`.
 pub fn is_same_or_descendant(parent: &Path, candidate: &Path) -> bool {
     candidate == parent || candidate.starts_with(parent)
 }
 
-/// Rewrite a path after moving `source` to `destination` while preserving
-/// descendants. This is used to keep open tabs and selections valid when a
-/// directory is moved as a unit.
 pub fn path_after_move(path: &Path, source: &Path, destination: &Path) -> Option<PathBuf> {
     if path == source {
         return Some(destination.to_path_buf());

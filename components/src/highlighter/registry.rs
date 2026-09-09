@@ -86,9 +86,6 @@ impl LanguageConfig {
     }
 }
 
-/// Theme for Tree-sitter Highlight
-///
-/// https://docs.rs/tree-sitter-highlight/0.25.4/tree_sitter_highlight/
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
 pub struct SyntaxColors {
     pub attribute: Option<ThemeStyle>,
@@ -269,7 +266,7 @@ impl SyntaxColors {
         if style.is_some() {
             style
         } else {
-            // Fallback `keyword.modifier` to `keyword`
+
             if name.contains(".") {
                 if let Some(prefix) = name.split(".").next() {
                     return self.style(prefix);
@@ -427,11 +424,6 @@ pub struct HighlightThemeStyle {
     pub syntax: SyntaxColors,
 }
 
-/// Theme for Tree-sitter Highlight from JSON theme file.
-///
-/// This json is compatible with the Zed theme format.
-///
-/// https://zed.dev/docs/extensions/languages#syntax-highlighting
 #[derive(Debug, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
 pub struct HighlightTheme {
     pub name: String,
@@ -458,13 +450,12 @@ impl HighlightTheme {
     }
 }
 
-/// Registry for code highlighter languages.
 pub struct LanguageRegistry {
     languages: Mutex<HashMap<SharedString, LanguageConfig>>,
 }
 
 impl LanguageRegistry {
-    /// Returns the singleton instance of the `LanguageRegistry` with default languages and themes.
+
     pub fn singleton() -> &'static LazyLock<LanguageRegistry> {
         static INSTANCE: LazyLock<LanguageRegistry> = LazyLock::new(|| LanguageRegistry {
             languages: Mutex::new(

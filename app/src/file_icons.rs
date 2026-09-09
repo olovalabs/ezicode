@@ -1,12 +1,7 @@
-//! File icons resolved using the official `vscode-icons` theme (vscode-icons/vscode-icons).
-//!
-//! The SVG assets live in `app/assets/file_icons/` and are embedded via rust-embed.
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
-/// Exact file names → icon type.
 const FILE_STEMS: &[(&str, &str)] = &[
     ("Containerfile", "docker"),
     ("Dockerfile", "docker"),
@@ -54,8 +49,6 @@ const FILE_STEMS: &[(&str, &str)] = &[
     ("CHANGELOG.md", "markdown"),
 ];
 
-/// Name/extension suffixes → icon type. Matched against progressively
-/// dot-stripped suffixes of the file name (see [`type_for_suffix`]).
 #[rustfmt::skip]
 const FILE_SUFFIXES: &[(&str, &str)] = &[
     ("astro", "astro"),
@@ -124,7 +117,6 @@ const FILE_SUFFIXES: &[(&str, &str)] = &[
     ("zip", "zip"), ("tar", "zip"), ("gz", "zip"), ("7z", "zip"), ("rar", "zip"),
 ];
 
-/// Icon type → official vscode-icons SVG asset path.
 const TYPE_ICONS: &[(&str, &str)] = &[
     ("astro", "file_icons/file_type_astro.svg"),
     ("audio", "file_icons/file_type_audio.svg"),
@@ -245,7 +237,6 @@ pub fn icon_for(path: &Path) -> &'static str {
         return "file_icons/default_file.svg";
     };
 
-    // Fast path for .env files (.env, .env.local, .env.example, .env.test, .env.twilio.template, etc.)
     if name.starts_with(".env") || name.ends_with(".env") {
         return "file_icons/file_type_dotenv.svg";
     }
@@ -275,8 +266,6 @@ pub fn icon_for(path: &Path) -> &'static str {
 pub const FOLDER_COLLAPSED: &str = "file_icons/default_folder.svg";
 pub const FOLDER_EXPANDED: &str = "file_icons/default_folder_opened.svg";
 
-/// Returns a specific icon for special folder names (e.g. `.github`, `.vscode`, `apps`, `docs`),
-/// or the official vscode-icons default folder open/close icon.
 pub fn folder_icon_for(path: &Path, expanded: bool) -> &'static str {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return if expanded { FOLDER_EXPANDED } else { FOLDER_COLLAPSED };

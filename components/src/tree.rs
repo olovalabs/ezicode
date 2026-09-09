@@ -24,28 +24,6 @@ pub(crate) fn init(cx: &mut App) {
     ]);
 }
 
-/// Create a [`Tree`].
-///
-/// # Arguments
-///
-/// * `state` - The shared state managing the tree items.
-/// * `render_item` - A closure to render each tree item.
-///
-/// ```ignore
-/// let state = cx.new(|_| {
-///     TreeState::new().items(vec![
-///         TreeItem::new("src")
-///             .child(TreeItem::new("lib.rs"),
-///         TreeItem::new("Cargo.toml"),
-///         TreeItem::new("README.md"),
-///     ])
-/// });
-///
-/// tree(&state, |ix, entry, selected, window, cx| {
-///     let item = entry.item();
-///     ListItem::new(ix).pl(px(16.) * entry.depth()).child(item.label.clone())
-/// })
-/// ```
 pub fn tree<R>(state: &Entity<TreeState>, render_item: R) -> Tree
 where
     R: Fn(usize, &TreeEntry, bool, &mut Window, &mut App) -> ListItem + 'static,

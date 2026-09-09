@@ -13,18 +13,10 @@ use crate::input::{
     popovers::{CompletionMenu, ContextMenu},
 };
 
-/// Default debounce duration for inline completions.
 const DEFAULT_INLINE_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// A trait for providing code completions based on the current input state and context.
 pub trait CompletionProvider {
-    /// Fetches completions based on the given byte offset.
-    ///
-    /// - The `offset` is in bytes of current cursor.
-    ///
-    /// textDocument/completion
-    ///
-    /// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
+
     fn completions(
         &self,
         text: &Rope,
@@ -34,20 +26,6 @@ pub trait CompletionProvider {
         cx: &mut Context<InputState>,
     ) -> Task<Result<CompletionResponse>>;
 
-    /// Fetches an inline completion suggestion for the given position.
-    ///
-    /// This is called after a debounce period when the user stops typing.
-    /// The provider can analyze the text and cursor position to determine
-    /// what inline completion suggestion to show.
-    ///
-    ///
-    /// # Arguments
-    /// * `rope` - The current text content
-    /// * `offset` - The cursor position in bytes
-    ///
-    /// textDocument/inlineCompletion
-    ///
-    /// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/#textDocument_inlineCompletion
     fn inline_completion(
         &self,
         _rope: &Rope,
@@ -59,9 +37,6 @@ pub trait CompletionProvider {
         Task::ready(Ok(InlineCompletionResponse::Array(vec![])))
     }
 
-    /// Returns the debounce duration for inline completions.
-    ///
-    /// Default: 300ms
     #[inline]
     fn inline_completion_debounce(&self) -> Duration {
         DEFAULT_INLINE_COMPLETION_DEBOUNCE
@@ -76,9 +51,6 @@ pub trait CompletionProvider {
         Task::ready(Ok(false))
     }
 
-    /// Determines if the completion should be triggered based on the given byte offset.
-    ///
-    /// This is called on the main thread.
     fn is_completion_trigger(
         &self,
         offset: usize,
@@ -88,9 +60,9 @@ pub trait CompletionProvider {
 }
 
 pub(crate) struct InlineCompletion {
-    /// Completion item to display as an inline completion suggestion
+
     pub(crate) item: Option<InlineCompletionItem>,
-    /// Task for debouncing inline completion requests
+
     pub(crate) task: Task<Result<InlineCompletionResponse>>,
 }
 
@@ -119,8 +91,6 @@ impl InputState {
             return;
         };
 
-        // Always schedule inline completion (debounced).
-        // It will check if menu is open before showing the suggestion.
         self.schedule_inline_completion(window, cx);
 
         let start = range.end;
@@ -135,7 +105,6 @@ impl InputState {
             _ => None,
         };
 
-        // To create or get the existing completion menu.
         let menu = match menu {
             Some(menu) => menu.clone(),
             None => {
@@ -206,13 +175,12 @@ impl InputState {
         });
     }
 
-    /// Schedule an inline completion request after debouncing.
     pub(crate) fn schedule_inline_completion(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Clear any existing inline completion on text change
+
         self.clear_inline_completion(cx);
 
         let Some(provider) = self.lsp.completion_provider.clone() else {
@@ -224,17 +192,15 @@ impl InputState {
         let debounce = provider.inline_completion_debounce();
 
         self.inline_completion.task = cx.spawn_in(window, async move |editor, cx| {
-            // Debounce: wait before fetching to avoid unnecessary requests while typing
+
             smol::Timer::after(debounce).await;
 
-            // Now fetch the inline completion after the debounce period
             let task = editor.update_in(cx, |editor, window, cx| {
-                // Check if cursor has moved during debounce
+
                 if editor.cursor() != offset {
                     return None;
                 }
 
-                // Don't fetch if completion menu is open
                 if editor.is_context_menu_open(cx) {
                     return None;
                 }
@@ -254,12 +220,11 @@ impl InputState {
             let response = task.await?;
 
             editor.update_in(cx, |editor, _window, cx| {
-                // Only apply if cursor still hasn't moved
+
                 if editor.cursor() != offset {
                     return;
                 }
 
-                // Don't show if completion menu opened while we were fetching
                 if editor.is_context_menu_open(cx) {
                     return;
                 }
@@ -277,20 +242,16 @@ impl InputState {
         });
     }
 
-    /// Check if an inline completion suggestion is currently displayed.
     #[inline]
     pub(crate) fn has_inline_completion(&self) -> bool {
         self.inline_completion.item.is_some()
     }
 
-    /// Clear the inline completion suggestion.
     pub(crate) fn clear_inline_completion(&mut self, cx: &mut Context<Self>) {
         self.inline_completion = InlineCompletion::default();
         cx.notify();
     }
 
-    /// Accept the inline completion, inserting it at the cursor position.
-    /// Returns true if a completion was accepted, false if there was none.
     pub(crate) fn accept_inline_completion(
         &mut self,
         window: &mut Window,

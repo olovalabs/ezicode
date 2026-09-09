@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-shape/arc
-
 use std::{f32::consts::PI, fmt::Debug};
 
 use gpui::{point, px, Bounds, Hsla, Path, PathBuilder, Pixels, Point, Window};
@@ -47,19 +45,16 @@ impl Arc {
         Self::default()
     }
 
-    /// Set the inner radius of the Arc.
     pub fn inner_radius(mut self, inner_radius: f32) -> Self {
         self.inner_radius = inner_radius;
         self
     }
 
-    /// Set the outer radius of the Arc.
     pub fn outer_radius(mut self, outer_radius: f32) -> Self {
         self.outer_radius = outer_radius;
         self
     }
 
-    /// Get the centroid of the Arc.
     pub fn centroid<T>(&self, arc: &ArcData<T>) -> Point<f32> {
         let start_angle = arc.start_angle - HALF_PI;
         let end_angle = arc.end_angle - HALF_PI;
@@ -80,8 +75,7 @@ impl Arc {
         let end_angle = arc.end_angle - HALF_PI;
         let da = end_angle - start_angle;
         let pad_angle = if da >= PI {
-            // Leave some pad angle for full circle.
-            // If not, the path start and end will be the same point.
+
             0.0001
         } else {
             arc.pad_angle
@@ -89,16 +83,13 @@ impl Arc {
         let r0 = inner_radius.unwrap_or(self.inner_radius).max(0.);
         let r1 = outer_radius.unwrap_or(self.outer_radius).max(0.);
 
-        // Calculate the center point.
         let center_x = bounds.origin.x.as_f32() + bounds.size.width.as_f32() / 2.;
         let center_y = bounds.origin.y.as_f32() + bounds.size.height.as_f32() / 2.;
 
-        // Angle difference.
         if r1 < EPSILON || da.abs() < EPSILON {
             return None;
         }
 
-        // Handle pad angle.
         let (a0_outer, a1_outer, a0_inner, a1_inner) = if r0 > EPSILON && pad_angle > 0.0 {
             let pad_width = r1 * pad_angle;
             let pad_angle_outer = pad_width / r1;
@@ -128,7 +119,6 @@ impl Arc {
             return None;
         }
 
-        // Calculate the start and end points of the outer arc.
         let x01 = center_x + r1 * a0_outer.cos();
         let y01 = center_y + r1 * a0_outer.sin();
         let x11 = center_x + r1 * a1_outer.cos();
@@ -136,10 +126,8 @@ impl Arc {
 
         let mut builder = PathBuilder::fill();
 
-        // Move to the start point of the outer arc.
         builder.move_to(point(px(x01), px(y01)));
 
-        // Draw the outer arc.
         let large_arc = (a1_outer - a0_outer).abs() > PI;
         builder.arc_to(
             point(px(r1), px(r1)),
@@ -150,12 +138,11 @@ impl Arc {
         );
 
         if r0 > EPSILON {
-            // End point of the inner arc.
+
             let x10 = center_x + r0 * a1_inner.cos();
             let y10 = center_y + r0 * a1_inner.sin();
             builder.line_to(point(px(x10), px(y10)));
 
-            // Draw the inner arc.
             let x00 = center_x + r0 * a0_inner.cos();
             let y00 = center_y + r0 * a0_inner.sin();
             let large_arc_inner = (a1_inner - a0_inner).abs() > PI;
@@ -167,14 +154,13 @@ impl Arc {
                 point(px(x00), px(y00)),
             );
         } else {
-            // If there is no inner radius, draw a line to the center.
+
             builder.line_to(point(px(center_x), px(center_y)));
         }
 
         builder.build().ok()
     }
 
-    /// Paint the Arc.
     pub fn paint<T>(
         &self,
         arc: &ArcData<T>,

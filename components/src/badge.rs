@@ -26,7 +26,6 @@ impl BadgeVariant {
     }
 }
 
-/// A badge for displaying a count, dot, or icon on an element.
 #[derive(IntoElement)]
 pub struct Badge {
     style: StyleRefinement,
@@ -39,7 +38,7 @@ pub struct Badge {
 }
 
 impl Badge {
-    /// Create a new badge.
+
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -52,33 +51,26 @@ impl Badge {
         }
     }
 
-    /// Set to use [`BadgeVariant::Dot`] to show a dot.
     pub fn dot(mut self) -> Self {
         self.variant = BadgeVariant::Dot;
         self
     }
 
-    /// Set to use [`BadgeVariant::Number`] to show a count.
-    ///
-    /// If count is 0, the badge will be hidden.
     pub fn count(mut self, count: usize) -> Self {
         self.count = count;
         self
     }
 
-    /// Set to use [`BadgeVariant::Icon`] to show an icon.
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.variant = BadgeVariant::Icon(Box::new(icon.into()));
         self
     }
 
-    /// Set the maximum count to show (Only if [`BadgeVariant::Number`] is used).
     pub fn max(mut self, max: usize) -> Self {
         self.max = max;
         self
     }
 
-    /// Set the color (background) of the badge.
     pub fn color(mut self, color: impl Into<Hsla>) -> Self {
         self.color = Some(color.into());
         self

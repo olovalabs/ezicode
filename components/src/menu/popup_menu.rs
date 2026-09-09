@@ -26,13 +26,12 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-/// An menu item in a popup menu.
 pub enum PopupMenuItem {
-    /// A menu separator item.
+
     Separator,
-    /// A non-interactive label item.
+
     Label(SharedString),
-    /// A standard menu item.
+
     Item {
         icon: Option<Icon>,
         label: SharedString,
@@ -40,10 +39,10 @@ pub enum PopupMenuItem {
         checked: bool,
         is_link: bool,
         action: Option<Box<dyn Action>>,
-        // For link item
+
         handler: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     },
-    /// A menu item with custom element render.
+
     ElementItem {
         icon: Option<Icon>,
         disabled: bool,
@@ -96,7 +95,6 @@ impl PopupMenuItem {
         }
     }
 
-    /// Create a new submenu item that opens another popup menu.
     #[inline]
     pub fn submenu(label: impl Into<SharedString>, menu: Entity<PopupMenu>) -> Self {
         PopupMenuItem::Submenu {
@@ -107,21 +105,16 @@ impl PopupMenuItem {
         }
     }
 
-    /// Create a separator menu item.
     #[inline]
     pub fn separator() -> Self {
         PopupMenuItem::Separator
     }
 
-    /// Creates a label menu item.
     #[inline]
     pub fn label(label: impl Into<SharedString>) -> Self {
         PopupMenuItem::Label(label.into())
     }
 
-    /// Set the icon for the menu item.
-    ///
-    /// Only works for [`PopupMenuItem::Item`], [`PopupMenuItem::ElementItem`] and [`PopupMenuItem::Submenu`].
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         match &mut self {
             PopupMenuItem::Item { icon: i, .. } => {
@@ -138,9 +131,6 @@ impl PopupMenuItem {
         self
     }
 
-    /// Set the action for the menu item.
-    ///
-    /// Only works for [`PopupMenuItem::Item`] and [`PopupMenuItem::ElementItem`].
     pub fn action(mut self, action: Box<dyn Action>) -> Self {
         match &mut self {
             PopupMenuItem::Item { action: a, .. } => {
@@ -154,9 +144,6 @@ impl PopupMenuItem {
         self
     }
 
-    /// Set the disabled state for the menu item.
-    ///
-    /// Only works for [`PopupMenuItem::Item`], [`PopupMenuItem::ElementItem`] and [`PopupMenuItem::Submenu`].
     pub fn disabled(mut self, disabled: bool) -> Self {
         match &mut self {
             PopupMenuItem::Item { disabled: d, .. } => {
@@ -173,9 +160,6 @@ impl PopupMenuItem {
         self
     }
 
-    /// Set checked state for the menu item.
-    ///
-    /// NOTE: If `check_side` is [`Side::Left`], the icon will replace with a check icon.
     pub fn checked(mut self, checked: bool) -> Self {
         match &mut self {
             PopupMenuItem::Item { checked: c, .. } => {
@@ -189,9 +173,6 @@ impl PopupMenuItem {
         self
     }
 
-    /// Add a click handler for the menu item.
-    ///
-    /// Only works for [`PopupMenuItem::Item`] and [`PopupMenuItem::ElementItem`].
     pub fn on_click<F>(mut self, handler: F) -> Self
     where
         F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -502,7 +483,6 @@ impl PopupMenu {
         self.menu_element_with_check(false, action, builder)
     }
 
-    /// Add Menu Item with custom element render with disabled state.
     pub fn menu_element_with_disabled<F, E>(
         self,
         action: Box<dyn Action>,
@@ -530,7 +510,6 @@ impl PopupMenu {
         self.menu_element_with_icon_and_disabled(icon, action, false, builder)
     }
 
-    /// Add Menu Item with custom element render with check state
     pub fn menu_element_with_check<F, E>(
         self,
         checked: bool,
@@ -565,7 +544,6 @@ impl PopupMenu {
         self
     }
 
-    /// Add Menu Item with custom element render with check state and disabled state
     fn menu_element_with_check_and_disabled<F, E>(
         mut self,
         checked: bool,
@@ -611,7 +589,6 @@ impl PopupMenu {
         self.submenu_with_icon(None, label, window, cx, f)
     }
 
-    /// Add a Submenu item with icon
     pub fn submenu_with_icon(
         mut self,
         icon: Option<Icon>,

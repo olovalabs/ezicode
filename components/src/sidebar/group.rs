@@ -4,7 +4,6 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
-/// A group of items in the [`super::Sidebar`].
 #[derive(IntoElement)]
 pub struct SidebarGroup<E: Collapsible + IntoElement + 'static> {
     base: Div,

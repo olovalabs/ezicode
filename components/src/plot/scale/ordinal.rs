@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-scale/ordinal
-
 #[derive(Clone)]
 pub struct ScaleOrdinal<D, R> {
     domain: Vec<D>,
@@ -26,19 +24,16 @@ impl<D, R> ScaleOrdinal<D, R> {
         }
     }
 
-    /// Set the domain to the specified array of values.
     pub fn domain(mut self, domain: Vec<D>) -> Self {
         self.domain = domain;
         self
     }
 
-    /// Set the range of the ordinal scale to the specified array of values.
     pub fn range(mut self, range: Vec<R>) -> Self {
         self.range = range;
         self
     }
 
-    /// Set the output value of the scale for unknown input values and returns this scale.
     pub fn unknown(mut self, unknown: R) -> Self {
         self.unknown = Some(unknown);
         self
@@ -50,7 +45,7 @@ where
     D: PartialEq,
     R: Clone,
 {
-    /// Given a value in the input domain, returns the corresponding value in the output range.
+
     pub fn map(&self, value: &D) -> Option<R> {
         if let Some(index) = self.domain.iter().position(|v| v == value) {
             if self.range.is_empty() {
@@ -98,7 +93,7 @@ mod tests {
         assert_eq!(scale.map(&"a"), Some("#1f77b4"));
         assert_eq!(scale.map(&"b"), Some("#ff7f0e"));
         assert_eq!(scale.map(&"c"), Some("#2ca02c"));
-        // Should cycle back to the first color
+
         assert_eq!(scale.map(&"d"), Some("#1f77b4"));
     }
 }

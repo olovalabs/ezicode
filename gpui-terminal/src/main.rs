@@ -1,8 +1,3 @@
-//! Minimal terminal emulator application using gpui-terminal library.
-//!
-//! This example demonstrates how to embed a terminal in a GPUI application
-//! using portable-pty for proper PTY support.
-
 use anyhow::Result;
 use gpui::{
     AppContext, Context, Edges, Entity, InteractiveElement, IntoElement, KeyDownEvent,
@@ -12,7 +7,6 @@ use gpui_terminal::{ColorPalette, TerminalConfig, TerminalView};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::sync::Arc;
 
-/// Wrapper view that holds the terminal and handles font size shortcuts.
 struct TerminalApp {
     terminal: Entity<TerminalView>,
 }
@@ -25,7 +19,6 @@ impl TerminalApp {
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
 
-        // Check for Ctrl++ or Ctrl+= (increase font size)
         if keystroke.modifiers.control && (keystroke.key == "+" || keystroke.key == "=") {
             self.terminal.update(cx, |terminal, cx| {
                 let mut config = terminal.config().clone();
@@ -34,10 +27,10 @@ impl TerminalApp {
             });
             cx.stop_propagation();
         } else if keystroke.modifiers.control && keystroke.key == "-" {
-            // Check for Ctrl+- (decrease font size)
+
             self.terminal.update(cx, |terminal, cx| {
                 let mut config = terminal.config().clone();
-                // Don't go below 6px font size
+
                 if config.font_size > px(6.0) {
                     config.font_size -= px(1.0);
                     terminal.update_config(config, cx);
@@ -61,13 +54,11 @@ fn main() -> Result<()> {
     let app = gpui::Application::new();
 
     app.run(move |cx| {
-        // Get shell from environment
+
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
-        // Create PTY system
         let pty_system = native_pty_system();
 
-        // Open a PTY with initial size
         let pair = pty_system
             .openpty(PtySize {
                 rows: 24,
@@ -77,7 +68,6 @@ fn main() -> Result<()> {
             })
             .expect("Failed to open PTY");
 
-        // Spawn shell in the PTY
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -87,27 +77,23 @@ fn main() -> Result<()> {
             .spawn_command(cmd)
             .expect("Failed to spawn shell");
 
-        // Get the master PTY handles for I/O
         let writer = pair.master.take_writer().expect("Failed to get PTY writer");
         let reader = pair
             .master
             .try_clone_reader()
             .expect("Failed to get PTY reader");
 
-        // Keep the master for resizing
         let pty_master = Arc::new(parking_lot::Mutex::new(pair.master));
 
-        // Drop the slave - we don't need it anymore after spawning
         drop(pair.slave);
 
-        // Spawn window creation on the main thread
         let pty_master_clone = pty_master.clone();
         cx.spawn(async move |cx| {
             let colors = ColorPalette::builder()
                 .background(0x16, 0x16, 0x17)
                 .foreground(0xC9, 0xC7, 0xCD)
                 .cursor(0xC9, 0xC7, 0xCD)
-                // Normal colors
+
                 .black(0x10, 0x10, 0x10)
                 .red(0xEF, 0xA6, 0xA2)
                 .green(0x80, 0xC9, 0x90)
@@ -116,7 +102,7 @@ fn main() -> Result<()> {
                 .magenta(0xE6, 0xA3, 0xDC)
                 .cyan(0x50, 0xCA, 0xCD)
                 .white(0x80, 0x80, 0x80)
-                // Bright colors
+
                 .bright_black(0x39, 0x41, 0x4E)
                 .bright_red(0xE0, 0xAF, 0x85)
                 .bright_green(0x5A, 0xCC, 0xAF)
@@ -138,7 +124,6 @@ fn main() -> Result<()> {
                 colors,
             };
 
-            // Create resize callback that notifies the PTY
             let pty_for_resize = pty_master_clone.clone();
             let resize_callback = move |cols: usize, rows: usize| {
                 if let Err(e) = pty_for_resize.lock().resize(PtySize {
@@ -160,7 +145,7 @@ fn main() -> Result<()> {
                     ..Default::default()
                 },
                 |window, cx| {
-                    // Create the terminal view
+
                     let terminal = cx.new(|cx| {
                         TerminalView::new(writer, reader, config, cx)
                             .with_resize_callback(resize_callback)
@@ -169,10 +154,8 @@ fn main() -> Result<()> {
                             })
                     });
 
-                    // Focus the terminal so it receives key events
                     terminal.read(cx).focus_handle().focus(window);
 
-                    // Wrap in TerminalApp to handle font size shortcuts
                     cx.new(|_cx| TerminalApp::new(terminal))
                 },
             )?;

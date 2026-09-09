@@ -70,7 +70,6 @@ pub use time::{calendar, date_picker};
 #[cfg(feature = "webview")]
 pub mod webview;
 
-// re-export
 #[cfg(feature = "webview")]
 pub use wry;
 
@@ -91,9 +90,6 @@ pub use window_border::{WindowBorder, window_border, window_paddings};
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-/// Initialize the components.
-///
-/// You must initialize the components at your application's entry point.
 pub fn init(cx: &mut App) {
     theme::init(cx);
     global_state::init(cx);
@@ -130,9 +126,6 @@ pub(crate) fn measure_enable() -> bool {
     std::env::var("ZED_MEASUREMENTS").is_ok() || std::env::var("GPUI_MEASUREMENTS").is_ok()
 }
 
-/// Measures the execution time of a function and logs it if `if_` is true.
-///
-/// And need env `GPUI_MEASUREMENTS=1`
 #[inline]
 #[track_caller]
 pub fn measure_if(name: impl Into<SharedString>, if_: bool, f: impl FnOnce()) {
@@ -145,7 +138,6 @@ pub fn measure_if(name: impl Into<SharedString>, if_: bool, f: impl FnOnce()) {
     }
 }
 
-/// Measures the execution time.
 #[inline]
 #[track_caller]
 pub fn measure(name: impl Into<SharedString>, f: impl FnOnce()) {

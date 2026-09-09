@@ -9,7 +9,6 @@ use gpui::{
 };
 use std::rc::Rc;
 
-/// Menu for the [`super::Sidebar`]
 #[derive(IntoElement)]
 pub struct SidebarMenu {
     style: StyleRefinement,
@@ -18,7 +17,7 @@ pub struct SidebarMenu {
 }
 
 impl SidebarMenu {
-    /// Create a new SidebarMenu
+
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -27,15 +26,11 @@ impl SidebarMenu {
         }
     }
 
-    /// Add a [`SidebarMenuItem`] child menu item to the sidebar menu.
-    ///
-    /// See also [`SidebarMenu::children`].
     pub fn child(mut self, child: impl Into<SidebarMenuItem>) -> Self {
         self.items.push(child.into());
         self
     }
 
-    /// Add multiple [`SidebarMenuItem`] child menu items to the sidebar menu.
     pub fn children(
         mut self,
         children: impl IntoIterator<Item = impl Into<SidebarMenuItem>>,
@@ -73,7 +68,6 @@ impl RenderOnce for SidebarMenu {
     }
 }
 
-/// Menu item for the [`SidebarMenu`]
 #[derive(IntoElement)]
 pub struct SidebarMenuItem {
     id: ElementId,
@@ -90,7 +84,7 @@ pub struct SidebarMenuItem {
 }
 
 impl SidebarMenuItem {
-    /// Create a new [`SidebarMenuItem`] with a label.
+
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self {
             id: ElementId::Integer(0),
@@ -107,19 +101,16 @@ impl SidebarMenuItem {
         }
     }
 
-    /// Set the icon for the menu item
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.icon = Some(icon.into());
         self
     }
 
-    /// Set the active state of the menu item
     pub fn active(mut self, active: bool) -> Self {
         self.active = active;
         self
     }
 
-    /// Add a click handler to the menu item
     pub fn on_click(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,

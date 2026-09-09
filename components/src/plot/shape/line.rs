@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-shape/line
-
 use gpui::{
     px, quad, size, Background, BorderStyle, Bounds, Hsla, PaintQuad, Path, PathBuilder, Pixels,
     Point, Window,
@@ -46,7 +44,6 @@ impl<T> Line<T> {
         Self::default()
     }
 
-    /// Set the data of the Line.
     pub fn data<I>(mut self, data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -55,7 +52,6 @@ impl<T> Line<T> {
         self
     }
 
-    /// Set the x of the Line.
     pub fn x<F>(mut self, x: F) -> Self
     where
         F: Fn(&T) -> Option<f32> + 'static,
@@ -73,49 +69,41 @@ impl<T> Line<T> {
         self
     }
 
-    /// Set the stroke color of the Line.
     pub fn stroke(mut self, stroke: impl Into<Background>) -> Self {
         self.stroke = stroke.into();
         self
     }
 
-    /// Set the stroke width of the Line.
     pub fn stroke_width(mut self, stroke_width: impl Into<Pixels>) -> Self {
         self.stroke_width = stroke_width.into();
         self
     }
 
-    /// Set the stroke style of the Line.
     pub fn stroke_style(mut self, stroke_style: StrokeStyle) -> Self {
         self.stroke_style = stroke_style;
         self
     }
 
-    /// Show dots on the Line.
     pub fn dot(mut self) -> Self {
         self.dot = true;
         self
     }
 
-    /// Set the size of the dots on the Line.
     pub fn dot_size(mut self, dot_size: impl Into<Pixels>) -> Self {
         self.dot_size = dot_size.into();
         self
     }
 
-    /// Set the fill color of the dots on the Line.
     pub fn dot_fill_color(mut self, dot_fill_color: impl Into<Hsla>) -> Self {
         self.dot_fill_color = dot_fill_color.into();
         self
     }
 
-    /// Set the stroke color of the dots on the Line.
     pub fn dot_stroke_color(mut self, dot_stroke_color: impl Into<Hsla>) -> Self {
         self.dot_stroke_color = Some(dot_stroke_color.into());
         self
     }
 
-    /// Paint the dots on the Line.
     fn paint_dot(&self, dot: Point<Pixels>) -> PaintQuad {
         quad(
             gpui::bounds(dot, size(self.dot_size, self.dot_size)),
@@ -169,7 +157,6 @@ impl<T> Line<T> {
                     let p2 = dots[i + 1];
                     let p3 = if i + 2 < n { dots[i + 2] } else { dots[n - 1] };
 
-                    // Catmull-Rom to Bezier
                     let c1 = Point::new(p1.x + (p2.x - p0.x) / 6.0, p1.y + (p2.y - p0.y) / 6.0);
                     let c2 = Point::new(p2.x - (p3.x - p1.x) / 6.0, p2.y - (p3.y - p1.y) / 6.0);
 
@@ -194,7 +181,6 @@ impl<T> Line<T> {
         (builder.build().ok(), paint_dots)
     }
 
-    /// Paint the Line.
     pub fn paint(&self, bounds: &Bounds<Pixels>, window: &mut Window) {
         let (path, dots) = self.path(bounds);
         if let Some(path) = path {

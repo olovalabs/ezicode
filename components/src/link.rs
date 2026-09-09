@@ -5,7 +5,6 @@ use gpui::{
 
 use crate::{ActiveTheme as _, StyledExt};
 
-/// A Link element like a `<a>` tag in HTML.
 #[derive(IntoElement)]
 pub struct Link {
     id: ElementId,
@@ -47,7 +46,6 @@ impl Link {
         self
     }
 
-    /// Set the disabled state, default false.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self

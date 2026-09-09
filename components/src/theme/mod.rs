@@ -36,7 +36,6 @@ impl ActiveTheme for App {
     }
 }
 
-/// The global theme configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Theme {
     pub colors: ThemeColor,
@@ -45,33 +44,27 @@ pub struct Theme {
     pub dark_theme: Rc<ThemeConfig>,
 
     pub mode: ThemeMode,
-    /// The font family for the application, default is `.SystemUIFont`.
+
     pub font_family: SharedString,
-    /// The base font size for the application, default is 16px.
+
     pub font_size: Pixels,
-    /// The monospace font family for the application.
-    ///
-    /// Defaults to:
-    ///
-    /// - macOS: `Menlo`
-    /// - Windows: `Consolas`
-    /// - Linux: `DejaVu Sans Mono`
+
     pub mono_font_family: SharedString,
-    /// The monospace font size for the application, default is 13px.
+
     pub mono_font_size: Pixels,
-    /// Radius for the general elements.
+
     pub radius: Pixels,
-    /// Radius for the large elements, e.g.: Dialog, Notification border radius.
+
     pub radius_lg: Pixels,
     pub shadow: bool,
     pub transparent: Hsla,
-    /// Show the scrollbar mode, default: Scrolling
+
     pub scrollbar_show: ScrollbarShow,
-    /// Tile grid size, default is 4px.
+
     pub tile_grid_size: Pixels,
-    /// The shadow of the tile panel.
+
     pub tile_shadow: bool,
-    /// The border radius of the tile panel, default is 0px.
+
     pub tile_radius: Pixels,
 }
 
@@ -98,25 +91,22 @@ impl DerefMut for Theme {
 impl Global for Theme {}
 
 impl Theme {
-    /// Returns the global theme reference
+
     #[inline(always)]
     pub fn global(cx: &App) -> &Theme {
         cx.global::<Theme>()
     }
 
-    /// Returns the global theme mutable reference
     #[inline(always)]
     pub fn global_mut(cx: &mut App) -> &mut Theme {
         cx.global_mut::<Theme>()
     }
 
-    /// Returns true if the theme is dark.
     #[inline(always)]
     pub fn is_dark(&self) -> bool {
         self.mode.is_dark()
     }
 
-    /// Returns the current theme name.
     pub fn theme_name(&self) -> &SharedString {
         if self.is_dark() {
             &self.dark_theme.name
@@ -125,10 +115,8 @@ impl Theme {
         }
     }
 
-    /// Sync the theme with the system appearance
     pub fn sync_system_appearance(window: Option<&mut Window>, cx: &mut App) {
-        // Better use window.appearance() for avoid error on Linux.
-        // https://github.com/longbridge/gpui-component/issues/104
+
         let appearance = window
             .as_ref()
             .map(|window| window.appearance())
@@ -137,7 +125,6 @@ impl Theme {
         Self::change(appearance, window, cx);
     }
 
-    /// Sync the Scrollbar showing behavior with the system
     pub fn sync_scrollbar_appearance(cx: &mut App) {
         Theme::global_mut(cx).scrollbar_show = if cx.should_auto_hide_scrollbars() {
             ScrollbarShow::Scrolling
@@ -146,7 +133,6 @@ impl Theme {
         };
     }
 
-    /// Change the theme mode.
     pub fn change(mode: impl Into<ThemeMode>, window: Option<&mut Window>, cx: &mut App) {
         let mode = mode.into();
         if !cx.has_global::<Theme>() {
@@ -169,7 +155,6 @@ impl Theme {
         }
     }
 
-    /// Get the editor background color, if not set, use the theme background color.
     #[inline]
     pub(crate) fn editor_background(&self) -> Hsla {
         self.highlight_theme
@@ -187,7 +172,7 @@ impl From<&ThemeColor> for Theme {
             font_family: ".SystemUIFont".into(),
             font_size: px(16.),
             mono_font_family: if cfg!(target_os = "macos") {
-                // https://en.wikipedia.org/wiki/Menlo_(typeface)
+
                 "Menlo".into()
             } else if cfg!(target_os = "windows") {
                 "Consolas".into()
@@ -226,7 +211,6 @@ impl ThemeMode {
         matches!(self, Self::Dark)
     }
 
-    /// Return lower_case theme name: `light`, `dark`.
     pub fn name(&self) -> &'static str {
         match self {
             ThemeMode::Light => "light",

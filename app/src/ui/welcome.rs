@@ -1,13 +1,9 @@
-//! Welcome screen (VS Code-style start state) and the explorer's
-//! "no folder opened" placeholder.
-
 use gpui::{div, prelude::*, px, rgba, App, Context, IntoElement, SharedString, Window};
 
 use crate::theme::Colors;
 use crate::ui::app_icon;
 use crate::workspace::Workspace;
 
-/// Start screen shown when no folder is open and no file is being edited.
 pub(crate) fn render_welcome(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
     div()
         .flex_1()
@@ -72,7 +68,6 @@ fn welcome_button(
         .on_click(on_click)
 }
 
-/// Explorer placeholder when the app started without a folder.
 pub(crate) fn render_no_folder_panel(t: &Colors, cx: &mut Context<Workspace>) -> gpui::AnyElement {
     div()
         .size_full()

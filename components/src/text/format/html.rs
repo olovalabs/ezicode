@@ -52,7 +52,6 @@ const BLOCK_ELEMENTS: [&str; 35] = [
     "script",
 ];
 
-/// Parse HTML into AST Node.
 pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<node::Node, SharedString> {
     let opts = ParseOpts {
         ..Default::default()
@@ -60,15 +59,14 @@ pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<node::Node, Sh
 
     let bytes = cleanup_html(&source);
     let mut cursor = std::io::Cursor::new(bytes);
-    // Ref
-    // https://github.com/servo/html5ever/blob/main/rcdom/examples/print-rcdom.rs
+
     let dom = parse_document(RcDom::default(), opts)
         .from_utf8()
         .read_from(&mut cursor)
         .map_err(|e| SharedString::from(format!("{:?}", e)))?;
 
     let mut paragraph = Paragraph::default();
-    // NOTE: The outer paragraph is not used.
+
     let node: node::Node =
         parse_node(&dom.document, &mut paragraph, cx).unwrap_or(node::Node::Unknown);
     let node = node.compact();
@@ -98,8 +96,6 @@ fn attr_value(attrs: &RefCell<Vec<html5ever::Attribute>>, name: LocalName) -> Op
     })
 }
 
-/// Get style properties to HashMap
-/// TODO: Use cssparser to parse style attribute.
 fn style_attrs(attrs: &RefCell<Vec<html5ever::Attribute>>) -> HashMap<String, String> {
     let mut styles = HashMap::new();
     let Some(css_text) = attr_value(attrs, local_name!("style")) else {
@@ -119,10 +115,6 @@ fn style_attrs(attrs: &RefCell<Vec<html5ever::Attribute>>) -> HashMap<String, St
     styles
 }
 
-/// Parse length value from style attribute.
-///
-/// When is percentage, it will be converted to relative length.
-/// Else, it will be converted to pixels.
 fn value_to_length(value: &str) -> Option<DefiniteLength> {
     if value.ends_with("%") {
         value
@@ -139,7 +131,6 @@ fn value_to_length(value: &str) -> Option<DefiniteLength> {
     }
 }
 
-/// Get width, height from attributes or parse them from style attribute.
 fn attr_width_height(
     attrs: &RefCell<Vec<html5ever::Attribute>>,
 ) -> (Option<DefiniteLength>, Option<DefiniteLength>) {
@@ -210,10 +201,6 @@ fn parse_table_cell(
     row.children.push(table_cell);
 }
 
-/// Trim text but leave at least one space.
-///
-/// - Before: " \r\n Hello world \t "
-/// - After: " Hello world "
 #[allow(dead_code)]
 fn trim_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -237,7 +224,6 @@ fn parse_paragraph(
     let mut text = String::new();
     let mut marks = vec![];
 
-    /// Append new_text and new_marks to text and marks.
     fn merge_child_text(
         text: &mut String,
         marks: &mut Vec<(Range<usize>, TextMark)>,
@@ -335,7 +321,7 @@ fn parse_paragraph(
                 });
             }
             _ => {
-                // All unknown tags to as text
+
                 let mut child_paragraph = Paragraph::default();
                 for child in node.children.borrow().iter() {
                     let (child_text, child_marks) = parse_paragraph(&mut child_paragraph, &child);
@@ -458,7 +444,7 @@ fn parse_node(
                         children.push(child_node);
                     }
                     if child_paragraph.text_len() > 0 {
-                        // If last child is paragraph, merge child
+
                         if let Some(last_child) = children.last_mut() {
                             if let node::Node::Paragraph(last_paragraph) = last_child {
                                 last_paragraph.merge(child_paragraph);
@@ -517,14 +503,8 @@ fn parse_node(
                 if BLOCK_ELEMENTS.contains(&name.local.trim()) {
                     let mut children: Vec<node::Node> = vec![];
 
-                    // Case:
-                    //
-                    // Hello <p>Inner text of block element</p> World
-
-                    // Insert before text as a node -- The "Hello"
                     consume_paragraph(&mut children, paragraph);
 
-                    // Inner of the block element -- The "Inner text of block element"
                     for child in node.children.borrow().iter() {
                         if let Some(child_node) = parse_node(child, paragraph, cx) {
                             children.push(child_node);
@@ -538,7 +518,7 @@ fn parse_node(
                         Some(node::Node::Root { children })
                     }
                 } else {
-                    // Others to as Inline
+
                     parse_paragraph(paragraph, node);
 
                     if paragraph.is_image() {

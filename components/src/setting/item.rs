@@ -15,17 +15,16 @@ use crate::{
     v_flex,
 };
 
-/// Setting item.
 #[derive(Clone)]
 pub enum SettingItem {
-    /// A normal setting item with a title, description, and field.
+
     Item {
         title: SharedString,
         description: Option<Text>,
         layout: Axis,
         field: Rc<dyn AnySettingField>,
     },
-    /// A full custom element to render.
+
     Element {
         render: Rc<dyn Fn(&RenderOptions, &mut Window, &mut App) -> AnyElement + 'static>,
     },
@@ -45,7 +44,6 @@ impl SettingItem {
         }
     }
 
-    /// Create a new custom element setting item with a render closure.
     pub fn render<R, E>(render: R) -> Self
     where
         E: IntoElement,

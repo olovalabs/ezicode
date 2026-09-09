@@ -87,13 +87,6 @@ impl RenderOnce for CompletionMenuItem {
 
         let deprecated = item.deprecated.unwrap_or(false);
 
-        // Highlight the typed prefix at the start of the label. The range
-        // must be computed on *this label's* char boundaries: converting the
-        // query (or `filter_text`) byte length into a range on a different
-        // string lands mid-character whenever the label contains multibyte
-        // characters, which trips GPUI's
-        // `debug_assert!(text.is_char_boundary(run.end))` and closes the app
-        // while the completion menu is open.
         let query_chars = self.highlight_prefix.chars().count();
         let matched_end = item
             .label
@@ -176,7 +169,6 @@ impl ListDelegate for ContextMenuDelegate {
     }
 }
 
-/// A context menu for code completions and code actions.
 pub struct CompletionMenu {
     offset: usize,
     editor: Entity<InputState>,
@@ -184,16 +176,13 @@ pub struct CompletionMenu {
     open: bool,
     bounds: Bounds<Pixels>,
 
-    /// The offset of the first character that triggered the completion.
     pub(crate) trigger_start_offset: Option<usize>,
     query: SharedString,
     _subscriptions: Vec<Subscription>,
 }
 
 impl CompletionMenu {
-    /// Creates a new `CompletionMenu` with the given offset and completion items.
-    ///
-    /// NOTE: This element should not call from InputState::new, unless that will stack overflow.
+
     pub(crate) fn new(
         editor: Entity<InputState>,
         window: &mut Window,
@@ -273,7 +262,7 @@ impl CompletionMenu {
                     cx,
                 );
                 editor.completion_inserting = false;
-                // FIXME: Input not get the focus
+
                 editor.focus(window, cx);
             })
         })
@@ -335,14 +324,12 @@ impl CompletionMenu {
         self.open
     }
 
-    /// Hide the completion menu and reset the trigger start offset.
     pub(crate) fn hide(&mut self, cx: &mut Context<Self>) {
         self.open = false;
         self.trigger_start_offset = None;
         cx.notify();
     }
 
-    /// Sets the trigger start offset if it is not already set.
     pub(crate) fn update_query(&mut self, start_offset: usize, query: impl Into<SharedString>) {
         if self.trigger_start_offset.is_none() {
             self.trigger_start_offset = Some(start_offset);

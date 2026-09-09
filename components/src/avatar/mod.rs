@@ -7,7 +7,6 @@ pub use avatar_group::*;
 use crate::{Icon, Size, StyledExt as _};
 use gpui::{px, rems, Div, Img, IntoElement, Pixels, Styled};
 
-/// Returns the size of the avatar based on the given [`Size`].
 pub(super) fn avatar_size(size: Size) -> Pixels {
     match size {
         Size::Large => px(80.),
@@ -18,7 +17,6 @@ pub(super) fn avatar_size(size: Size) -> Pixels {
     }
 }
 
-/// Extension for add `avatar_size` method to `IntoElement` to apply avatar size to element.
 pub(super) trait AvatarSized: IntoElement + Styled {
     fn avatar_size(self, size: Size) -> Self {
         self.size(avatar_size(size))

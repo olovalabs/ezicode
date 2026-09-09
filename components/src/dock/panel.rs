@@ -16,10 +16,10 @@ pub enum PanelEvent {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PanelStyle {
-    /// Display the TabBar when there are multiple tabs, otherwise display the simple title.
+
     #[default]
     Auto,
-    /// Always display the tab bar.
+
     TabBar,
 }
 
@@ -49,13 +49,9 @@ impl PanelControl {
     }
 }
 
-/// The Panel trait used to define the panel.
 #[allow(unused_variables)]
 pub trait Panel: EventEmitter<PanelEvent> + Render + Focusable {
-    /// The name of the panel used to serialize, deserialize and identify the panel.
-    ///
-    /// This is used to identify the panel when deserializing the panel.
-    /// Once you have defined a panel name, this must not be changed.
+
     fn panel_name(&self) -> &'static str;
 
     /// The name of the tab of the panel, default is `None`.
@@ -305,7 +301,7 @@ pub struct PanelRegistry {
     >,
 }
 impl PanelRegistry {
-    /// Initialize the panel registry.
+
     pub(crate) fn init(cx: &mut App) {
         if let None = cx.try_global::<PanelRegistry>() {
             cx.set_global(PanelRegistry::new());
@@ -326,9 +322,6 @@ impl PanelRegistry {
         cx.global_mut::<PanelRegistry>()
     }
 
-    /// Build a panel by name.
-    ///
-    /// If not registered, return InvalidPanel.
     pub fn build_panel(
         panel_name: &str,
         dock_area: WeakEntity<DockArea>,
@@ -345,14 +338,13 @@ impl PanelRegistry {
         {
             return view;
         } else {
-            // Show an invalid panel if the panel is not registered.
+
             Box::new(cx.new(|cx| InvalidPanel::new(&panel_name, panel_state.clone(), window, cx)))
         }
     }
 }
 impl Global for PanelRegistry {}
 
-/// Register the Panel init by panel_name to global registry.
 pub fn register_panel<F>(cx: &mut App, panel_name: &str, deserialize: F)
 where
     F: Fn(

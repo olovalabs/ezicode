@@ -5,7 +5,6 @@ use gpui::{
 
 use crate::{h_flex, text::Text, v_flex, ActiveTheme as _, AxisExt, Sizable, Size};
 
-/// A description list.
 #[derive(IntoElement)]
 pub struct DescriptionList {
     items: Vec<DescriptionItem>,
@@ -16,7 +15,6 @@ pub struct DescriptionList {
     columns: usize,
 }
 
-/// Item for the [`DescriptionList`].
 pub enum DescriptionItem {
     Item {
         label: DescriptionText,
@@ -26,7 +24,6 @@ pub enum DescriptionItem {
     Divider,
 }
 
-/// Text for the label or value in the [`DescriptionList`].
 #[derive(IntoElement)]
 pub enum DescriptionText {
     String(SharedString),
@@ -75,9 +72,7 @@ impl RenderOnce for DescriptionText {
 }
 
 impl DescriptionItem {
-    /// Create a new description item, with a label.
-    ///
-    /// The value is an empty element.
+
     pub fn new(label: impl Into<DescriptionText>) -> Self {
         DescriptionItem::Item {
             label: label.into(),
@@ -86,7 +81,6 @@ impl DescriptionItem {
         }
     }
 
-    /// Set the element value of the item.
     pub fn value(mut self, value: impl Into<DescriptionText>) -> Self {
         let new_value = value.into();
         if let DescriptionItem::Item { value, .. } = &mut self {
@@ -95,9 +89,6 @@ impl DescriptionItem {
         self
     }
 
-    /// Set the span of the item.
-    ///
-    /// This method only works for [`DescriptionItem::Item`].
     pub fn span(mut self, span: usize) -> Self {
         let val = span;
         if let DescriptionItem::Item { span, .. } = &mut self {
@@ -122,7 +113,7 @@ impl DescriptionItem {
 }
 
 impl DescriptionList {
-    /// Create a new description list with the default layout (Horizontal).
+
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -134,47 +125,34 @@ impl DescriptionList {
         }
     }
 
-    /// Create a vertical description list.
     pub fn vertical() -> Self {
         Self::new().layout(Axis::Vertical)
     }
 
-    /// Create a horizontal description list, the default.
     pub fn horizontal() -> Self {
         Self::new().layout(Axis::Horizontal)
     }
 
-    /// Set the width of the label, only works for horizontal layout.
-    ///
-    /// Default is `120px`.
     pub fn label_width(mut self, label_width: impl Into<DefiniteLength>) -> Self {
         self.label_width = label_width.into();
         self
     }
 
-    /// Set the layout of the description list.
     pub fn layout(mut self, layout: Axis) -> Self {
         self.layout = layout;
         self
     }
 
-    /// Set the border of the description list, default is `true`.
-    ///
-    /// `Horizontal` layout only.
     pub fn bordered(mut self, bordered: bool) -> Self {
         self.bordered = bordered;
         self
     }
 
-    /// Set the number of columns in the description list, default is `3`.
-    ///
-    /// A value between `1` and `10` is allowed.
     pub fn columns(mut self, columns: usize) -> Self {
         self.columns = columns.clamp(1, 10);
         self
     }
 
-    /// Add a [`DescriptionItem::Item`] to the list.
     pub fn item(
         mut self,
         label: impl Into<DescriptionText>,
@@ -189,13 +167,11 @@ impl DescriptionList {
         self
     }
 
-    /// Add a child to the list.
     pub fn child(mut self, child: impl Into<DescriptionItem>) -> Self {
         self.items.push(child.into());
         self
     }
 
-    /// Add children to the list.
     pub fn children(
         mut self,
         children: impl IntoIterator<Item = impl Into<DescriptionItem>>,
@@ -205,7 +181,6 @@ impl DescriptionList {
         self
     }
 
-    /// Add a divider to the list.
     pub fn divider(mut self) -> Self {
         self.items.push(DescriptionItem::Divider);
         self
@@ -227,7 +202,7 @@ impl DescriptionList {
             last_group.push(item);
             current_span += span;
         }
-        // Remove last empty rows if it exists
+
         while let Some(last_group) = rows.last() {
             if !last_group.is_empty() {
                 break;
@@ -256,7 +231,6 @@ impl RenderOnce for DescriptionList {
             _ => px(4.),
         };
 
-        // Only for Horizontal layout
         let (mut padding_x, mut padding_y) = match self.size {
             Size::XSmall | Size::Small => (px(4.), px(2.)),
             Size::Medium => (px(8.), px(4.)),
@@ -275,7 +249,6 @@ impl RenderOnce for DescriptionList {
         }
         let gap = if self.bordered { px(0.) } else { base_gap };
 
-        // Group items by columns
         let rows = Self::group_item_rows(self.items, self.columns);
         let rows_len = rows.len();
 

@@ -10,7 +10,6 @@ use crate::{
     Disableable, Sizable, Size, StyledExt,
 };
 
-/// A ButtonGroup element, to wrap multiple buttons in a group.
 #[derive(IntoElement)]
 pub struct ButtonGroup {
     id: ElementId,
@@ -20,7 +19,6 @@ pub struct ButtonGroup {
     pub(super) disabled: bool,
     pub(super) layout: Axis,
 
-    // The button props
     pub(super) compact: bool,
     pub(super) outline: bool,
     pub(super) variant: Option<ButtonVariant>,
@@ -175,7 +173,7 @@ impl RenderOnce for ButtonGroup {
                         let child = if children_len == 1 {
                             child
                         } else if child_index == 0 {
-                            // First
+
                             child
                                 .border_corners(Corners {
                                     top_left: true,
@@ -190,7 +188,7 @@ impl RenderOnce for ButtonGroup {
                                     bottom: true,
                                 })
                         } else if child_index == children_len - 1 {
-                            // Last
+
                             child
                                 .border_edges(Edges {
                                     left: vertical,
@@ -205,7 +203,7 @@ impl RenderOnce for ButtonGroup {
                                     bottom_right: true,
                                 })
                         } else {
-                            // Middle
+
                             child
                                 .border_corners(Corners::all(false))
                                 .border_edges(Edges {

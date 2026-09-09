@@ -1,19 +1,3 @@
-//! Everything here is inert unless `EZICODE_PERF` is set to something other than
-//! `0`, so the probes can stay in the hot paths permanently without costing
-//! anything in normal runs:
-//!
-//! ```text
-//! EZICODE_PERF=1 cargo run
-//! ```
-//!
-//! Three primitives:
-//! - [`span`] — RAII timer, reports on drop. Use at the top of a function that
-//!   takes `&mut self` (a closure-based `timed` would fight the borrow checker).
-//! - [`mark`] — point-in-time milestone, reports total + delta since last mark.
-//! - [`note_stat`] / [`stat_count`] — counts filesystem probes so a change that
-//!   trades O(n log n) `stat()` calls for O(n) can be *proved* rather than
-//!   asserted. Gated on the same env var.
-
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -23,7 +7,6 @@ static BOOT: OnceLock<Instant> = OnceLock::new();
 static LAST_MARK_MS: AtomicU64 = AtomicU64::new(0);
 static STAT_CALLS: AtomicU32 = AtomicU32::new(0);
 
-/// True when `EZICODE_PERF` is set and not `0`.
 pub fn enabled() -> bool {
     *ENABLED.get_or_init(|| {
         std::env::var_os("EZICODE_PERF")
@@ -57,7 +40,7 @@ pub fn mark(label: &str) {
 /// RAII span. Reports elapsed time when the guard is dropped.
 ///
 /// `label` is `'static` on purpose: it is a fixed site name, not a formatted
-/// string, so building the span never allocates.
+
 pub struct Span {
     label: &'static str,
     start: Instant,
@@ -87,7 +70,6 @@ impl Drop for Span {
     }
 }
 
-/// Start a span. Reads well as `let _span = perf::span("site");` on line 1.
 pub fn span(label: &'static str) -> Span {
     Span::start(label)
 }

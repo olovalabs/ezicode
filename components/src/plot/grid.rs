@@ -20,25 +20,21 @@ impl Grid {
         }
     }
 
-    /// Set the x of the Grid.
     pub fn x(mut self, x: Vec<impl Into<Pixels>>) -> Self {
         self.x = x.into_iter().map(|v| v.into()).collect();
         self
     }
 
-    /// Set the y of the Grid.
     pub fn y(mut self, y: Vec<impl Into<Pixels>>) -> Self {
         self.y = y.into_iter().map(|v| v.into()).collect();
         self
     }
 
-    /// Set the stroke color of the Grid.
     pub fn stroke(mut self, stroke: impl Into<Hsla>) -> Self {
         self.stroke = stroke.into();
         self
     }
 
-    /// Set the dash array of the Grid.
     pub fn dash_array(mut self, dash_array: &[Pixels]) -> Self {
         self.dash_array = Some(dash_array.to_vec());
         self
@@ -74,7 +70,6 @@ impl Grid {
         x
     }
 
-    /// Paint the Grid.
     pub fn paint(&self, bounds: &Bounds<Pixels>, window: &mut Window) {
         let points = self.points(bounds);
 

@@ -5,7 +5,6 @@ use gpui::{
 
 use crate::{menu::DropdownMenu, ActiveTheme as _, Collapsible, Selectable, StyledExt};
 
-/// Header for the [`super::Sidebar`]
 #[derive(IntoElement)]
 pub struct SidebarHeader {
     base: Div,
@@ -16,7 +15,7 @@ pub struct SidebarHeader {
 }
 
 impl SidebarHeader {
-    /// Create a new [`SidebarHeader`].
+
     pub fn new() -> Self {
         Self {
             base: div(),

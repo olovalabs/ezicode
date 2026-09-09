@@ -11,7 +11,6 @@ use crate::{
     table::{Column, ColumnSort, TableState, loading::Loading},
 };
 
-/// A delegate trait for providing data and rendering for a table.
 #[allow(unused)]
 pub trait TableDelegate: Sized + 'static {
     /// Return the number of columns in the table.

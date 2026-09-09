@@ -10,8 +10,6 @@ enum TooltipContext {
     Element(Box<dyn Fn(&mut Window, &mut App) -> AnyElement>),
 }
 
-/// A Tooltip element that can display text or custom content,
-/// with optional key binding information.
 pub struct Tooltip {
     style: StyleRefinement,
     content: TooltipContext,
@@ -20,7 +18,7 @@ pub struct Tooltip {
 }
 
 impl Tooltip {
-    /// Create a Tooltip with a text content.
+
     pub fn new(text: impl Into<Text>) -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -30,7 +28,6 @@ impl Tooltip {
         }
     }
 
-    /// Create a Tooltip with a custom element.
     pub fn element<E, F>(builder: F) -> Self
     where
         E: IntoElement,

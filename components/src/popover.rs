@@ -13,7 +13,6 @@ pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Cancel, Some(CONTEXT))])
 }
 
-/// A popover element that can be triggered by a button or any other element.
 #[derive(IntoElement)]
 pub struct Popover {
     id: ElementId,
@@ -30,8 +29,7 @@ pub struct Popover {
         >,
     >,
     children: Vec<AnyElement>,
-    /// Style for trigger element.
-    /// This is used for hotfix the trigger element style to support w_full.
+
     trigger_style: Option<StyleRefinement>,
     mouse_button: MouseButton,
     appearance: bool,
@@ -40,7 +38,7 @@ pub struct Popover {
 }
 
 impl Popover {
-    /// Create a new Popover with `view` mode.
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -60,19 +58,16 @@ impl Popover {
         }
     }
 
-    /// Set the anchor corner of the popover, default is `Corner::TopLeft`.
     pub fn anchor(mut self, anchor: Corner) -> Self {
         self.anchor = anchor;
         self
     }
 
-    /// Set the mouse button to trigger the popover, default is `MouseButton::Left`.
     pub fn mouse_button(mut self, mouse_button: MouseButton) -> Self {
         self.mouse_button = mouse_button;
         self
     }
 
-    /// Set the trigger element of the popover.
     pub fn trigger<T>(mut self, trigger: T) -> Self
     where
         T: Selectable + IntoElement + 'static,
@@ -117,22 +112,16 @@ impl Popover {
         self
     }
 
-    /// Set the style for the trigger element.
     pub fn trigger_style(mut self, style: StyleRefinement) -> Self {
         self.trigger_style = Some(style);
         self
     }
 
-    /// Set whether clicking outside the popover will dismiss it, default is `true`.
     pub fn overlay_closable(mut self, closable: bool) -> Self {
         self.overlay_closable = closable;
         self
     }
 
-    /// Set the content builder for content of the Popover.
-    ///
-    /// This callback will called every time on render the popover.
-    /// So, you should avoid creating new elements or entities in the content closure.
     pub fn content<F, E>(mut self, content: F) -> Self
     where
         E: IntoElement,

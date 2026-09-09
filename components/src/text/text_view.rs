@@ -221,11 +221,11 @@ pub(crate) struct TextViewState {
     tx: Option<smol::channel::Sender<Update>>,
     parsed_result: Option<Result<ParsedContent, SharedString>>,
     focus_handle: Option<FocusHandle>,
-    /// The bounds of the text view
+
     bounds: Bounds<Pixels>,
-    /// The local (in TextView) position of the selection.
+
     selection_positions: (Option<Point<Pixels>>, Option<Point<Pixels>>),
-    /// Is current in selection.
+
     is_selecting: bool,
     is_selectable: bool,
     list_state: ListState,
@@ -249,7 +249,7 @@ impl TextViewState {
 }
 
 impl TextViewState {
-    /// Save bounds and unselect if bounds changed.
+
     fn update_bounds(&mut self, bounds: Bounds<Pixels>) {
         if self.bounds.size != bounds.size {
             self.clear_selection();
@@ -291,7 +291,6 @@ impl TextViewState {
         self.is_selectable
     }
 
-    /// Return the bounds of the selection in window coordinates.
     pub(crate) fn selection_bounds(&self) -> Bounds<Pixels> {
         selection_bounds(
             self.selection_positions.0,
@@ -343,9 +342,7 @@ impl From<TextView> for Text {
 }
 
 impl Text {
-    /// Set the style for [`TextView`].
-    ///
-    /// Do nothing if this is `String`.
+
     pub fn style(self, style: TextViewStyle) -> Self {
         match self {
             Self::String(s) => Self::String(s),
@@ -353,7 +350,6 @@ impl Text {
         }
     }
 
-    /// Get the str
     pub fn as_str(&self) -> &str {
         match self {
             Self::String(s) => s.as_str(),
@@ -398,7 +394,6 @@ impl TextView {
         }
     }
 
-    /// Create a new markdown text view.
     pub fn markdown(
         id: impl Into<ElementId>,
         markdown: impl Into<SharedString>,
@@ -434,7 +429,6 @@ impl TextView {
         }
     }
 
-    /// Create a new html text view.
     pub fn html(
         id: impl Into<ElementId>,
         html: impl Into<SharedString>,
@@ -465,7 +459,6 @@ impl TextView {
         }
     }
 
-    /// Set the source text of the text view.
     pub fn text(mut self, raw: impl Into<SharedString>) -> Self {
         let raw: SharedString = raw.into();
         if let Some(init_state) = &mut self.init_state {
@@ -480,7 +473,6 @@ impl TextView {
         self
     }
 
-    /// Set [`TextViewStyle`].
     pub fn style(mut self, style: TextViewStyle) -> Self {
         if let Some(init_state) = &mut self.init_state {
             match init_state {
@@ -493,24 +485,11 @@ impl TextView {
         self
     }
 
-    /// Set the text view to be selectable, default is false.
     pub fn selectable(mut self, selectable: bool) -> Self {
         self.selectable = selectable;
         self
     }
 
-    /// Set the text view to be scrollable, default is false.
-    ///
-    /// ## If true for `scrollable`
-    ///
-    /// The `scrollable` mode used for large content,
-    /// will show scrollbar, but requires the parent to have a fixed height,
-    /// and use [`gpui::list`] to render the content in a virtualized way.
-    ///
-    /// ## If false to fit content
-    ///
-    /// The TextView will expand to fit all content, no scrollbar.
-    /// This mode is suitable for small content, such as a few lines of text, a label, etc.
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
         self
@@ -524,10 +503,6 @@ impl TextView {
         cx.write_to_clipboard(ClipboardItem::new_string(selected_text.trim().to_string()));
     }
 
-    /// Set custom block actions for code blocks.
-    ///
-    /// The closure receives the [`CodeBlock`],
-    /// and returns an element to display.
     pub fn code_block_actions<F, E>(mut self, f: F) -> Self
     where
         F: Fn(&CodeBlock, &mut Window, &mut App) -> E + Send + Sync + 'static,

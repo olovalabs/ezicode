@@ -1,5 +1,3 @@
-//! Custom title bar with the File / Edit / View / Terminal / Help menus.
-
 use gpui::{div, prelude::*, px, rgba, Context, IntoElement, SharedString, Window};
 use gpui_component::{
     button::{Button, ButtonVariants as _},
@@ -25,7 +23,7 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                 .items_center()
                 .text_size(px(13.5))
                 .child(
-                    // App icon on the left of the menu
+
                     div()
                         .w(px(28.0))
                         .h_full()

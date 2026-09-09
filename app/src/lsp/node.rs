@@ -1,43 +1,13 @@
-//! Node runtime + npm package installer — a port of Zed's `NodeRuntime`
-//! (`crates/node_runtime/src/node_runtime.rs`).
-//!
-//! This is the piece that makes language support "just work" with no user
-//! setup. Zed never asks you to `npm i -g typescript-language-server`: on the
-//! first TypeScript/CSS/HTML/JSON file it opens, it npm-installs the server
-//! into a private directory under its data dir and runs it with its own Node.
-//!
-//! Zed additionally *downloads* a pinned Node build when the system has none.
-//! We stop short of that (it means shipping tarball extraction and an updater)
-//! and instead use the system `node`, falling back to a clear, actionable
-//! status message when it is missing. Everything else follows Zed:
-//!
-//! * installs live in a per-server container dir — never the user's project,
-//!   never a global `npm -g`, so we can't corrupt their toolchain
-//!   (Zed: `container_dir`)
-//! * a version marker records what we installed, so startup is instant on
-//!   every later launch (Zed: `should_install_npm_package`)
-//! * installs run on a background thread and are deduplicated, so opening ten
-//!   `.ts` files triggers exactly one `npm install`
-//!
-//! Everything here runs off the UI thread.
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-/// Minimum Node version. Zed pins v24 for its managed download and requires
-/// >= 22 of a system Node (`SystemNodeRuntime::MIN_VERSION`).
 const MIN_NODE_MAJOR: u32 = 18;
 
-/// How long an `npm install` may run before we give up.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Where servers get installed: `<data dir>/language-servers/<server name>`.
-///
-/// Mirrors Zed's `~/.local/share/zed/languages/<name>` (and the equivalent
-/// `%LOCALAPPDATA%\Zed\languages` on Windows).
 pub fn language_servers_dir() -> PathBuf {
     let base = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA")
@@ -53,15 +23,12 @@ pub fn language_servers_dir() -> PathBuf {
     base.join("ezicode").join("language-servers")
 }
 
-/// The container directory for one server (Zed's `container_dir`).
 pub fn container_dir(server_name: &str) -> PathBuf {
     language_servers_dir().join(server_name)
 }
 
-/// Locate the `node` executable.
 pub fn node_binary() -> Option<PathBuf> {
-    // An explicit override always wins, so users on unusual setups (nvm,
-    // Volta, corporate images) can point us at the right runtime.
+
     if let Some(explicit) = std::env::var_os("EZICODE_NODE").or_else(|| std::env::var_os("OLOVA_NODE")) {
         let p = PathBuf::from(explicit);
         if p.is_file() {
@@ -71,10 +38,6 @@ pub fn node_binary() -> Option<PathBuf> {
     super::client::find_binary_on_path("node")
 }
 
-/// Locate the npm CLI. Prefer the `npm-cli.js` script next to the Node binary
-/// and run it *with* Node: on Windows the `npm` shim is a `.cmd` batch file
-/// that cannot be spawned directly, which is exactly why Zed keeps a
-/// `NPM_PATH` pointing at `node_modules/npm/bin/npm-cli.js`.
 fn npm_command() -> Option<Command> {
     let node = node_binary()?;
     if let Some(dir) = node.parent() {
@@ -90,7 +53,7 @@ fn npm_command() -> Option<Command> {
             }
         }
     }
-    // Fall back to whatever `npm` is on PATH.
+
     let npm = super::client::find_binary_on_path("npm")?;
     if cfg!(windows) {
         let mut cmd = Command::new("cmd");
@@ -101,7 +64,6 @@ fn npm_command() -> Option<Command> {
     }
 }
 
-/// Whether a usable Node is installed, and its version string.
 pub fn node_version() -> Option<String> {
     let node = node_binary()?;
     let out = Command::new(node)
@@ -118,18 +80,10 @@ pub fn node_version() -> Option<String> {
         .map(|_| v)
 }
 
-/// The marker file recording which packages we installed into a container.
 fn marker_path(container: &Path) -> PathBuf {
     container.join(".ezicode-installed")
 }
 
-/// Zed's `should_install_npm_package`, simplified: install when the entry
-/// point is missing, or when the marker doesn't match the requested set.
-///
-/// Zed compares real semver against the npm registry to auto-upgrade. We
-/// deliberately don't: hitting the network on every file open makes startup
-/// depend on the registry being reachable. A marker match means "installed
-/// and usable", which keeps launches offline-clean and instant.
 fn needs_install(container: &Path, entry: &Path, packages: &[String]) -> bool {
     if !entry.exists() {
         return true;
@@ -141,7 +95,6 @@ fn needs_install(container: &Path, entry: &Path, packages: &[String]) -> bool {
     }
 }
 
-/// Installs currently in flight, so N concurrent file opens cause one install.
 fn in_flight() -> &'static Mutex<HashSet<String>> {
     static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
@@ -150,21 +103,14 @@ fn in_flight() -> &'static Mutex<HashSet<String>> {
 /// Outcome of resolving a server's executable.
 #[derive(Debug)]
 pub enum Resolved {
-    /// Ready to spawn: run `program` with `args`.
+
     Ready { program: PathBuf, args: Vec<String> },
-    /// An install is required first (and has been started by the caller).
+
     NeedsInstall,
-    /// Cannot be resolved, with a user-facing reason.
+
     Unavailable(String),
 }
 
-/// Resolve a Node-based server without installing anything.
-///
-/// Returns [`Resolved::Ready`] with the *node* binary as the program and the
-/// server's JS entry point as the first argument — Zed does exactly this
-/// (`LanguageServerBinary { path: node.binary_path(), arguments: [server_path,
-/// "--stdio"] }`) so the server always runs under a known-good Node rather
-/// than relying on a shebang.
 pub fn resolve_npm_server(
     server_name: &str,
     entry: &str,
@@ -194,11 +140,6 @@ pub fn resolve_npm_server(
     Resolved::NeedsInstall
 }
 
-/// Install a server's npm packages into its container directory.
-///
-/// Blocking — call from a background thread. Returns the entry-point path on
-/// success. Mirrors Zed's `npm_install_packages`, including the retry/timeout
-/// flags it passes so a flaky registry doesn't hang the editor forever.
 pub fn install_npm_server(
     server_name: &str,
     packages: &[String],
@@ -211,14 +152,13 @@ pub fn install_npm_server(
         return Ok(entry_path);
     }
 
-    // Deduplicate concurrent installs of the same server.
     {
         let mut guard = in_flight().lock().unwrap();
         if !guard.insert(server_name.to_string()) {
             return Err(format!("{server_name} is already installing"));
         }
     }
-    // Ensure the in-flight marker is cleared on every exit path.
+
     struct Guard(String);
     impl Drop for Guard {
         fn drop(&mut self) {
@@ -230,8 +170,6 @@ pub fn install_npm_server(
     std::fs::create_dir_all(&container)
         .map_err(|e| format!("cannot create {}: {e}", container.display()))?;
 
-    // A package.json keeps npm from walking up and installing into a parent
-    // directory — the container must stay self-contained.
     let pkg_json = container.join("package.json");
     if !pkg_json.exists() {
         let _ = std::fs::write(
@@ -266,7 +204,6 @@ pub fn install_npm_server(
         .spawn()
         .map_err(|e| format!("failed to run npm install: {e}"))?;
 
-    // Poll for the timeout instead of blocking forever on a wedged install.
     let start = std::time::Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -312,7 +249,7 @@ mod tests {
         let a = container_dir("typescript-language-server");
         let b = container_dir("vscode-css-language-server");
         assert_ne!(a, b);
-        // Never install into the user's project or a global prefix.
+
         assert!(a.ends_with("language-servers/typescript-language-server"));
     }
 
@@ -324,17 +261,15 @@ mod tests {
         let entry = tmp.join("server.js");
         let pkgs = vec!["a@1".to_string()];
 
-        // No entry point yet.
         assert!(needs_install(&tmp, &entry, &pkgs));
 
         std::fs::write(&entry, "//").unwrap();
-        // Entry exists but nothing recorded.
+
         assert!(needs_install(&tmp, &entry, &pkgs));
 
         std::fs::write(marker_path(&tmp), "a@1").unwrap();
         assert!(!needs_install(&tmp, &entry, &pkgs));
 
-        // Requested set changed -> reinstall.
         assert!(needs_install(&tmp, &entry, &["a@2".to_string()]));
 
         let _ = std::fs::remove_dir_all(&tmp);

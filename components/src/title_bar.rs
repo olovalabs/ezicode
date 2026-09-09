@@ -12,14 +12,8 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-/// Our copy of gpui-component's `TITLE_BAR_HEIGHT` (removed there since the
-/// height is now dynamic per-OS like Zed's `platform_title_bar_height`).
-/// Kept exported so `inspector` / `sheet` keep compiling unchanged.
 pub const TITLE_BAR_HEIGHT: Pixels = px(34.);
 
-/// Title bar height, like Zed's `platform_title_bar_height`
-/// (`crates/ui/src/utils/constants.rs`): 32px fixed on Windows, rem-scaled
-/// (1.75x, min 34px) everywhere else.
 fn title_bar_height(window: &Window) -> Pixels {
     match PlatformStyle::platform() {
         PlatformStyle::Windows => px(32.),
@@ -27,8 +21,6 @@ fn title_bar_height(window: &Window) -> Pixels {
     }
 }
 
-/// Left padding reserving room for macOS traffic lights, which the OS draws
-/// over our title bar (positioned via `TitleBar::title_bar_options`).
 fn title_bar_left_padding() -> Pixels {
     match PlatformStyle::platform() {
         PlatformStyle::Mac => px(78.),
@@ -36,14 +28,6 @@ fn title_bar_left_padding() -> Pixels {
     }
 }
 
-/// OS detection for window-control rendering, mirroring Zed's
-/// `PlatformStyle::platform()` (`crates/ui/src/styles/platform.rs`).
-///
-/// - macOS: the OS draws the traffic lights, we draw nothing.
-/// - Windows: always draw caption buttons, clicks are routed natively via
-///   `WindowControlArea`.
-/// - Linux: draw buttons only with client-side decorations, and only the
-///   ones the compositor reports as supported via `window.window_controls()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlatformStyle {
     Mac,
@@ -63,9 +47,6 @@ impl PlatformStyle {
     }
 }
 
-/// TitleBar used to customize the appearance of the title bar.
-///
-/// We can put some elements inside the title bar.
 #[derive(IntoElement)]
 pub struct TitleBar {
     style: StyleRefinement,
@@ -74,7 +55,7 @@ pub struct TitleBar {
 }
 
 impl TitleBar {
-    /// Create a new TitleBar.
+
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -83,7 +64,6 @@ impl TitleBar {
         }
     }
 
-    /// Returns the default title bar options for compatible with the [`crate::TitleBar`].
     pub fn title_bar_options() -> TitlebarOptions {
         TitlebarOptions {
             title: None,
@@ -92,10 +72,6 @@ impl TitleBar {
         }
     }
 
-    /// Add custom for close window event, default is None, then click X button will call `window.remove_window()`.
-    /// Only used on Linux (client-side path); stored on every OS and
-    /// ignored elsewhere, so the check happens at render time like Zed's
-    /// `render_right_window_controls` instead of at build time.
     pub fn on_close_window(
         mut self,
         f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -108,7 +84,7 @@ impl TitleBar {
 // The Windows control buttons have a fixed width of 35px.
 //
 // We don't need implementation the click event for the control buttons.
-// If user clicked in the bounds, the window event will be triggered.
+
 #[derive(IntoElement, Clone)]
 enum ControlIcon {
     Minimize,
@@ -119,16 +95,6 @@ enum ControlIcon {
     },
 }
 
-/// Segoe font used by Zed's `WindowsWindowControls`
-/// (`crates/platform_title_bar/src/platforms/platform_windows.rs`).
-/// "Segoe Fluent Icons" on Win11 (build >= 22000), "Segoe MDL2 Assets" below.
-///
-/// Segoe is a system font on Windows, so no detection call is needed at all:
-/// Win11 ships "Segoe Fluent Icons", Win10 ships "Segoe MDL2 Assets", and both
-/// glyph sets use the same codepoints for min/max/restore/close. GPUI's text
-/// system falls back through the font stack, so listing Fluent first with MDL2
-/// as fallback renders correctly on both — exactly what the glyph codepoints
-/// need, with zero version-detection code.
 fn caption_font_family() -> &'static str {
     "Segoe Fluent Icons"
 }
@@ -206,7 +172,7 @@ impl ControlIcon {
     }
 
     // Zed's Windows close button: solid #E81120 fill, white glyph
-    // (`crates/platform_title_bar/src/platforms/platform_windows.rs`).
+
     #[inline]
     fn hover_bg(&self, cx: &App) -> Hsla {
         if self.is_close() {
@@ -225,16 +191,6 @@ impl ControlIcon {
         }
     }
 
-    /// Windows caption button (Zed's `WindowsCaptionButton`): Segoe glyph,
-    /// native click via `WindowControlArea`, red hover on close.
-    ///
-    /// `window` is only used for the enabled check, which exists solely on
-    /// Windows in gpui 0.2.2 (`is_minimizable`/`is_resizable` landed upstream
-    /// later — Zed commit `e99616c`). Until the vendored gpui is bumped we
-    /// check `WindowOptions` the same way GPUI's own Windows backend does:
-    /// `WS_MINIMIZEBOX`/`WS_MAXIMIZEBOX` are set from `is_minimizable` /
-    /// `is_resizable`, and our window passes neither `false`, so both are
-    /// always enabled — exactly what Zed renders for a normal window.
     fn render_windows_button(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         use gpui::Rgba;
 
@@ -287,9 +243,6 @@ impl ControlIcon {
             .child(glyph)
     }
 
-    /// Linux caption button (Zed's `LinuxWindowControls`): SVG icon that
-    /// dispatches the action itself. Only rendered with client-side
-    /// decorations (see `WindowControls` below).
     fn render_linux_button(self, cx: &mut App) -> impl IntoElement {
         let hover_fg = self.hover_fg(cx);
         let hover_bg = self.hover_bg(cx);
@@ -337,14 +290,11 @@ impl ControlIcon {
 
 impl RenderOnce for ControlIcon {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        // Dynamic dispatch like Zed's `PlatformStyle::platform()`: every
-        // branch compiles on every OS, the match picks at runtime. Boxed to
-        // `AnyElement` since the Windows (Segoe text) and Linux (SVG icon)
-        // buttons are different element types.
+
         match PlatformStyle::platform() {
             PlatformStyle::Windows => self.render_windows_button(window, cx).into_any_element(),
             PlatformStyle::Linux => self.render_linux_button(cx).into_any_element(),
-            // macOS: the OS draws the traffic lights; nothing to render.
+
             PlatformStyle::Mac => div().id(self.id()).into_any_element(),
         }
     }
@@ -357,13 +307,7 @@ struct WindowControls {
 
 impl RenderOnce for WindowControls {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
-        // Zed parity (`render_right_window_controls` in
-        // `crates/platform_title_bar/src/platform_title_bar.rs`):
-        // - macOS: the OS draws the traffic lights (positioned via
-        //   `TitleBar::title_bar_options`), so we draw nothing.
-        // - Fullscreen: no caption buttons, same as Zed.
-        // - Linux with server-side decorations: the compositor draws its
-        //   own controls, so we draw nothing.
+
         match PlatformStyle::platform() {
             PlatformStyle::Mac => return div().id("window-controls"),
             _ => {}
@@ -379,9 +323,7 @@ impl RenderOnce for WindowControls {
 
         let supported = window.window_controls();
         let show_minimize = match PlatformStyle::platform() {
-            // Zed's `LinuxWindowControls` omits buttons the compositor
-            // doesn't support; Windows always shows them (disabled when
-            // the window isn't minimizable/resizable).
+
             PlatformStyle::Linux => supported.minimize,
             _ => true,
         };
@@ -390,10 +332,6 @@ impl RenderOnce for WindowControls {
             _ => true,
         };
 
-        // Zed's `WindowsWindowControls` is a fixed-height (title-bar height)
-        // strip: `content_stretch` + `max_h`/`min_h` = button height, each
-        // button `w(px(46.))` `h_full`. The Linux row keeps the old
-        // centered-icon look.
         match PlatformStyle::platform() {
             PlatformStyle::Windows => div()
                 .id("window-controls")
@@ -446,7 +384,6 @@ struct TitleBarState {
     should_move: bool,
 }
 
-// TODO: Remove this when GPUI has released v0.2.3
 impl Render for TitleBarState {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()

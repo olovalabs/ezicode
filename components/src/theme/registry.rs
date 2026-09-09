@@ -43,7 +43,6 @@ pub(super) fn init(cx: &mut App) {
     cx.set_global(ThemeRegistry::default());
     ThemeRegistry::global_mut(cx).init_default_themes();
 
-    // Observe changes to the theme registry to apply changes to the active theme
     cx.observe_global::<ThemeRegistry>(|cx| {
         let mode = Theme::global(cx).mode;
         let light_theme = Theme::global(cx).light_theme.name.clone();
@@ -92,9 +91,6 @@ impl ThemeRegistry {
         cx.global_mut::<Self>()
     }
 
-    /// Watch themes directory.
-    ///
-    /// And reload themes to trigger the `on_load` callback.
     pub fn watch_dir<F>(themes_dir: PathBuf, cx: &mut App, on_load: F) -> Result<()>
     where
         F: Fn(&mut App) + 'static,

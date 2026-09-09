@@ -1,10 +1,3 @@
-//! Explorer panel: a Zed/VS Code-style file tree.
-//!
-//! The important performance property lives here: rows are handed to GPUI's
-//! `uniform_list`, so only the small viewport-sized slice is laid out and
-//! painted. The workspace owns a cached flat row snapshot; this view never
-//! recursively walks or clones the tree during a normal paint.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -54,9 +47,6 @@ pub(crate) fn render_tree(
         .bg(rgba(t.panel))
         .overflow_hidden();
 
-    // Root project header and its quick actions mirror the compact toolbar in
-    // VS Code and Zed. The actions are always available without opening a
-    // context menu, which is especially useful on narrow sidebars.
     let root_folder_icon = if section_expanded {
         file_icons::FOLDER_EXPANDED
     } else {
@@ -68,9 +58,6 @@ pub(crate) fn render_tree(
         "ui_icons/chevron-right_tint.svg"
     };
 
-    // Only the context-menu closure needs to retain an owned path between
-    // frames. Toolbar clicks resolve the current root at click time, avoiding
-    // three more PathBuf clones on every workspace repaint.
     let r_context = root_path.map(|path| path.to_path_buf());
     let drop_root = r_context.clone();
     let drop_color = t.element_selected;
@@ -87,9 +74,7 @@ pub(crate) fn render_tree(
         .on_click(cx.listener(|this, _, _, cx| {
             this.toggle_explorer_section(cx);
         }))
-        // The project header is the drop target for moving an item back to
-        // the workspace root. This is important when the root is collapsed or
-        // when there are no visible child rows to drop onto.
+
         .drag_over::<ExplorerDrag>(move |this, _, _, _| {
             this.bg(rgba(drop_color))
         })
@@ -154,8 +139,7 @@ pub(crate) fn render_tree(
                         .text_size(px(13.5))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(t.text))
-                        // Preserve the actual project name. Lowercasing here
-                        // made case-sensitive projects look unfamiliar.
+
                         .child(folder.clone()),
                 ),
         )
@@ -295,8 +279,7 @@ fn header_action_button(
         )
         .on_click(cx.listener(move |this, _, window, cx| {
             action(this, window, cx);
-            // Do not also toggle the root section when a toolbar button is
-            // clicked inside the header.
+
             cx.stop_propagation();
         }))
 }
@@ -325,7 +308,6 @@ fn inline_create_row(
             }
         }));
 
-    // Zed-style vertical tree lines (indent guides)
     for d in 0..depth {
         let guide_x = BASE_PAD + d as f32 * INDENT_STEP + 3.0;
         row = row.child(
@@ -494,9 +476,6 @@ fn tree_row(
     let name = row_data.name.clone();
     let pad = BASE_PAD + row_data.depth as f32 * INDENT_STEP;
 
-    // The index is stable for the lifetime of a visible snapshot and keeps
-    // element-id work allocation-free. UniformList also reuses only the
-    // viewport's handful of rows.
     let mut row = div()
         .id(("tree-row", idx))
         .w_full()
@@ -591,10 +570,7 @@ fn tree_row(
                 this.open_file(path_click.clone(), window, cx);
             }
         }))
-        // GPUI starts the drag after the normal click threshold, so a simple
-        // click still selects/opens the row. The payload is a path rather than
-        // a rendered row, which keeps it valid while the virtual list recycles
-        // elements during a drag.
+
         .on_drag(ExplorerDrag { path: path.clone() }, |drag, _, _, cx| {
             cx.stop_propagation();
             cx.new(|_| drag.clone())
@@ -612,8 +588,6 @@ fn tree_row(
             }));
     }
 
-    // VS Code selects the row that was right-clicked before opening its
-    // context menu, which makes New/Rename/Delete target the obvious item.
     let context_select_path = path.clone();
     row = row.on_mouse_down(
         MouseButton::Right,
@@ -623,7 +597,6 @@ fn tree_row(
         }),
     );
 
-    // Right-click context menu (Zed / VS Code File Explorer Context Menu)
     let path_c1 = path.clone();
     let path_c2 = path.clone();
     let path_c3 = path.clone();

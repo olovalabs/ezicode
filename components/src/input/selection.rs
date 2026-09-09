@@ -8,13 +8,13 @@ use crate::{input::InputState, RopeExt as _};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CharType {
-    /// a-z, A-Z, 0-9, _
+
     Word,
-    /// '\t', ' ', '\u{00A0}' etc.
+
     Whitespace,
-    /// \n, \r
+
     Newline,
-    /// . , ; : ( ) [ ] { } ... or CJK characters: `汉`, `🎉` etc.
+
     Other,
 }
 
@@ -31,7 +31,7 @@ impl From<char> for CharType {
 }
 
 impl CharType {
-    /// Check if two CharTypes are connectable
+
     fn is_connectable(self, c: char) -> bool {
         let other = CharType::from(c);
         match (self, other) {
@@ -43,9 +43,7 @@ impl CharType {
 }
 
 impl InputState {
-    /// Select the word at the given offset on double-click.
-    ///
-    /// The offset is the UTF-8 offset.
+
     pub(super) fn select_word(&mut self, offset: usize, _: &mut Window, cx: &mut Context<Self>) {
         let Some(range) = TextSelector::word_range(&self.text, offset) else {
             return;
@@ -59,11 +57,7 @@ impl InputState {
 
 struct TextSelector;
 impl TextSelector {
-    /// Select a word in the given text at the specified offset.
-    ///
-    /// The offset is the UTF-8 offset.
-    ///
-    /// Returns the start and end offsets of the selected word.
+
     pub fn word_range(text: &Rope, offset: usize) -> Option<Range<usize>> {
         let offset = text.clip_offset(offset, Bias::Left);
         let Some(char) = text.char_at(offset) else {

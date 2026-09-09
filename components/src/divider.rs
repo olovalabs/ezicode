@@ -4,7 +4,6 @@ use gpui::{
     StyleRefinement, Styled, Window, canvas, div, point, prelude::FluentBuilder as _, px,
 };
 
-/// The style of the divider line.
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum DividerStyle {
     #[default]
@@ -12,7 +11,6 @@ pub enum DividerStyle {
     Dashed,
 }
 
-/// A divider that can be either vertical or horizontal.
 #[derive(IntoElement)]
 pub struct Divider {
     base: Div,
@@ -24,7 +22,7 @@ pub struct Divider {
 }
 
 impl Divider {
-    /// Creates a vertical divider.
+
     pub fn vertical() -> Self {
         Self {
             base: div().h_full(),
@@ -36,7 +34,6 @@ impl Divider {
         }
     }
 
-    /// Creates a horizontal divider.
     pub fn horizontal() -> Self {
         Self {
             base: div(),
@@ -48,29 +45,24 @@ impl Divider {
         }
     }
 
-    /// Creates a vertical dashed divider.
     pub fn vertical_dashed() -> Self {
         Self::vertical().dashed()
     }
 
-    /// Creates a horizontal dashed divider.
     pub fn horizontal_dashed() -> Self {
         Self::horizontal().dashed()
     }
 
-    /// Sets the label for the divider.
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
         self
     }
 
-    /// Sets the color for the divider line.
     pub fn color(mut self, color: impl Into<Hsla>) -> Self {
         self.color = Some(color.into());
         self
     }
 
-    /// Sets the style of the divider to dashed.
     pub fn dashed(mut self) -> Self {
         self.line_style = DividerStyle::Dashed;
         self

@@ -1,91 +1,6 @@
-//! Keyboard input handling for the terminal emulator.
-//!
-//! This module provides [`keystroke_to_bytes`], which converts GPUI keyboard
-//! events into terminal escape sequences that can be written to the PTY.
-//!
-//! # Key Mappings
-//!
-//! ## Special Keys
-//!
-//! | Key | Sequence | Notes |
-//! |-----|----------|-------|
-//! | Enter | `\r` (0x0D) | Carriage return |
-//! | Escape | `\x1b` (0x1B) | ESC |
-//! | Backspace | `\x7f` (0x7F) | DEL |
-//! | Tab | `\t` (0x09) | Horizontal tab |
-//! | Shift+Tab | `\x1b[Z` | Backtab |
-//! | Space | ` ` (0x20) | Space |
-//! | Ctrl+Space | `\x00` | NUL |
-//!
-//! ## Arrow Keys
-//!
-//! Arrow key sequences depend on application cursor mode:
-//!
-//! | Key | Normal Mode | App Cursor Mode |
-//! |-----|-------------|-----------------|
-//! | Up | `\x1b[A` | `\x1bOA` |
-//! | Down | `\x1b[B` | `\x1bOB` |
-//! | Right | `\x1b[C` | `\x1bOC` |
-//! | Left | `\x1b[D` | `\x1bOD` |
-//!
-//! ## Navigation Keys
-//!
-//! | Key | Sequence |
-//! |-----|----------|
-//! | Home | `\x1b[H` |
-//! | End | `\x1b[F` |
-//! | PageUp | `\x1b[5~` |
-//! | PageDown | `\x1b[6~` |
-//! | Insert | `\x1b[2~` |
-//! | Delete | `\x1b[3~` |
-//!
-//! ## Function Keys
-//!
-//! | Key | Sequence |
-//! |-----|----------|
-//! | F1-F4 | `\x1bOP` - `\x1bOS` |
-//! | F5-F12 | `\x1b[15~` - `\x1b[24~` |
-//!
-//! ## Control Combinations
-//!
-//! Ctrl+A through Ctrl+Z map to ASCII control characters 0x01-0x1A:
-//!
-//! | Combination | Byte |
-//! |-------------|------|
-//! | Ctrl+A | 0x01 |
-//! | Ctrl+C | 0x03 (interrupt) |
-//! | Ctrl+D | 0x04 (EOF) |
-//! | Ctrl+Z | 0x1A (suspend) |
-//!
-//! ## Alt Combinations
-//!
-//! Alt+key sends ESC followed by the key: `\x1b` + key
-//!
-//! # Terminal Mode Effects
-//!
-//! The [`TermMode`] flags affect key sequences:
-//!
-//! - **APP_CURSOR**: Changes arrow key sequences from CSI to SS3 format
-//!
-//! # Example
-//!
-//! ```
-//! use gpui::Keystroke;
-//! use alacritty_terminal::term::TermMode;
-//! use gpui_terminal::input::keystroke_to_bytes;
-//!
-//! // Enter key
-//! let keystroke = Keystroke::parse("enter").unwrap();
-//! assert_eq!(keystroke_to_bytes(&keystroke, TermMode::empty()), Some(b"\r".to_vec()));
-//!
-//! // Ctrl+C (interrupt)
-//! let keystroke = Keystroke::parse("ctrl-c").unwrap();
-//! assert_eq!(keystroke_to_bytes(&keystroke, TermMode::empty()), Some(vec![0x03]));
-//! ```
-
 use alacritty_terminal::term::TermMode;
 use gpui::Keystroke;
-/// Query the current Caps Lock state from the operating system.
+
 #[cfg(windows)]
 pub fn is_capslock_on() -> bool {
     #[link(name = "user32")]
@@ -101,38 +16,10 @@ pub fn is_capslock_on() -> bool {
     false
 }
 
-/// Convert a GPUI keystroke to terminal escape sequence bytes.
-///
-/// This function translates GPUI keyboard events into the appropriate byte sequences
-/// expected by terminal applications. It handles special keys, control characters,
-/// and application cursor mode.
-///
-/// # Arguments
-///
-/// * `keystroke` - The GPUI keystroke to convert
-/// * `mode` - The current terminal mode (affects arrow key sequences)
-///
-/// # Returns
-///
-/// An optional vector of bytes representing the terminal escape sequence.
-/// Returns `None` if the keystroke should not produce any output.
-///
-/// # Examples
-///
-/// ```
-/// use gpui::Keystroke;
-/// use alacritty_terminal::term::TermMode;
-/// use gpui_terminal::input::keystroke_to_bytes;
-///
-/// let keystroke = Keystroke::parse("enter").unwrap();
-/// let bytes = keystroke_to_bytes(&keystroke, TermMode::empty());
-/// assert_eq!(bytes, Some(b"\r".to_vec()));
-/// ```
 pub fn keystroke_to_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
     keystroke_to_bytes_internal(keystroke, mode, is_capslock_on())
 }
 
-/// Convert a GPUI keystroke to terminal escape sequence bytes with an explicit Caps Lock state.
 pub fn keystroke_to_bytes_with_caps(
     keystroke: &Keystroke,
     mode: TermMode,
@@ -148,17 +35,15 @@ fn keystroke_to_bytes_internal(
 ) -> Option<Vec<u8>> {
     let key_lower = keystroke.key.to_ascii_lowercase();
 
-    // Standard xterm modifier calculation: 1 + shift*1 + alt*2 + ctrl*4
     let mod_code = 1
         + (if keystroke.modifiers.shift { 1 } else { 0 })
         + (if keystroke.modifiers.alt { 2 } else { 0 })
         + (if keystroke.modifiers.control { 4 } else { 0 });
 
-    // Handle special navigation and function keys
     match key_lower.as_str() {
         "space" => {
             if keystroke.modifiers.control {
-                return Some(vec![0x00]); // Ctrl+Space = NUL
+                return Some(vec![0x00]);
             }
             return Some(b" ".to_vec());
         }
@@ -166,21 +51,20 @@ fn keystroke_to_bytes_internal(
         "escape" => return Some(b"\x1b".to_vec()),
         "tab" => {
             if keystroke.modifiers.shift {
-                return Some(b"\x1b[Z".to_vec()); // Backtab
+                return Some(b"\x1b[Z".to_vec());
             }
             return Some(b"\t".to_vec());
         }
         "backspace" => {
             if keystroke.modifiers.alt {
-                return Some(b"\x1b\x7f".to_vec()); // Alt+Backspace (word delete backwards)
+                return Some(b"\x1b\x7f".to_vec());
             }
             if keystroke.modifiers.control {
-                return Some(vec![0x08]); // Ctrl+Backspace (BS)
+                return Some(vec![0x08]);
             }
             return Some(b"\x7f".to_vec());
         }
 
-        // Arrow keys
         "up" => {
             if mod_code > 1 {
                 return Some(format!("\x1b[1;{mod_code}A").into_bytes());
@@ -218,7 +102,6 @@ fn keystroke_to_bytes_internal(
             return Some(b"\x1b[D".to_vec());
         }
 
-        // Navigation keys
         "home" => {
             if mod_code > 1 {
                 return Some(format!("\x1b[1;{mod_code}H").into_bytes());
@@ -262,7 +145,6 @@ fn keystroke_to_bytes_internal(
             return Some(b"\x1b[3~".to_vec());
         }
 
-        // Function keys F1-F4
         "f1" => {
             if mod_code > 1 {
                 return Some(format!("\x1b[1;{mod_code}P").into_bytes());
@@ -288,7 +170,6 @@ fn keystroke_to_bytes_internal(
             return Some(b"\x1bOS".to_vec());
         }
 
-        // Function keys F5-F12
         "f5" => {
             if mod_code > 1 {
                 return Some(format!("\x1b[15;{mod_code}~").into_bytes());
@@ -341,7 +222,6 @@ fn keystroke_to_bytes_internal(
         _ => {}
     }
 
-    // Handle Ctrl+key combinations
     if keystroke.modifiers.control && !keystroke.modifiers.alt {
         let key = keystroke.key.as_str();
         if key.len() == 1 {
@@ -353,18 +233,17 @@ fn keystroke_to_bytes_internal(
             }
 
             match ch {
-                '[' => return Some(b"\x1b".to_vec()),  // Ctrl+[
-                '\\' => return Some(b"\x1c".to_vec()), // Ctrl+\
-                ']' => return Some(b"\x1d".to_vec()),  // Ctrl+]
-                '^' => return Some(b"\x1e".to_vec()),  // Ctrl+^
-                '_' => return Some(b"\x1f".to_vec()),  // Ctrl+_
-                '?' => return Some(b"\x7f".to_vec()),  // Ctrl+?
+                '[' => return Some(b"\x1b".to_vec()),
+                '\\' => return Some(b"\x1c".to_vec()),
+                ']' => return Some(b"\x1d".to_vec()),
+                '^' => return Some(b"\x1e".to_vec()),
+                '_' => return Some(b"\x1f".to_vec()),
+                '?' => return Some(b"\x7f".to_vec()),
                 _ => {}
             }
         }
     }
 
-    // Handle Alt+key combinations
     if keystroke.modifiers.alt && !keystroke.modifiers.control {
         let key = keystroke.key.as_str();
         if key.len() == 1 {
@@ -375,10 +254,8 @@ fn keystroke_to_bytes_internal(
         }
     }
 
-    // Handle regular printable characters: Shift, CapsLock, symbols, letters
     if !keystroke.modifiers.control && !keystroke.modifiers.alt {
-        // Shift XOR CapsLock determines if a letter should be capitalized.
-        // On non-Windows platforms, also check if key_char contains an uppercase character.
+
         let should_uppercase = if is_caps {
             keystroke.modifiers.shift ^ true
         } else {
@@ -389,7 +266,6 @@ fn keystroke_to_bytes_internal(
                     .map_or(false, |s| s.chars().any(|c| c.is_ascii_uppercase()))
         };
 
-        // Check if key is a single ASCII letter
         let key = keystroke.key.as_str();
         if key.len() == 1 {
             let ch = key.chars().next().unwrap();
@@ -403,7 +279,6 @@ fn keystroke_to_bytes_internal(
             }
         }
 
-        // If key_char is available (from IME or platform event)
         if let Some(key_char) = &keystroke.key_char {
             if key_char.len() == 1 {
                 let ch = key_char.chars().next().unwrap();
@@ -421,7 +296,6 @@ fn keystroke_to_bytes_internal(
             }
         }
 
-        // Fallback for shifted US keyboard layout symbols when key_char is None (common on Windows)
         if key.len() == 1 {
             let ch = key.chars().next().unwrap();
             if keystroke.modifiers.shift {
@@ -457,7 +331,6 @@ fn keystroke_to_bytes_internal(
                 return Some(vec![ch as u8]);
             }
 
-            // For non-ASCII characters, encode as UTF-8
             return Some(key.as_bytes().to_vec());
         }
     }
@@ -585,19 +458,15 @@ mod tests {
     fn test_ctrl_combinations() {
         let mode = TermMode::empty();
 
-        // Ctrl+A = 0x01
         let ctrl_a = Keystroke::parse("ctrl-a").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_a, mode), Some(vec![0x01]));
 
-        // Ctrl+C = 0x03
         let ctrl_c = Keystroke::parse("ctrl-c").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_c, mode), Some(vec![0x03]));
 
-        // Ctrl+Z = 0x1a
         let ctrl_z = Keystroke::parse("ctrl-z").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_z, mode), Some(vec![0x1a]));
 
-        // Ctrl+Space = 0x00
         let ctrl_space = Keystroke::parse("ctrl-space").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_space, mode), Some(vec![0x00]));
     }
@@ -606,11 +475,9 @@ mod tests {
     fn test_alt_combinations() {
         let mode = TermMode::empty();
 
-        // Alt+a sends ESC followed by 'a'
         let alt_a = Keystroke::parse("alt-a").unwrap();
         assert_eq!(keystroke_to_bytes(&alt_a, mode), Some(b"\x1ba".to_vec()));
 
-        // Alt+x sends ESC followed by 'x'
         let alt_x = Keystroke::parse("alt-x").unwrap();
         assert_eq!(keystroke_to_bytes(&alt_x, mode), Some(b"\x1bx".to_vec()));
     }
@@ -641,22 +508,18 @@ mod tests {
     fn test_modified_arrow_keys() {
         let mode = TermMode::empty();
 
-        // Shift: mod_code = 1 + 1 = 2
         let shift_up = Keystroke::parse("shift-up").unwrap();
         assert_eq!(keystroke_to_bytes(&shift_up, mode), Some(b"\x1b[1;2A".to_vec()));
 
-        // Alt: mod_code = 1 + 2 = 3
         let alt_down = Keystroke::parse("alt-down").unwrap();
         assert_eq!(keystroke_to_bytes(&alt_down, mode), Some(b"\x1b[1;3B".to_vec()));
 
-        // Ctrl: mod_code = 1 + 4 = 5
         let ctrl_left = Keystroke::parse("ctrl-left").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_left, mode), Some(b"\x1b[1;5D".to_vec()));
 
         let ctrl_right = Keystroke::parse("ctrl-right").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_right, mode), Some(b"\x1b[1;5C".to_vec()));
 
-        // Ctrl+Shift: mod_code = 1 + 1 + 4 = 6
         let ctrl_shift_right = Keystroke::parse("ctrl-shift-right").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_shift_right, mode), Some(b"\x1b[1;6C".to_vec()));
     }
@@ -665,15 +528,12 @@ mod tests {
     fn test_modified_navigation_and_fn_keys() {
         let mode = TermMode::empty();
 
-        // Ctrl-Home
         let ctrl_home = Keystroke::parse("ctrl-home").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_home, mode), Some(b"\x1b[1;5H".to_vec()));
 
-        // Shift-F1
         let shift_f1 = Keystroke::parse("shift-f1").unwrap();
         assert_eq!(keystroke_to_bytes(&shift_f1, mode), Some(b"\x1b[1;2P".to_vec()));
 
-        // Ctrl-F5
         let ctrl_f5 = Keystroke::parse("ctrl-f5").unwrap();
         assert_eq!(keystroke_to_bytes(&ctrl_f5, mode), Some(b"\x1b[15;5~".to_vec()));
     }
@@ -696,24 +556,19 @@ mod tests {
     fn test_caps_lock_capitalization() {
         let mode = TermMode::empty();
 
-        // CapsLock ON, lower key -> uppercase
         let a = Keystroke::parse("a").unwrap();
         assert_eq!(keystroke_to_bytes_with_caps(&a, mode, true), Some(b"A".to_vec()));
 
         let z = Keystroke::parse("z").unwrap();
         assert_eq!(keystroke_to_bytes_with_caps(&z, mode, true), Some(b"Z".to_vec()));
 
-        // CapsLock ON + Shift -> lowercase (inverts)
         let shift_a = Keystroke::parse("shift-a").unwrap();
         assert_eq!(keystroke_to_bytes_with_caps(&shift_a, mode, true), Some(b"a".to_vec()));
 
-        // CapsLock OFF, shift -> uppercase
         assert_eq!(keystroke_to_bytes_with_caps(&shift_a, mode, false), Some(b"A".to_vec()));
 
-        // CapsLock OFF, no shift -> lowercase
         assert_eq!(keystroke_to_bytes_with_caps(&a, mode, false), Some(b"a".to_vec()));
 
-        // Numbers unaffected by CapsLock
         let one = Keystroke::parse("1").unwrap();
         assert_eq!(keystroke_to_bytes_with_caps(&one, mode, true), Some(b"1".to_vec()));
     }
@@ -724,8 +579,6 @@ mod tests {
         let mut keystroke = Keystroke::parse("a").unwrap();
         keystroke.key_char = Some("a".to_string());
 
-        // Even if platform returns lowercase in key_char (like Windows with CapsLock),
-        // keystroke_to_bytes_with_caps capitalizes it when CapsLock is active.
         assert_eq!(keystroke_to_bytes_with_caps(&keystroke, mode, true), Some(b"A".to_vec()));
     }
 }

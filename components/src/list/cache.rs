@@ -66,7 +66,7 @@ impl RowEntry {
 pub(crate) struct RowsCache {
     pub(crate) entities: Rc<Vec<RowEntry>>,
     pub(crate) items_count: usize,
-    /// The sections, the item is number of rows in each section.
+
     pub(crate) sections: Rc<Vec<usize>>,
     pub(crate) entries_sizes: Rc<Vec<Size<Pixels>>>,
     measured_size: MeasuredEntrySize,
@@ -77,34 +77,28 @@ impl RowsCache {
         self.entities.get(flatten_ix).cloned()
     }
 
-    /// Returns the number of flattened rows (Includes header, item, footer).
     pub(crate) fn len(&self) -> usize {
         self.entities.len()
     }
 
-    /// Return the number of items in the cache.
     pub(crate) fn items_count(&self) -> usize {
         self.items_count
     }
 
-    /// Returns the index of the  Entry with given path in the flattened rows.
     pub(crate) fn position_of(&self, path: &IndexPath) -> Option<usize> {
         self.entities
             .iter()
             .position(|p| p.is_entry() && p.eq_index_path(path))
     }
 
-    /// Returns the sections count in the cache.
     pub(crate) fn sections_count(&self) -> usize {
         self.sections.len()
     }
 
-    /// Returns the rows count in the given section, if the section does not exist, returns 0.
     pub(crate) fn rows_count(&self, section: usize) -> usize {
         self.sections.get(section).cloned().unwrap_or(0)
     }
 
-    /// Return prev row, if the row is the first in the first section, goes to the last row.
     pub(crate) fn prev(&self, path: Option<IndexPath>) -> IndexPath {
         let mut path = path.unwrap_or_default();
 
@@ -123,7 +117,6 @@ impl RowsCache {
         path
     }
 
-    /// Returns the next row, if the row is the last in the last section, goes to the first row.
     pub(crate) fn next(&self, path: Option<IndexPath>) -> IndexPath {
         let Some(mut path) = path else {
             return IndexPath::default();
@@ -208,18 +201,7 @@ mod tests {
     #[test]
     fn test_prev_next() {
         let mut row_cache = RowsCache::default();
-        // section 0
-        //  row 0
-        //  row 1
-        // section 1
-        //  row 0
-        //  row 1
-        //  row 2
-        //  row 3
-        // section 2
-        //  row 0
-        //  row 1
-        //  row 2
+
         row_cache.sections = Rc::new(vec![2, 4, 3]);
 
         assert_eq!(

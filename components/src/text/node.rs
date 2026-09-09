@@ -30,7 +30,7 @@ use super::{TextViewStyle, utils::list_item_prefix};
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct LinkMark {
     pub url: SharedString,
-    /// Optional identifier for footnotes.
+
     pub identifier: Option<SharedString>,
     pub title: Option<SharedString>,
 }
@@ -116,10 +116,10 @@ impl PartialEq for ImageNode {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct InlineNode {
-    /// The text content.
+
     pub(crate) text: SharedString,
     pub(crate) image: Option<ImageNode>,
-    /// The text styles, each tuple contains the range of the text and the style.
+
     pub(crate) marks: Vec<(Range<usize>, TextMark)>,
 
     state: Arc<Mutex<InlineState>>,
@@ -153,17 +153,11 @@ impl InlineNode {
     }
 }
 
-/// The paragraph element, contains multiple text nodes.
-///
-/// Unlike other Element, this is cloneable, because it is used in the Node AST.
-/// We are keep the selection state inside this AST Nodes.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Paragraph {
     pub(super) span: Option<Span>,
     pub(super) children: Vec<InlineNode>,
-    /// The link references in this paragraph, used for reference links.
-    ///
-    /// The key is the identifier, the value is the url.
+
     pub(super) link_refs: HashMap<SharedString, SharedString>,
 
     pub(crate) state: Arc<Mutex<InlineState>>,
@@ -293,7 +287,6 @@ impl Paragraph {
                 .all(|node| node.text.is_empty() && node.image.is_none())
     }
 
-    /// Return length of children text.
     pub(crate) fn text_len(&self) -> usize {
         self.children
             .iter()
@@ -320,12 +313,11 @@ impl PartialEq for CodeBlock {
 }
 
 impl CodeBlock {
-    /// Get the language of the code block.
+
     pub fn lang(&self) -> Option<SharedString> {
         self.lang.clone()
     }
 
-    /// Get the code content of the code block.
     pub fn code(&self) -> SharedString {
         self.state.lock().unwrap().text.clone()
     }
@@ -406,7 +398,6 @@ impl CodeBlock {
     }
 }
 
-/// A context for rendering nodes, contains link references.
 #[derive(Default, Clone)]
 pub(crate) struct NodeContext {
     pub(crate) link_refs: HashMap<SharedString, LinkMark>,
@@ -423,11 +414,10 @@ impl NodeContext {
 impl PartialEq for NodeContext {
     fn eq(&self, other: &Self) -> bool {
         self.link_refs == other.link_refs && self.style == other.style
-        // Note: code_block_buttons is intentionally not compared (closures can't be compared)
+
     }
 }
 
-/// The AST Node of the rich text.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Node {
     Root {
@@ -442,14 +432,14 @@ pub(crate) enum Node {
         children: Vec<Node>,
     },
     List {
-        /// Only contains ListItem, others will be ignored
+
         children: Vec<Node>,
         ordered: bool,
     },
     ListItem {
         children: Vec<Node>,
         spread: bool,
-        /// Whether the list item is checked, if None, it's not a checkbox
+
         checked: Option<bool>,
     },
     CodeBlock(CodeBlock),
@@ -458,7 +448,7 @@ pub(crate) enum Node {
         html: bool,
     },
     Divider,
-    /// Use for to_markdown get raw definition
+
     Definition {
         identifier: SharedString,
         url: SharedString,
@@ -476,7 +466,6 @@ impl Node {
         matches!(self, Self::Break { .. })
     }
 
-    /// Combine all children, omitting the empt parent nodes.
     pub(super) fn compact(self) -> Node {
         match self {
             Self::Root { mut children } if children.len() == 1 => children.remove(0).compact(),
@@ -658,7 +647,6 @@ impl Paragraph {
                             ..Default::default()
                         });
 
-                        // convert link references, replace link
                         if let Some(identifier) = link_mark.identifier.as_ref() {
                             if let Some(mark) = node_cx.link_refs.get(identifier) {
                                 link_mark = mark.clone();
@@ -677,7 +665,6 @@ impl Paragraph {
             ix += 1;
         }
 
-        // Add the last text node
         if text.len() > 0 {
             self.state.lock().unwrap().set_text(text.into());
             child_nodes
@@ -749,9 +736,7 @@ impl Paragraph {
 }
 
 impl Node {
-    /// Converts the node to markdown format.
-    ///
-    /// This is used to generate markdown for test.
+
     #[allow(dead_code)]
     pub(crate) fn to_markdown(&self) -> String {
         match self {
@@ -920,7 +905,6 @@ impl Node {
                                     cx,
                                 );
 
-                                // merge content into last item.
                                 if last_not_list {
                                     if let Some(item_item) = items.last_mut() {
                                         item_item.extend(vec![
@@ -944,7 +928,7 @@ impl Node {
                                             ))
                                         })
                                         .when_some(*checked, |this, checked| {
-                                            // Todo list checkbox
+
                                             this.child(
                                                 div()
                                                     .flex()

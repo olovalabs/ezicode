@@ -1,21 +1,3 @@
-//! LSP transport + client manager — the analogue of Zed's `crates/lsp` and
-//! `crates/project/src/lsp_store.rs`.
-//!
-//! Spawns and communicates with language servers over stdio using JSON-RPC
-//! and `lsp-types`. Diagnostics are streamed to the workspace and rendered as
-//! real-time squiggly underlines.
-//!
-//! Which server to run, how to invoke it and what to configure it with all
-//! come from [`super::adapter`]; installing Node-based servers is
-//! [`super::node`]'s job. This module only owns the protocol.
-//!
-//! Besides the streaming notifications, the client supports synchronous
-//! request/response pairs (`textDocument/completion`, `textDocument/hover`,
-//! `textDocument/definition`, `textDocument/codeAction`,
-//! `textDocument/formatting`, …) which are exposed to the editor through the
-//! provider hooks of gpui-component's `InputState::lsp` — the same surface
-//! Zed's editor uses to talk to language servers.
-
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::ops::Range as StdRange;
@@ -46,8 +28,6 @@ use lsp_types::{
 };
 use serde_json::{json, Value};
 
-/// How long a request may take before we give up (servers that are
-/// initializing a large project can be slow on the first request).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Debug)]
@@ -56,69 +36,53 @@ pub enum LspEvent {
         path: PathBuf,
         diagnostics: Vec<lsp_types::Diagnostic>,
     },
-    /// A transient message for the status bar.
+
     Status {
         lang: String,
         message: String,
     },
-    /// A background install finished; the server can now be started.
+
     ServerReady {
         server: String,
     },
-    /// A server could not be installed or started.
+
     ServerFailed {
         server: String,
         reason: String,
     },
-    /// The `initialize` handshake completed.
+
     Initialized {
         server: String,
     },
-    /// The server process exited unexpectedly (crash, OOM, kill). The
-    /// workspace drops the cached client and respawns the server for every
-    /// open buffer, so a crashed `tsserver` heals itself instead of leaving
-    /// the editor silently feature-less until the file is reopened.
+
     ServerExited {
         server: String,
     },
 }
 
-/// Lifecycle of one language server, surfaced in the status bar.
-///
-/// Zed shows the same progression in its status bar / "language server logs":
-/// checking → downloading/installing → starting → running.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerStatus {
-    /// npm install in progress (Zed: "Downloading <server>…").
+
     Installing,
-    /// Process spawned, `initialize` handshake in flight.
+
     Starting,
-    /// Handshake finished; diagnostics and completions are live.
+
     Running,
-    /// Not usable, with a user-facing reason.
+
     Failed(String),
 }
 
-/// Owns one `LspClient` per *server*, spawns them on demand and installs
-/// Node-based servers in the background.
-///
-/// Note the key change versus a naive design: clients are keyed by **server
-/// name**, not by language. `typescript-language-server` serves `.ts`, `.js`,
-/// `.tsx` and `.jsx` from a single process that shares one project graph —
-/// which is what lets a rename in `a.ts` show an error in `b.tsx`. Keying by
-/// language would spawn four servers that each see a quarter of the project.
-/// Zed does the same via `LanguageServerName`.
 pub struct LspManager {
-    /// server name → client
+
     clients: HashMap<String, Arc<LspClient>>,
-    /// server name → status
+
     statuses: HashMap<String, ServerStatus>,
-    /// Servers whose background install has been kicked off already.
+
     installing: HashSet<String>,
     root: Option<PathBuf>,
     event_tx: async_channel::Sender<LspEvent>,
     event_rx: async_channel::Receiver<LspEvent>,
-    /// server name → (consecutive crash count, last crash timestamp)
+
     crash_counts: HashMap<String, (usize, Instant)>,
 }
 
@@ -140,15 +104,10 @@ impl LspManager {
         self.event_rx.clone()
     }
 
-    /// Set the workspace root. Servers started later are rooted here, which is
-    /// what lets them read `tsconfig.json` / `package.json` and resolve
-    /// imports across the project.
     pub fn set_root(&mut self, root: Option<PathBuf>) {
         if self.root != root {
             self.root = root;
-            // Restart everything: a language server's project graph is bound
-            // to its root, so an old client would keep serving the old
-            // project. Zed likewise restarts servers when worktrees change.
+
             self.clients.clear();
             self.statuses.clear();
             self.installing.clear();
@@ -161,12 +120,6 @@ impl LspManager {
         self.root.as_deref()
     }
 
-    /// Ensure a server is running for `lang`, installing it first if needed.
-    ///
-    /// Never blocks: if the server has to be installed, this kicks off a
-    /// background `npm install`, reports [`ServerStatus::Installing`] and
-    /// returns `None`. The install thread emits [`LspEvent::ServerReady`]
-    /// when it finishes so the UI can retry and open its documents.
     pub fn ensure_server(
         &mut self,
         lang: &str,
@@ -179,8 +132,7 @@ impl LspManager {
             if client.is_alive() {
                 return Some(client.clone());
             }
-            // The server died (crash, OOM). Drop it and respawn below —
-            // Zed's supervisor does the same.
+
             self.clients.remove(name);
         }
 
@@ -226,7 +178,6 @@ impl LspManager {
         }
     }
 
-    /// Spawn a client for a resolved executable and record its status.
     fn spawn_client(
         &mut self,
         adapter: &'static super::adapter::ServerAdapter,
@@ -401,26 +352,19 @@ impl LspManager {
         }
     }
 
-    /// Notify the server that a document was saved. Servers like ESLint and
-    /// gopls only run some checks on save (Zed sends this from its buffer
-    /// store on every save).
     pub fn save_document(&mut self, path: &Path, lang: &str, text: &str) {
         if let Some(client) = self.client_for(lang) {
             client.did_save(path, text);
         }
     }
 
-    /// True when a live client exists for `lang`.
-    ///
-    /// Lets the UI skip whole-buffer reads and coalescing work on every
-    /// keystroke when no server exists for the language.
     pub fn has_client(&self, lang: &str) -> bool {
         self.client_for(lang).is_some()
     }
 }
 
 pub struct LspClient {
-    /// The adapter that configures this server (Zed's `LspAdapter`).
+
     pub adapter: &'static super::adapter::ServerAdapter,
     /// Workspace root this server was started in.
     #[allow(dead_code)]
@@ -434,40 +378,25 @@ pub struct LspClient {
     is_initialized: Arc<Mutex<bool>>,
     pending_opens: Arc<Mutex<Vec<(PathBuf, String, String)>>>,
     /// Documents whose text changed but haven't been synced yet: latest text
-    /// per path. The writer thread flushes these as debounced full-document
-    /// `didChange` messages, coalescing a fast typist's keystrokes into a
-    /// single sync instead of one whole-document message per keystroke.
+
     pending_changes: Arc<Mutex<HashMap<PathBuf, String>>>,
-    /// The most recent text we told the server for each open document. Used
-    /// by providers to answer requests that need positions (code actions).
+
     last_texts: Arc<Mutex<HashMap<PathBuf, String>>>,
-    /// What the server currently holds for each document — the base for
-    /// incremental `didChange` diffs. Deliberately separate from
-    /// `last_texts`: that mirrors the *editor's* text (updated on every
-    /// keystroke, before the debounced flush), and diffing the editor text
-    /// against itself would silently drop the edit entirely.
+
     synced_texts: Arc<Mutex<HashMap<PathBuf, String>>>,
-    /// Latest diagnostics per document (from publishDiagnostics), used to
-    /// build the `CodeActionContext` of code-action requests.
+
     last_diagnostics: Arc<Mutex<HashMap<PathBuf, Vec<lsp_types::Diagnostic>>>>,
-    /// Capabilities advertised by the server in its `initialize` response.
+
     server_capabilities: Arc<Mutex<Option<lsp_types::ServerCapabilities>>>,
-    /// Monotonic request id allocator. Starts at 100 so the reserved
-    /// `initialize` id (1) never collides with a routed response.
+
     next_id: AtomicI64,
-    /// In-flight requests: id → channel that the reader thread delivers the
-    /// response on.
+
     pending: Arc<Mutex<HashMap<i64, mpsc::Sender<Value>>>>,
     child: Arc<Mutex<Option<Child>>>,
 }
 
 impl LspClient {
-    /// Spawn an already-resolved server executable.
-    ///
-    /// `program` + `args` come from the adapter layer: for Node servers that
-    /// is our managed `node` plus the server's JS entry point, exactly like
-    /// Zed's `LanguageServerBinary`. No shell, no `.cmd` shim, no PATH
-    /// guessing at this level.
+
     pub fn spawn(
         adapter: &'static super::adapter::ServerAdapter,
         program: PathBuf,
@@ -505,7 +434,6 @@ impl LspClient {
             }
         };
 
-        // Drain stderr so a chatty server can never fill the pipe and wedge.
         if let Some(stderr) = child.stderr.take() {
             let name = adapter.name;
             thread::spawn(move || {
@@ -538,9 +466,6 @@ impl LspClient {
             Arc::new(Mutex::new(HashMap::new()));
         let child_arc = Arc::new(Mutex::new(Some(child)));
 
-        // Framed-message channel drained by a dedicated writer thread. All
-        // sends are non-blocking (unbounded mpsc), so the UI thread never
-        // blocks on a language server that is slow to drain its stdin.
         let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
 
         let client = Self {
@@ -561,13 +486,8 @@ impl LspClient {
             child: child_arc,
         };
 
-        // Send initialize request
         client.send_initialize(root_dir);
 
-        // Writer thread: writes framed messages to the child's stdin and,
-        // between messages, flushes coalesced didChange documents (debounced
-        // ~120 ms). Since this is its own OS thread, a blocked `write_all`
-        // (full pipe) costs the UI thread nothing.
         {
             let is_alive_w = is_alive.clone();
             let stdin_for_write = stdin_arc.clone();
@@ -604,7 +524,6 @@ impl LspClient {
             });
         }
 
-        // Spawn stdout reader thread
         let lang_str = adapter.name.to_string();
         let root_for_reader = root_dir.map(Path::to_path_buf);
         let is_alive_clone = is_alive.clone();
@@ -623,10 +542,7 @@ impl LspClient {
             while *is_alive_clone.lock().unwrap() {
                 match read_message(&mut reader) {
                     Ok(Some(mut msg)) => {
-                        // Per the spec a request id is `integer | string`.
-                        // Some servers (metals, and jdtls under load) use
-                        // string ids, so a client that only reads integers
-                        // silently drops their requests and deadlocks them.
+
                         let raw_id = msg.get("id").cloned().filter(|v| !v.is_null());
                         let id = raw_id.as_ref().and_then(Value::as_i64);
                         let method = msg
@@ -634,11 +550,6 @@ impl LspClient {
                             .and_then(Value::as_str)
                             .map(str::to_string);
 
-                        // A server-initiated *request* (has both id and
-                        // method) must always be answered. Zed registers
-                        // handlers for these; the VS Code family of servers
-                        // publishes no diagnostics at all until
-                        // `workspace/configuration` is answered.
                         if let (Some(req_id), Some(m)) = (raw_id.clone(), method.as_deref()) {
                             handle_server_request(
                                 adapter,
@@ -652,10 +563,9 @@ impl LspClient {
                         }
 
                         match (id, method.as_deref()) {
-                            // The `initialize` response (id 1, no method).
+
                             (Some(1), None) => {
-                                // Remember what this server can do so providers
-                                // can skip unsupported features.
+
                                 *caps_r.lock().unwrap() = msg
                                     .get("result")
                                     .and_then(|r| r.get("capabilities"))
@@ -668,7 +578,6 @@ impl LspClient {
 
                                 *is_init_clone.lock().unwrap() = true;
 
-                                // Send initialized notification
                                 let initialized = json!({
                                     "jsonrpc": "2.0",
                                     "method": "initialized",
@@ -676,12 +585,6 @@ impl LspClient {
                                 });
                                 send_framed(&out_for_init, &initialized);
 
-                                // Push our settings proactively. Servers that
-                                // registered for `didChangeConfiguration`
-                                // (yaml, eslint, json) apply validation
-                                // settings from this rather than pulling
-                                // them, so sending it is what turns their
-                                // diagnostics on.
                                 let settings =
                                     adapter.workspace_configuration("", root_for_reader.as_deref());
                                 if !settings.is_null() {
@@ -699,7 +602,6 @@ impl LspClient {
                                     server: adapter.name.to_string(),
                                 });
 
-                                // Drain and send all pending did_open documents
                                 let pendings: Vec<_> = {
                                     let mut guard = pending_for_init.lock().unwrap();
                                     guard.drain(..).collect()
@@ -727,15 +629,15 @@ impl LspClient {
                                     }
                                 }
                             }
-                            // A response to one of our requests.
+
                             (Some(req_id), None) => {
                                 if let Some(tx) = pending_r.lock().unwrap().remove(&req_id) {
                                     let _ = tx.send(msg);
                                 }
                             }
-                            // Requests are handled above.
+
                             (Some(_), Some(_)) => {}
-                            // A notification from the server.
+
                             (None, Some(_)) => {
                                 handle_incoming_message(&mut msg, &event_tx, &last_diag_r);
                             }
@@ -752,9 +654,7 @@ impl LspClient {
                 }
             }
             *is_alive_clone.lock().unwrap() = false;
-            // Tell the workspace the process went away so it can respawn the
-            // server for every open buffer. Without this, a crashed server
-            // leaves the editor silently feature-less.
+
             let _ = event_tx.try_send(LspEvent::ServerExited {
                 server: lang_str.clone(),
             });
@@ -767,24 +667,18 @@ impl LspClient {
         *self.is_alive.lock().unwrap()
     }
 
-    /// True once the initialize handshake finished and the process is alive.
     pub fn is_ready(&self) -> bool {
         *self.is_initialized.lock().unwrap() && *self.is_alive.lock().unwrap()
     }
 
-    /// The capabilities the server advertised in its initialize response.
     pub fn capabilities(&self) -> Option<lsp_types::ServerCapabilities> {
         self.server_capabilities.lock().unwrap().clone()
     }
 
-    /// True when the server advertised a capability (or hasn't told us yet —
-    /// requests are still safe because they no-op until initialized).
     pub fn supports(&self, pred: impl FnOnce(&lsp_types::ServerCapabilities) -> bool) -> bool {
         self.capabilities().as_ref().map(pred).unwrap_or(true)
     }
 
-    /// The most recent text synced for `path`, used to answer requests that
-    /// need line/character positions.
     pub fn last_text(&self, path: &Path) -> Option<String> {
         self.last_texts.lock().unwrap().get(path).cloned()
     }
@@ -846,11 +740,7 @@ impl LspClient {
                 }),
                 ..Default::default()
             }),
-            // Workspace capabilities. `configuration: true` is what makes a
-            // server send `workspace/configuration` at all — without it the
-            // CSS/HTML/JSON/YAML/ESLint servers never ask for their settings,
-            // fall back to their built-in defaults (validation off) and
-            // publish nothing. Zed sets exactly these.
+
             workspace: Some(lsp_types::WorkspaceClientCapabilities {
                 configuration: Some(true),
                 did_change_configuration: Some(
@@ -875,7 +765,7 @@ impl LspClient {
                 }),
                 ..Default::default()
             }),
-            // Servers gate progress reporting on this.
+
             window: Some(lsp_types::WindowClientCapabilities {
                 work_done_progress: Some(true),
                 ..Default::default()
@@ -887,8 +777,6 @@ impl LspClient {
             version: Some("0.1.0".into()),
         });
 
-        // Advertise the workspace folder too: ESLint and the JSON/YAML
-        // servers resolve config files and `node_modules` relative to it.
         if let Some(root) = root_dir {
             if let Some(uri) = path_to_uri(root) {
                 params.workspace_folders = Some(vec![lsp_types::WorkspaceFolder {
@@ -901,8 +789,6 @@ impl LspClient {
             }
         }
 
-        // Per-server options come from the adapter (Zed's
-        // `LspAdapter::initialization_options`).
         params.initialization_options = self.adapter.initialization_options(root_dir);
 
         let init_req = json!({
@@ -916,23 +802,21 @@ impl LspClient {
     }
 
     pub fn did_open(&self, path: &Path, lang: &str, text: &str) {
-        // Translate our editor language id into the id the *protocol*
-        // defines (Zed: `LspAdapter::language_ids`) — "tsx" becomes
-        // "typescriptreact", "bash" becomes "shellscript".
+
         let language_id = self.adapter.language_id(lang).to_string();
 
         self.last_texts
             .lock()
             .unwrap()
             .insert(path.to_path_buf(), text.to_string());
-        // The didOpen text is exactly what the server will hold.
+
         self.synced_texts
             .lock()
             .unwrap()
             .insert(path.to_path_buf(), text.to_string());
 
         if !*self.is_initialized.lock().unwrap() {
-            // Queue until initialize handshake completes
+
             self.pending_opens
                 .lock()
                 .unwrap()
@@ -940,8 +824,6 @@ impl LspClient {
             return;
         }
 
-        // Re-opening a document the server already knows about is a protocol
-        // error; sync it instead.
         if self.versions.lock().unwrap().contains_key(path) {
             self.sync_document(path, text);
             return;
@@ -974,15 +856,7 @@ impl LspClient {
         if !*self.is_initialized.lock().unwrap() {
             return;
         }
-        // Coalesce: remember only the latest text per document. The writer
-        // thread flushes pending changes as debounced full-document syncs,
-        // so a fast typist costs one network round-trip every ~120 ms
-        // instead of one whole-document serialization + write per keystroke.
-        //
-        // `text` arrives owned (the caller's single per-keystroke buffer
-        // read); it is cloned once for `last_texts` and moved into
-        // `pending_changes`, so a keystroke costs two copies total instead
-        // of three.
+
         self.last_texts
             .lock()
             .unwrap()
@@ -1001,8 +875,7 @@ impl LspClient {
         self.last_texts.lock().unwrap().remove(path);
         self.synced_texts.lock().unwrap().remove(path);
         self.last_diagnostics.lock().unwrap().remove(path);
-        // Drop any not-yet-flushed edit for the document so a coalesced
-        // didChange can never race the didClose.
+
         self.pending_changes.lock().unwrap().remove(path);
 
         let params = DidCloseTextDocumentParams {
@@ -1018,14 +891,11 @@ impl LspClient {
         self.send_payload(&msg);
     }
 
-    /// `textDocument/didSave`. ESLint (`"run": "onType"` still re-lints on
-    /// save), gopls and rust-analyzer run their heavier checks here, so a
-    /// client that never sends it under-reports diagnostics.
     pub fn did_save(&self, path: &Path, text: &str) {
         if !self.is_ready() {
             return;
         }
-        // Flush pending edits first so the server's copy matches the file.
+
         self.sync_document(path, text);
 
         let Some(uri) = path_to_uri(path) else {
@@ -1042,14 +912,6 @@ impl LspClient {
         self.send_payload(&msg);
     }
 
-    /// Immediately sync `text` as the authoritative document, dropping any
-    /// not-yet-flushed coalesced edit. Call before a request so the server's
-    /// copy matches what the user sees.
-    ///
-    /// The sync is *incremental* when the server advertised it: we diff
-    /// against the text the server last received and send one ranged edit
-    /// covering just the difference. A full-document `didChange` is legal
-    /// under any sync kind, so diffing degrades safely.
     pub fn sync_document(&self, path: &Path, text: &str) {
         if !self.is_ready() {
             return;
@@ -1058,7 +920,7 @@ impl LspClient {
             return;
         };
         self.pending_changes.lock().unwrap().remove(path);
-        // Providers (code actions) read `last_texts` as the *editor's* text.
+
         self.last_texts
             .lock()
             .unwrap()
@@ -1071,8 +933,7 @@ impl LspClient {
             server_wants_incremental(&self.server_capabilities.lock().unwrap()),
         );
         let Some(change) = change else {
-            // Server is already up to date; re-announcing would force it to
-            // re-analyse the document for no reason.
+
             return;
         };
 
@@ -1094,10 +955,6 @@ impl LspClient {
         self.send_payload(&msg);
     }
 
-    /// Send a JSON-RPC request and block (up to `timeout`) for its response.
-    /// Returns the `result` field, or `None` on timeout / server error /
-    /// disconnect. Safe to call from background threads; never call from the
-    /// UI thread.
     pub fn request(&self, method: &str, params: Value, timeout: Duration) -> Option<Value> {
         if !self.is_ready() {
             return None;
@@ -1121,9 +978,6 @@ impl LspClient {
         }
     }
 
-    /// [`Self::sync_document`] followed by [`Self::request`] with the
-    /// default timeout. The server's answer is guaranteed to be computed
-    /// against exactly `text`.
     pub fn request_with_text(
         &self,
         path: &Path,
@@ -1135,7 +989,6 @@ impl LspClient {
         self.request(method, params, REQUEST_TIMEOUT)
     }
 
-    /// `textDocument/formatting` for the whole document.
     pub fn format_document(&self, path: &Path, text: &str) -> Option<Vec<lsp_types::TextEdit>> {
         if !self.supports(|c| c.document_formatting_provider.is_some()) {
             return None;
@@ -1165,8 +1018,7 @@ impl LspClient {
 
 impl Drop for LspClient {
     fn drop(&mut self) {
-        // Best-effort graceful shutdown: the writer thread may flush these
-        // before the child is killed.
+
         *self.is_alive.lock().unwrap() = false;
         let shutdown = json!({"jsonrpc": "2.0", "id": 999_999, "method": "shutdown", "params": null});
         if let Some(bytes) = frame_payload(&shutdown) {
@@ -1182,9 +1034,6 @@ impl Drop for LspClient {
     }
 }
 
-/// Attach the standard LSP provider set (completions, hover, go-to-definition,
-/// code actions) to an editor. Call once per editor after its server is
-/// ensured; the providers talk to `client` and identify documents by `path`.
 pub fn attach_lsp_providers(state: &mut InputState, client: Arc<LspClient>, path: PathBuf) {
     state.lsp.completion_provider = Some(Rc::new(LspCompletionProvider {
         client: client.clone(),
@@ -1201,9 +1050,6 @@ pub fn attach_lsp_providers(state: &mut InputState, client: Arc<LspClient>, path
     state.lsp.code_action_providers = vec![Rc::new(LspCodeActionProvider { client, path })];
 }
 
-/// Characters that fire a completion request while typing. Mirrors the
-/// trigger set of VS Code / Zed: word characters plus common punctuation
-/// that usually starts a member access or argument list.
 pub fn is_completion_trigger_char(c: char) -> bool {
     c.is_alphanumeric()
         || matches!(
@@ -1212,9 +1058,6 @@ pub fn is_completion_trigger_char(c: char) -> bool {
         )
 }
 
-// -- Providers --------------------------------------------------------------
-
-/// `textDocument/completion` + inline (ghost text) completions.
 pub struct LspCompletionProvider {
     client: Arc<LspClient>,
     path: PathBuf,
@@ -1237,9 +1080,6 @@ impl CompletionProvider for LspCompletionProvider {
         let text_str = text.to_string();
         let position = text.offset_to_position(offset);
 
-        // The library hands us the whole query text typed since the menu
-        // opened; the protocol wants a single trigger character, so only
-        // forward it when it is exactly one char.
         let trigger_character = trigger.trigger_character.filter(|c| c.chars().count() == 1);
         let trigger_kind = if trigger_character.is_some() {
             trigger.trigger_kind
@@ -1284,7 +1124,6 @@ impl CompletionProvider for LspCompletionProvider {
     }
 }
 
-/// `textDocument/hover` — the library shows the result in a popover.
 pub struct LspHoverProvider {
     client: Arc<LspClient>,
     path: PathBuf,
@@ -1322,8 +1161,6 @@ impl HoverProvider for LspHoverProvider {
     }
 }
 
-/// `textDocument/definition` — ctrl-hover underlines the symbol and F12
-/// jumps (the library renders the link highlight and handles the jump).
 pub struct LspDefinitionProvider {
     client: Arc<LspClient>,
     path: PathBuf,
@@ -1369,7 +1206,6 @@ impl DefinitionProvider for LspDefinitionProvider {
     }
 }
 
-/// `textDocument/codeAction` + `workspace/executeCommand`.
 pub struct LspCodeActionProvider {
     client: Arc<LspClient>,
     path: PathBuf,
@@ -1394,8 +1230,7 @@ impl CodeActionProvider for LspCodeActionProvider {
         let path = self.path.clone();
 
         cx.background_spawn(async move {
-            // The byte range refers to the text we last synced; rebuild the
-            // rope so we can convert it to line/character positions.
+
             let Some(text) = client.last_text(&path) else {
                 return Ok(vec![]);
             };
@@ -1419,7 +1254,7 @@ impl CodeActionProvider for LspCodeActionProvider {
                         .unwrap_or_default()
                         .into_iter()
                         .filter(|d| {
-                            // Keep only diagnostics overlapping the range.
+
                             !(d.range.end <= start || d.range.start >= end)
                         })
                         .collect(),
@@ -1469,9 +1304,6 @@ impl CodeActionProvider for LspCodeActionProvider {
         let client = self.client.clone();
         let path = self.path.clone();
 
-        // Apply the action's workspace edits to the current document (the
-        // library only has one document per editor; multi-file edits like
-        // renames touch the other files on the next open).
         if let Some(edit) = action.edit {
             if let (Some(uri), Some(changes)) = (path_to_uri(&path), edit.changes) {
                 if let Some((_, text_edits)) =
@@ -1490,7 +1322,6 @@ impl CodeActionProvider for LspCodeActionProvider {
             }
         }
 
-        // Execute the action's command on the server.
         if let Some(command) = action.command {
             let command_name = command.command;
             let arguments = command.arguments.unwrap_or_default();
@@ -1514,8 +1345,6 @@ fn location_to_link(loc: Location) -> LocationLink {
     }
 }
 
-/// Serialize `val` as one framed (Content-Length headed) JSON-RPC message.
-/// `None` when serialization fails.
 fn frame_payload(val: &Value) -> Option<Vec<u8>> {
     let json_str = serde_json::to_string(val).ok()?;
     let body = json_str.as_bytes();
@@ -1526,14 +1355,12 @@ fn frame_payload(val: &Value) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-/// Non-blocking enqueue of one framed message onto the writer channel.
 fn send_framed(tx: &mpsc::Sender<Vec<u8>>, val: &Value) {
     if let Some(bytes) = frame_payload(val) {
         let _ = tx.send(bytes);
     }
 }
 
-/// Write framed bytes to the child's stdin (writer thread only).
 fn write_to_stdin(stdin_arc: &Arc<Mutex<Option<ChildStdin>>>, bytes: &[u8]) {
     let mut stdin_guard = stdin_arc.lock().unwrap();
     if let Some(stdin) = stdin_guard.as_mut() {
@@ -1542,9 +1369,6 @@ fn write_to_stdin(stdin_arc: &Arc<Mutex<Option<ChildStdin>>>, bytes: &[u8]) {
     }
 }
 
-/// Flush every coalesced `didChange` document as an incremental (ranged)
-/// edit with a monotonically increasing version. Runs on the writer thread,
-/// so any pipe backpressure blocks a background thread, never the UI.
 fn flush_pending_changes(
     stdin_arc: &Arc<Mutex<Option<ChildStdin>>>,
     pending: &Mutex<HashMap<PathBuf, String>>,
@@ -1561,7 +1385,7 @@ fn flush_pending_changes(
     }
     let incremental = server_wants_incremental(&server_capabilities.lock().unwrap());
     for (path, text) in items {
-        // The document was closed before the flush — drop the stale edit.
+
         let doc_open = versions.lock().unwrap().contains_key(&path);
         if !doc_open {
             continue;
@@ -1593,11 +1417,6 @@ fn flush_pending_changes(
     }
 }
 
-/// Diff the server's current copy of `path` against `text`, record `text` as
-/// the new server copy, and return the change event to send — `None` when
-/// the server is already up to date. The mutex is held across the diff so a
-/// concurrent `flush_pending_changes` and `sync_document` can never compute
-/// from the same base and apply the same change twice.
 fn next_change_for(
     synced: &Mutex<HashMap<PathBuf, String>>,
     path: &Path,
@@ -1612,11 +1431,6 @@ fn next_change_for(
     Some(content_change_for(&prev, text, incremental))
 }
 
-/// Build a single `TextDocumentContentChangeEvent` that transforms `prev`
-/// (the text the server currently holds, or `None` for a fresh document)
-/// into `text`: a ranged edit covering just the difference when we know the
-/// old text and the server accepts incremental sync, a full replacement
-/// otherwise (always legal under any sync kind).
 fn content_change_for(
     prev: &Option<String>,
     text: &str,
@@ -1626,7 +1440,7 @@ fn content_change_for(
         (true, Some(prev)) => {
             let (start, end, inserted) = diff_edit(prev, text);
             if start == end && inserted.is_empty() {
-                // Identical texts (defensive; callers skip this case).
+
                 return TextDocumentContentChangeEvent {
                     range: None,
                     range_length: None,
@@ -1650,9 +1464,6 @@ fn content_change_for(
     }
 }
 
-/// True when the server advertised incremental (`didChange`) sync. The sync
-/// kind is a *server* capability; before the initialize response arrives we
-/// conservatively send full documents.
 fn server_wants_incremental(caps: &Option<lsp_types::ServerCapabilities>) -> bool {
     use lsp_types::TextDocumentSyncCapability;
     const INCREMENTAL: lsp_types::TextDocumentSyncKind =
@@ -1664,13 +1475,6 @@ fn server_wants_incremental(caps: &Option<lsp_types::ServerCapabilities>) -> boo
     }
 }
 
-/// Diff `old` → `new` into one edit: `(start, end)` are byte offsets into
-/// `old` whose contents are replaced by the returned slice of `new`.
-///
-/// The common prefix/suffix search works on bytes but is pulled back to
-/// `char` boundaries, so the offsets are always valid to convert to LSP
-/// positions. If nothing changed the result replaces an empty range with an
-/// empty string.
 fn diff_edit<'a>(old: &'a str, new: &'a str) -> (usize, usize, &'a str) {
     if old == new {
         return (0, 0, "");
@@ -1678,7 +1482,6 @@ fn diff_edit<'a>(old: &'a str, new: &'a str) -> (usize, usize, &'a str) {
     let ob = old.as_bytes();
     let nb = new.as_bytes();
 
-    // Common prefix, clamped to a char boundary.
     let mut p = 0;
     let max = ob.len().min(nb.len());
     while p < max && ob[p] == nb[p] {
@@ -1688,7 +1491,6 @@ fn diff_edit<'a>(old: &'a str, new: &'a str) -> (usize, usize, &'a str) {
         p -= 1;
     }
 
-    // Common suffix, not allowed to reach into the prefix.
     let mut s = 0;
     while s < ob.len() - p
         && s < nb.len() - p
@@ -1705,9 +1507,6 @@ fn diff_edit<'a>(old: &'a str, new: &'a str) -> (usize, usize, &'a str) {
     (p, ob.len() - s, &new[p..nb.len() - s])
 }
 
-/// Convert a byte offset into an LSP `Position` (line + UTF-16 code units on
-/// the line). `byte_offset` must land on a char boundary; offsets past the
-/// end clamp to the end of the text.
 fn offset_to_position(text: &str, byte_offset: usize) -> lsp_types::Position {
     let mut line: u32 = 0;
     let mut col: u32 = 0;
@@ -1797,27 +1596,6 @@ fn read_message<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Value>> {
     Ok(val)
 }
 
-/// Answer a server-initiated request.
-///
-/// Zed registers handlers for these on every server it starts
-/// (`crates/project/src/lsp_store.rs`). Answering them is not optional:
-///
-/// * **`workspace/configuration`** — the VS Code-derived servers (CSS, HTML,
-///   JSON, YAML, ESLint) ask for their settings immediately after
-///   `initialized` and **publish no diagnostics until they get a reply**.
-///   Replying "method not found" is the single most common reason a
-///   hand-rolled client shows errors for TypeScript but stays silent for CSS
-///   and HTML.
-/// * **`client/registerCapability`** — servers register dynamic capabilities
-///   here (tsserver registers most of its features this way). It must be
-///   acknowledged or the server may never finish starting.
-/// * **`window/workDoneProgress/create`** — must be acknowledged before the
-///   server will emit progress notifications.
-/// * **`workspace/applyEdit`** — must be answered so the server doesn't block
-///   after a rename/quick-fix; we report `applied: false` because applying a
-///   multi-file edit needs the buffer store.
-///
-/// Anything genuinely unknown still gets `-32601`, per the spec.
 fn handle_server_request(
     adapter: &'static super::adapter::ServerAdapter,
     root: Option<&Path>,
@@ -2016,62 +1794,55 @@ mod tests {
     /// apply cleanly on the server's copy.
     #[test]
     fn diff_edit_produces_minimal_ranged_edits() {
-        // Pure insertion in the middle.
+
         let (s, e, ins) = diff_edit("hello world", "hello big world");
         assert_eq!((s, e, ins), (6, 6, "big "));
-        // Pure deletion.
+
         let (s, e, ins) = diff_edit("hello big world", "hello world");
         assert_eq!((s, e, ins), (6, 10, ""));
-        // Replacement.
+
         let (s, e, ins) = diff_edit("hello world", "hello there");
         assert_eq!((s, e, ins), (6, 11, "there"));
-        // Append.
+
         let (s, e, ins) = diff_edit("abc", "abcdef");
         assert_eq!((s, e, ins), (3, 3, "def"));
-        // Truncate.
+
         let (s, e, ins) = diff_edit("abcdef", "abc");
         assert_eq!((s, e, ins), (3, 6, ""));
-        // No change.
+
         assert_eq!(diff_edit("same", "same"), (0, 0, ""));
     }
 
-    /// Multibyte characters must not end up split across the edit range:
-    /// the offsets are pulled back to char boundaries.
     #[test]
     fn diff_edit_stays_on_char_boundaries() {
-        // é is two bytes; the differing byte sits inside the char.
-        let (s, e, ins) = diff_edit("café", "café!"); // pure append after é
+
+        let (s, e, ins) = diff_edit("café", "café!");
         let mut applied = "café".to_string();
         applied.replace_range(s..e, ins);
         assert_eq!(applied, "café!");
         assert!("café".is_char_boundary(s) && "café".is_char_boundary(e));
 
-        let (s, e, ins) = diff_edit("éa", "e̶a"); // different lead char
+        let (s, e, ins) = diff_edit("éa", "e̶a");
         let mut applied = "éa".to_string();
         applied.replace_range(s..e, ins);
         assert_eq!(applied, "e̶a");
     }
 
-    /// LSP positions are line + UTF-16 code units — the classic trap is an
-    /// astral-plane char (emoji) counting as 2, and CRLF splitting lines.
     #[test]
     fn offset_to_position_counts_utf16_units() {
         let text = "ab\ncd😀\nef";
-        // Start of line 2 ("ef") — 😀 is 4 UTF-8 bytes but 2 UTF-16 units.
-        let off = "ab\n".len() + "cd".len() + 4; // past the emoji
+
+        let off = "ab\n".len() + "cd".len() + 4;
         let pos = offset_to_position(text, off);
         assert_eq!((pos.line, pos.character), (1, 4));
-        // Start of line 3.
+
         let pos = offset_to_position(text, text.len() - 2);
         assert_eq!((pos.line, pos.character), (2, 0));
-        // End of text.
+
         let pos = offset_to_position(text, text.len());
         assert_eq!((pos.line, pos.character), (2, 2));
     }
 
-    /// The full chain: old server text + new buffer text → one change event
-    /// whose range refers to the OLD text (as the spec requires) and which,
-    /// when applied, reproduces the new text exactly.
     #[test]
     fn content_change_ranges_reference_the_old_text() {
         let prev = "let x = 1;\nlet y = 2;\n".to_string();
@@ -2081,25 +1852,21 @@ mod tests {
         assert_eq!(range.start.line, 1);
         assert_eq!(range.end.line, 1);
 
-        // Apply the ranged edit to the old text; the result must be `next`.
         let start = position_to_offset(&prev, range.start);
         let end = position_to_offset(&prev, range.end);
         let mut applied = prev.clone();
         applied.replace_range(start..end, &change.text);
         assert_eq!(applied, next);
 
-        // No previous text (fresh doc) → full replacement, no range.
         let change = content_change_for(&None, "fresh", true);
         assert!(change.range.is_none());
         assert_eq!(change.text, "fresh");
 
-        // A full-sync server always gets the whole document.
         let change = content_change_for(&Some(prev), next, false);
         assert!(change.range.is_none());
         assert_eq!(change.text, next);
     }
 
-    /// Inverse of `offset_to_position`, for verifying edits in tests.
     fn position_to_offset(text: &str, pos: lsp_types::Position) -> usize {
         let mut line = 0u32;
         for (i, ch) in text.char_indices() {
@@ -2118,8 +1885,6 @@ mod tests {
         text.len()
     }
 
-    /// The sync kind is a server capability; both spellings the spec allows
-    /// must be recognised.
     #[test]
     fn incremental_sync_kind_is_detected() {
         use lsp_types::{ServerCapabilities, TextDocumentSyncCapability};
@@ -2148,32 +1913,21 @@ mod tests {
         })));
     }
 
-    /// Regression: the debounced flush must diff against what the *server*
-    /// holds, not what the editor holds. When the diff base was the editor
-    /// text (already updated by `did_change`), every flushed edit diffed
-    /// against itself and was silently skipped — the server stayed on the
-    /// didOpen text and stopped publishing diagnostics.
     #[test]
     fn flush_diffs_against_the_server_copy_not_the_editor_copy() {
         let synced: Mutex<HashMap<PathBuf, String>> = Mutex::new(HashMap::new());
         let path = PathBuf::from("C:/proj/a.ts");
-        // did_open: the server now holds "abc".
+
         next_change_for(&synced, &path, "abc", false);
 
-        // Editor changes to "abcd" (did_change updates the editor map, not
-        // `synced`). The first flush must produce a real ranged edit…
         let change = next_change_for(&synced, &path, "abcd", true).unwrap();
         let range = change.range.unwrap();
         assert_eq!(range.start.character, 3);
         assert_eq!(change.text, "d");
 
-        // …and a repeat flush of the same text must be a no-op, not a
-        // second (corrupting) application.
         assert!(next_change_for(&synced, &path, "abcd", true).is_none());
     }
 
-    /// Genuinely unknown methods still get a spec-compliant error, so a
-    /// server never blocks waiting on us.
     #[test]
     fn unknown_server_requests_get_method_not_found() {
         let ts = super::super::adapter::adapter_by_name("typescript-language-server").unwrap();
@@ -2183,8 +1937,6 @@ mod tests {
         assert_eq!(sent[0]["error"]["code"], -32601);
     }
 
-    /// Frames must be byte-length prefixed, not char-length — a diagnostic
-    /// containing non-ASCII would otherwise desynchronise the stream.
     #[test]
     fn framing_uses_byte_length_for_non_ascii() {
         let msg = json!({ "jsonrpc": "2.0", "method": "note", "params": { "s": "héllo — ✓" } });
@@ -2198,14 +1950,11 @@ mod tests {
             .unwrap();
         assert_eq!(declared, bytes.len() - (header_end + 4));
 
-        // And it round-trips through the reader.
         let mut cursor = std::io::Cursor::new(bytes);
         let back = read_message(&mut cursor).unwrap().unwrap();
         assert_eq!(back["params"]["s"], "héllo — ✓");
     }
 
-    /// End-to-end against the real server. Skipped unless it is installed,
-    /// so CI without Node still passes.
     #[test]
     fn live_typescript_diagnostics() {
         let adapter =

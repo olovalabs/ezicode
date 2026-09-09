@@ -1,6 +1,3 @@
-//! Modern floating pill activity bar matching modern IDE design
-//! with an elevated vertical capsule container, circular buttons, and dynamic theme tokens.
-
 use gpui::{div, prelude::*, px, rgba, svg, Context, FontWeight, IntoElement, SharedString, Window};
 
 use crate::workspace::{Activity, Workspace};
@@ -24,7 +21,7 @@ pub(crate) fn render_activity_bar(
         .border_r_1()
         .border_color(rgba(t.border_variant))
         .py(px(8.0))
-        // Floating Top Pill Capsule
+
         .child(
             div()
                 .id("activity-pill")
@@ -76,7 +73,7 @@ pub(crate) fn render_activity_bar(
                     cx,
                 )),
         )
-        // Bottom Settings Circular Capsule
+
         .child(
             div()
                 .id("activity-settings-pill")

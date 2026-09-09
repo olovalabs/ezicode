@@ -5,12 +5,8 @@ use gpui::{
     Transformation, Window,
 };
 
-/// Types implementing this trait can automatically be converted to [`Icon`].
-///
-/// This allows you to implement a custom version of [`IconName`] that functions as a drop-in
-/// replacement for other UI components.
 pub trait IconNamed {
-    /// Returns the embedded path of the icon.
+
     fn path(self) -> SharedString;
 }
 
@@ -20,7 +16,6 @@ impl<T: IconNamed> From<T> for Icon {
     }
 }
 
-/// The name of an icon in the asset bundle.
 #[derive(IntoElement, Clone)]
 pub enum IconName {
     ALargeSmall,
@@ -112,7 +107,7 @@ pub enum IconName {
 }
 
 impl IconName {
-    /// Return the icon as a Entity<Icon>
+
     pub fn view(self, cx: &mut App) -> Entity<Icon> {
         Icon::build(self).view(cx)
     }
@@ -267,15 +262,11 @@ impl Icon {
         Self::default().path(name.path())
     }
 
-    /// Set the icon path of the Assets bundle
-    ///
-    /// For example: `icons/foo.svg`
     pub fn path(mut self, path: impl Into<SharedString>) -> Self {
         self.path = path.into();
         self
     }
 
-    /// Create a new view for the icon
     pub fn view(self, cx: &mut App) -> Entity<Icon> {
         cx.new(|_| self)
     }
@@ -289,7 +280,6 @@ impl Icon {
         Self::default()
     }
 
-    /// Rotate the icon by the given angle
     pub fn rotate(mut self, radians: impl Into<Radians>) -> Self {
         self.base = self
             .base

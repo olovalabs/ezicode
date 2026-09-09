@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-shape/pie
-
 use std::f32::consts::TAU;
 
 use super::arc::ArcData;
@@ -28,7 +26,6 @@ impl<T> Pie<T> {
         Self::default()
     }
 
-    /// Set the value of the Pie.
     pub fn value<F>(mut self, value: F) -> Self
     where
         F: 'static + Fn(&T) -> Option<f32>,

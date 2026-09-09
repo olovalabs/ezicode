@@ -13,25 +13,21 @@ pub(crate) use resize_handle::*;
 
 pub(crate) const PANEL_MIN_SIZE: Pixels = px(100.);
 
-/// Create a [`ResizablePanelGroup`] with horizontal resizing
 pub fn h_resizable(id: impl Into<ElementId>) -> ResizablePanelGroup {
     ResizablePanelGroup::new(id).axis(Axis::Horizontal)
 }
 
-/// Create a [`ResizablePanelGroup`] with vertical resizing
 pub fn v_resizable(id: impl Into<ElementId>) -> ResizablePanelGroup {
     ResizablePanelGroup::new(id).axis(Axis::Vertical)
 }
 
-/// Create a [`ResizablePanel`].
 pub fn resizable_panel() -> ResizablePanel {
     ResizablePanel::new()
 }
 
-/// State for a [`ResizablePanel`]
 #[derive(Debug, Clone)]
 pub struct ResizableState {
-    /// The `axis` will sync to actual axis of the ResizablePanelGroup in use.
+
     axis: Axis,
     panels: Vec<ResizablePanelState>,
     sizes: Vec<Pixels>,
@@ -52,7 +48,7 @@ impl Default for ResizableState {
 }
 
 impl ResizableState {
-    /// Get the size of the panels.
+
     pub fn sizes(&self) -> &Vec<Pixels> {
         &self.sizes
     }
@@ -70,8 +66,6 @@ impl ResizableState {
 
         let size = size.unwrap_or(PANEL_MIN_SIZE);
 
-        // We make sure that the size always sums up to the container size
-        // by reducing the size of all other panels first.
         let container_size = self.container_size().max(px(1.));
         let total_leftover_size = (container_size - size).max(px(1.));
 
@@ -116,7 +110,7 @@ impl ResizableState {
         }
 
         if changed {
-            // We need to make sure the total size is in line with the container size.
+
             self.adjust_to_container_size(cx);
         }
     }
@@ -129,9 +123,7 @@ impl ResizableState {
         cx: &mut Context<Self>,
     ) {
         let size = bounds.size.along(self.axis);
-        // This check is only necessary to stop the very first panel from resizing on its own
-        // it needs to be passed when the panel is freshly created so we get the initial size,
-        // but its also fine when it sometimes passes later.
+
         if self.sizes[panel_ix].as_f32() == PANEL_MIN_SIZE.as_f32() {
             self.sizes[panel_ix] = size;
             self.panels[panel_ix].size = Some(size);
@@ -194,13 +186,11 @@ impl ResizableState {
         }
     }
 
-    /// The `ix`` is the index of the panel to resize,
-    /// and the `size` is the new size for the panel.
     fn resize_panel(&mut self, ix: usize, size: Pixels, _: &mut Window, cx: &mut Context<Self>) {
         let old_sizes = self.sizes.clone();
 
         let mut ix = ix;
-        // Only resize the left panels.
+
         if ix >= old_sizes.len() - 1 {
             return;
         }
@@ -247,7 +237,6 @@ impl ResizableState {
             new_sizes[main_ix + 1] += old_sizes[main_ix] - size - changed;
         }
 
-        // If total size exceeds container size, adjust the main panel
         let total_size: Pixels = new_sizes.iter().map(|s| s.as_f32()).sum::<f32>().into();
         if total_size > container_size {
             let overflow = total_size - container_size;
@@ -262,9 +251,6 @@ impl ResizableState {
         cx.notify();
     }
 
-    /// Adjust panel sizes according to the container size.
-    ///
-    /// When the container size changes, the panels should take up the same percentage as they did before.
     fn adjust_to_container_size(&mut self, cx: &mut Context<Self>) {
         if self.container_size().is_zero() {
             return;

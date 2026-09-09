@@ -1,5 +1,3 @@
-//! Extensions panel placeholder: mock marketplace listing.
-
 use gpui::{div, prelude::*, px, rgba, AnyElement, Div, FontWeight, SharedString};
 
 use crate::theme::Colors;

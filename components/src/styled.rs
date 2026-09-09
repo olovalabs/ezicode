@@ -5,25 +5,16 @@ use gpui::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Returns a `Div` as horizontal flex layout.
 #[inline(always)]
 pub fn h_flex() -> Div {
     div().h_flex()
 }
 
-/// Returns a `Div` as vertical flex layout.
 #[inline(always)]
 pub fn v_flex() -> Div {
     div().v_flex()
 }
 
-/// Create a [`BoxShadow`] like CSS.
-///
-/// e.g:
-///
-/// If CSS is `box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.1);`
-///
-/// Then the equivalent in Rust is `box_shadow(0., 0., 10., 0., hsla(0., 0., 0., 0.1))`
 #[inline(always)]
 pub fn box_shadow(
     x: impl Into<Pixels>,
@@ -42,7 +33,7 @@ pub fn box_shadow(
 
 macro_rules! font_weight {
     ($fn:ident, $const:ident) => {
-        /// [docs](https://tailwindcss.com/docs/font-weight)
+
         #[inline]
         fn $fn(self) -> Self {
             self.font_weight(gpui::FontWeight::$const)
@@ -50,31 +41,27 @@ macro_rules! font_weight {
     };
 }
 
-/// Extends [`gpui::Styled`] with specific styling methods.
 #[cfg_attr(
     any(feature = "inspector", debug_assertions),
     gpui_macros::derive_inspector_reflection
 )]
 pub trait StyledExt: Styled + Sized {
-    /// Refine the style of this element, applying the given style refinement.
+
     fn refine_style(mut self, style: &StyleRefinement) -> Self {
         self.style().refine(style);
         self
     }
 
-    /// Apply self into a horizontal flex layout.
     #[inline(always)]
     fn h_flex(self) -> Self {
         self.flex().flex_row().items_center()
     }
 
-    /// Apply self into a vertical flex layout.
     #[inline(always)]
     fn v_flex(self) -> Self {
         self.flex().flex_col()
     }
 
-    /// Apply paddings to the element.
     fn paddings<L>(self, paddings: impl Into<Edges<L>>) -> Self
     where
         L: Into<DefiniteLength> + Clone + Default + std::fmt::Debug + PartialEq,
@@ -86,7 +73,6 @@ pub trait StyledExt: Styled + Sized {
             .pr(paddings.right.into())
     }
 
-    /// Apply margins to the element.
     fn margins<L>(self, margins: impl Into<Edges<L>>) -> Self
     where
         L: Into<DefiniteLength> + Clone + Default + std::fmt::Debug + PartialEq,
@@ -98,7 +84,6 @@ pub trait StyledExt: Styled + Sized {
             .mr(margins.right.into())
     }
 
-    /// Render a border with a width of 1px, color red
     fn debug_red(self) -> Self {
         if cfg!(debug_assertions) {
             self.border_1().border_color(crate::red_500())
@@ -107,7 +92,6 @@ pub trait StyledExt: Styled + Sized {
         }
     }
 
-    /// Render a border with a width of 1px, color blue
     fn debug_blue(self) -> Self {
         if cfg!(debug_assertions) {
             self.border_1().border_color(crate::blue_500())
@@ -116,7 +100,6 @@ pub trait StyledExt: Styled + Sized {
         }
     }
 
-    /// Render a border with a width of 1px, color yellow
     fn debug_yellow(self) -> Self {
         if cfg!(debug_assertions) {
             self.border_1().border_color(crate::yellow_500())
@@ -125,7 +108,6 @@ pub trait StyledExt: Styled + Sized {
         }
     }
 
-    /// Render a border with a width of 1px, color green
     fn debug_green(self) -> Self {
         if cfg!(debug_assertions) {
             self.border_1().border_color(crate::green_500())
@@ -134,7 +116,6 @@ pub trait StyledExt: Styled + Sized {
         }
     }
 
-    /// Render a border with a width of 1px, color pink
     fn debug_pink(self) -> Self {
         if cfg!(debug_assertions) {
             self.border_1().border_color(crate::pink_500())
@@ -143,7 +124,6 @@ pub trait StyledExt: Styled + Sized {
         }
     }
 
-    /// Render a 1px blue border, when if the element is focused
     fn debug_focused(self, focus_handle: &FocusHandle, window: &Window, cx: &App) -> Self {
         if cfg!(debug_assertions) {
             if focus_handle.contains_focused(window, cx) {
@@ -156,7 +136,6 @@ pub trait StyledExt: Styled + Sized {
         }
     }
 
-    /// Render a border with a width of 1px, color ring color
     #[inline]
     fn focused_border(self, cx: &App) -> Self {
         self.border_1().border_color(cx.theme().ring)
@@ -172,7 +151,6 @@ pub trait StyledExt: Styled + Sized {
     font_weight!(font_extrabold, EXTRA_BOLD);
     font_weight!(font_black, BLACK);
 
-    /// Set as Popover style
     #[inline]
     fn popover_style(self, cx: &App) -> Self {
         self.bg(cx.theme().popover)
@@ -183,7 +161,6 @@ pub trait StyledExt: Styled + Sized {
             .rounded(cx.theme().radius)
     }
 
-    /// Set corner radii for the element.
     fn corner_radii(self, radius: Corners<Pixels>) -> Self {
         self.rounded_tl(radius.top_left)
             .rounded_tr(radius.top_right)
@@ -194,7 +171,6 @@ pub trait StyledExt: Styled + Sized {
 
 impl<E: Styled> StyledExt for E {}
 
-/// A size for elements.
 #[derive(Clone, Default, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub enum Size {
     Size(Pixels),
@@ -216,7 +192,6 @@ impl Size {
         }
     }
 
-    /// Returns the size as a static string.
     pub fn as_str(&self) -> &'static str {
         match self {
             Size::XSmall => "xs",
@@ -622,7 +597,6 @@ impl<T: ParentElement + Styled + Sized> FocusableExt<T> for T {
     }
 }
 
-/// A trait for defining element that can be collapsed.
 pub trait Collapsible {
     fn collapsed(self, collapsed: bool) -> Self;
     fn is_collapsed(&self) -> bool;
@@ -647,7 +621,6 @@ mod tests {
             Size::Size(px(20.))
         );
 
-        // Min
         assert_eq!(Size::Small.max(Size::XSmall), Size::XSmall);
         assert_eq!(Size::XSmall.max(Size::Small), Size::XSmall);
         assert_eq!(Size::Small.max(Size::Medium), Size::Small);
@@ -681,7 +654,6 @@ mod tests {
         assert_eq!(Size::from_str("large"), Size::Large);
         assert_eq!(Size::from_str("unknown"), Size::Medium);
 
-        // Case insensitive
         assert_eq!(Size::from_str("XS"), Size::XSmall);
         assert_eq!(Size::from_str("SMALL"), Size::Small);
         assert_eq!(Size::from_str("Md"), Size::Medium);

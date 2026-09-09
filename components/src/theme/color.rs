@@ -5,52 +5,37 @@ use serde::{de::Error, Deserialize, Deserializer};
 
 use anyhow::Result;
 
-/// Create a [`gpui::Hsla`] color.
-///
-/// - h: 0..360.0
-/// - s: 0.0..100.0
-/// - l: 0.0..100.0
 #[inline]
 pub fn hsl(h: f32, s: f32, l: f32) -> Hsla {
     hsla(h / 360., s / 100.0, l / 100.0, 1.0)
 }
 
 pub trait Colorize: Sized {
-    /// Returns a new color with the given opacity.
-    ///
-    /// The opacity is a value between 0.0 and 1.0, where 0.0 is fully transparent and 1.0 is fully opaque.
+
     fn opacity(&self, opacity: f32) -> Self;
-    /// Returns a new color with each channel divided by the given divisor.
-    ///
-    /// The divisor in range of 0.0 .. 1.0
+
     fn divide(&self, divisor: f32) -> Self;
-    /// Return inverted color
+
     fn invert(&self) -> Self;
-    /// Return inverted lightness
+
     fn invert_l(&self) -> Self;
-    /// Return a new color with the lightness increased by the given factor.
-    ///
-    /// factor range: 0.0 .. 1.0
+
     fn lighten(&self, amount: f32) -> Self;
-    /// Return a new color with the darkness increased by the given factor.
-    ///
-    /// factor range: 0.0 .. 1.0
+
     fn darken(&self, amount: f32) -> Self;
-    /// Return a new color with the same lightness and alpha but different hue and saturation.
+
     fn apply(&self, base_color: Self) -> Self;
 
-    /// Mix two colors together, the `factor` is a value between 0.0 and 1.0 for first color.
     fn mix(&self, other: Self, factor: f32) -> Self;
-    /// Change the `Hue` of the color by the given in range: 0.0 .. 1.0
+
     fn hue(&self, hue: f32) -> Self;
-    /// Change the `Saturation` of the color by the given value in range: 0.0 .. 1.0
+
     fn saturation(&self, saturation: f32) -> Self;
-    /// Change the `Lightness` of the color by the given value in range: 0.0 .. 1.0
+
     fn lightness(&self, lightness: f32) -> Self;
 
-    /// Convert the color to a hex string. For example, "#F8FAFC".
     fn to_hex(&self) -> String;
-    /// Parse a hex string to a color.
+
     fn parse_hex(hex: &str) -> Result<Self>;
 }
 
@@ -106,8 +91,6 @@ impl Colorize for Hsla {
         }
     }
 
-    /// Reference:
-    /// https://github.com/bevyengine/bevy/blob/85eceb022da0326b47ac2b0d9202c9c9f01835bb/crates/bevy_color/src/hsla.rs#L112
     fn mix(&self, other: Self, factor: f32) -> Self {
         let factor = factor.clamp(0.0, 1.0);
         let inv = 1.0 - factor;
@@ -214,7 +197,6 @@ mod color_scales {
     }
 }
 
-/// Enum representing the available color names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorName {
     Gray,

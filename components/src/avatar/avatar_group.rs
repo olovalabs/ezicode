@@ -5,7 +5,6 @@ use gpui::{
 
 use crate::{avatar::Avatar, ActiveTheme, Sizable, Size, StyledExt as _};
 
-/// A grouped avatars to display in a compact layout.
 #[derive(IntoElement)]
 pub struct AvatarGroup {
     base: Div,
@@ -17,7 +16,7 @@ pub struct AvatarGroup {
 }
 
 impl AvatarGroup {
-    /// Create a new AvatarGroup.
+
     pub fn new() -> Self {
         Self {
             base: div(),
@@ -29,25 +28,21 @@ impl AvatarGroup {
         }
     }
 
-    /// Add a child avatar to the group.
     pub fn child(mut self, avatar: Avatar) -> Self {
         self.avatars.push(avatar);
         self
     }
 
-    /// Add multiple child avatars to the group.
     pub fn children(mut self, avatars: impl IntoIterator<Item = Avatar>) -> Self {
         self.avatars.extend(avatars);
         self
     }
 
-    /// Set the maximum number of avatars to display before showing a "more" avatar.
     pub fn limit(mut self, limit: usize) -> Self {
         self.limit = limit;
         self
     }
 
-    /// Set whether to show an ellipsis when the limit is reached, default: false
     pub fn ellipsis(mut self) -> Self {
         self.ellipsis = true;
         self

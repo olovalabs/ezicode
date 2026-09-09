@@ -1,12 +1,3 @@
-//! Git diff view — side-by-side (split) and unified diff editor like VS Code / Zed.
-//!
-//! Features:
-//! - Side-by-side (left = old/staged, right = new/worktree) split layout
-//! - Word-level / character-level intra-line difference highlighting
-//! - Synchronized row scrolling
-//! - Line number gutters with change-indicator bars
-//! - Rich subheader with file icon, path, +add/-del stats, action buttons, and split/unified view switcher
-
 use std::path::Path;
 
 use gpui::{
@@ -21,10 +12,8 @@ use crate::theme::Colors;
 use crate::ui::common::icon_img;
 use crate::workspace::{DiffTab, Workspace};
 
-/// Cap on rendered diff lines (huge generated diffs stay responsive).
 const MAX_RENDERED_LINES: usize = 12_000;
 
-/// Replace the alpha of an RGBA8 color.
 fn with_alpha(color: u32, alpha: u8) -> u32 {
     (color & 0xFFFF_FF00) | u32::from(alpha)
 }
@@ -58,14 +47,6 @@ pub enum SideBySideRow {
     },
 }
 
-/// A unified diff parsed into render-ready rows and change stats.
-///
-/// Parsing includes word-level intra-line diffing, which is the expensive
-/// part — so it runs **once per diff load, on a background thread** (see
-/// `Workspace::open_diff` / `refresh_active_diff`) and is then shared with
-/// the render loop through an `Arc`. Re-renders (theme switches, git status
-/// updates, panel toggles, …) reuse this snapshot instead of re-parsing the
-/// whole diff on every frame.
 #[derive(Clone, Debug)]
 pub(crate) struct ParsedDiff {
     pub rows: Vec<SideBySideRow>,
@@ -73,8 +54,6 @@ pub(crate) struct ParsedDiff {
     pub removed: usize,
 }
 
-/// Parse a unified diff into rows and stats. Cheap wrapper around
-/// [`parse_side_by_side_diff`] for background-thread use.
 pub(crate) fn parse_diff(raw: &str) -> ParsedDiff {
     let (rows, added, removed) = parse_side_by_side_diff(raw);
     ParsedDiff { rows, added, removed }
@@ -110,9 +89,6 @@ pub(crate) fn render_diff_view(
     let path = diff.path.clone();
     let file_icon_path = file_icons::icon_for(rel_path);
 
-    // Use the background-parsed snapshot. Parsing (with word-level
-    // intra-line diffing) is far too expensive to run on every repaint, so
-    // it is done once when the diff loads and shared here via `Arc`.
     let (rows, total_added, total_removed) = match &diff.parsed {
         Some(parsed) => (parsed.rows.clone(), parsed.added, parsed.removed),
         None => (Vec::new(), 0, 0),
@@ -126,7 +102,7 @@ pub(crate) fn render_diff_view(
         .flex_col()
         .bg(rgba(t.editor_bg))
         .child(
-            // Secondary Header Bar (VS Code / Zed diff toolbar)
+
             div()
                 .h(px(36.0))
                 .w_full()
@@ -139,7 +115,7 @@ pub(crate) fn render_diff_view(
                 .border_b_1()
                 .border_color(rgba(t.border_variant))
                 .child(
-                    // Left: File icon + File name + parent path + stats badge
+
                     div()
                         .flex()
                         .flex_row()
@@ -162,7 +138,7 @@ pub(crate) fn render_diff_view(
                             )
                         })
                         .child(
-                            // Stats badge (+add -del)
+
                             div()
                                 .px(px(6.0))
                                 .py(px(1.5))
@@ -204,7 +180,7 @@ pub(crate) fn render_diff_view(
                         ),
                 )
                 .child(
-                    // Right: Actions (Split/Unified Toggle, Stage/Unstage, Restore, Open File)
+
                     div()
                         .flex()
                         .flex_row()
@@ -397,7 +373,6 @@ fn diff_body(
     list.into_any_element()
 }
 
-/// Hunk header row spanning across the diff view.
 fn hunk_header_row(
     old_no: u32,
     new_no: u32,
@@ -418,7 +393,7 @@ fn hunk_header_row(
             .border_b_1()
             .border_color(rgba(t.border_variant))
             .child(
-                // Left half hunk indicator
+
                 div()
                     .flex_1()
                     .min_w(px(0.0))
@@ -455,7 +430,7 @@ fn hunk_header_row(
                     ),
             )
             .child(
-                // Right half hunk indicator
+
                 div()
                     .flex_1()
                     .min_w(px(0.0))
@@ -507,7 +482,6 @@ fn hunk_header_row(
     }
 }
 
-/// One Side-by-Side row: [Left Pane (Old)] | [Right Pane (New)].
 fn split_line_row(
     left: &DiffCell,
     right: &DiffCell,
@@ -521,7 +495,7 @@ fn split_line_row(
         .flex()
         .flex_row()
         .child(
-            // Left Pane (Old / Staged / Removed)
+
             div()
                 .flex_1()
                 .min_w(px(0.0))
@@ -533,7 +507,7 @@ fn split_line_row(
                 .child(render_pane_cell(left, font_size, t)),
         )
         .child(
-            // Right Pane (New / Worktree / Added)
+
             div()
                 .flex_1()
                 .min_w(px(0.0))
@@ -544,7 +518,6 @@ fn split_line_row(
         )
 }
 
-/// One pane cell (gutter + content).
 fn render_pane_cell(
     cell: &DiffCell,
     font_size: f32,
@@ -575,7 +548,7 @@ fn render_pane_cell(
         .flex()
         .flex_row()
         .when_some(bg, |d, bg| d.bg(rgba(bg)))
-        // Gutter indicator bar on the edge
+
         .child(
             div()
                 .w(px(3.0))
@@ -583,7 +556,7 @@ fn render_pane_cell(
                 .flex_none()
                 .when_some(bar_color, |d, color| d.bg(rgba(color))),
         )
-        // Line number gutter
+
         .child(
             div()
                 .w(px(font_size * 3.4))
@@ -598,11 +571,10 @@ fn render_pane_cell(
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from(gutter_no)),
         )
-        // Content text with character/word diffing
+
         .child(render_cell_content(cell, font_size, t))
 }
 
-/// Renders the cell's code text with word-level diff highlight tags.
 fn render_cell_content(
     cell: &DiffCell,
     font_size: f32,
@@ -635,7 +607,6 @@ fn render_cell_content(
             .into_any_element();
     }
 
-    // Render with highlighted spans for intra-line word-diff
     let text = &cell.text;
     let mut fragments = Vec::new();
     let mut last_idx = 0;
@@ -696,7 +667,6 @@ fn render_cell_content(
         .into_any_element()
 }
 
-/// Fallback inline (unified) mode.
 fn inline_line_row(
     left: &DiffCell,
     right: &DiffCell,
@@ -731,7 +701,6 @@ fn inline_line_row(
         .into_any_element()
 }
 
-/// Compute character / word diff ranges between two lines safely across UTF-8 boundaries.
 fn compute_word_diff(
     old: &str,
     new: &str,
@@ -743,7 +712,6 @@ fn compute_word_diff(
     let old_chars: Vec<(usize, char)> = old.char_indices().collect();
     let new_chars: Vec<(usize, char)> = new.char_indices().collect();
 
-    // 1. Common prefix
     let mut prefix_chars = 0;
     while prefix_chars < old_chars.len()
         && prefix_chars < new_chars.len()
@@ -755,7 +723,6 @@ fn compute_word_diff(
     let old_rem = old_chars.len() - prefix_chars;
     let new_rem = new_chars.len() - prefix_chars;
 
-    // 2. Common suffix from remainder
     let mut suffix_chars = 0;
     while suffix_chars < old_rem
         && suffix_chars < new_rem
@@ -800,7 +767,6 @@ fn compute_word_diff(
     (old_spans, new_spans)
 }
 
-/// Parse raw unified diff output into aligned SideBySide rows.
 pub fn parse_side_by_side_diff(raw: &str) -> (Vec<SideBySideRow>, usize, usize) {
     let mut rows = Vec::new();
     let mut old_no: Option<u32> = None;
@@ -956,7 +922,7 @@ pub fn parse_side_by_side_diff(raw: &str) -> (Vec<SideBySideRow>, usize, usize) 
                 }
             }
             '\\' => {
-                // "\ No newline at end of file"
+
             }
             _ => {}
         }
@@ -975,7 +941,6 @@ fn bump(old: &mut Option<u32>, new: &mut Option<u32>) {
     }
 }
 
-/// Parse the numbers of a `@@ -a,b +c,d @@` header: `(old_start, new_start)`.
 fn hunk_numbers(header: &str) -> (Option<u32>, Option<u32>) {
     let mut old = None;
     let mut new = None;

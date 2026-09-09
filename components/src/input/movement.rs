@@ -12,7 +12,7 @@ pub(crate) enum MoveDirection {
 }
 
 impl InputState {
-    /// Called after moving the cursor. Updates preferred_column if we know where the cursor now is.
+
     pub(super) fn update_preferred_column(&mut self) {
         let Some(last_layout) = &self.last_layout else {
             self.preferred_column = None;
@@ -34,11 +34,6 @@ impl InputState {
         self.preferred_column = Some((pos.x, point.column));
     }
 
-    /// Move the cursor to the given offset.
-    ///
-    /// The offset is the UTF-8 offset.
-    ///
-    /// Ensure the offset use self.next_boundary or self.previous_boundary to get the correct offset.
     pub(crate) fn move_to(
         &mut self,
         offset: usize,
@@ -55,9 +50,6 @@ impl InputState {
         cx.notify()
     }
 
-    /// Move the cursor vertically by one line (up or down) while preserving the column if possible.
-    ///
-    /// move_lines: Number of lines to move vertically (positive for down, negative for up).
     pub(super) fn move_vertical(
         &mut self,
         move_lines: isize,
@@ -80,13 +72,12 @@ impl InputState {
         let mut new_offset = self.text_wrapper.display_point_to_offset(display_point);
 
         if let Some((preferred_x, column)) = was_preferred_column {
-            // Get display point again to update local_row.
+
             let mut next_display_point = self.text_wrapper.offset_to_display_point(new_offset);
             next_display_point.column = 0;
             let next_point = self.text_wrapper.display_point_to_point(next_display_point);
             let line_start_offset = self.text.line_start_offset(next_point.row);
 
-            // If in visible range, prefer to use position to get column.
             if let Some(line) = last_layout.line(next_point.row) {
                 if let Some(x) = line.closest_index_for_position(
                     Point {
@@ -98,7 +89,7 @@ impl InputState {
                     new_offset = line_start_offset + x;
                 }
             } else {
-                // Not in visible range, use column directly.
+
                 let max_line_len = self.text.slice_line(next_point.row).len();
                 new_offset = line_start_offset + column.min(max_line_len);
             }
@@ -111,7 +102,7 @@ impl InputState {
             MoveDirection::Down
         };
         self.move_to(new_offset, Some(direction), cx);
-        // Set back the preferred_column
+
         self.preferred_column = was_preferred_column;
         cx.notify();
     }

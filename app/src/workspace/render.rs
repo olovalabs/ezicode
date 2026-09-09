@@ -1,7 +1,3 @@
-//! Root layout. Composes title bar → activity bar + sidebar + editor area
-//! (+ terminal) → status bar into a single column, and wires every action to
-//! its [`Workspace`] command.
-
 use gpui::{
     div, prelude::*, px, rgba, Context, MouseButton, MouseMoveEvent, MouseUpEvent, Render, Window,
 };
@@ -16,9 +12,6 @@ use crate::workspace::CreatingKind;
 
 use super::{Activity, PanelResizeDrag, ResizeKind, Workspace};
 
-/// Pixels of chrome reserved above/below the terminal so it can be dragged to
-/// full height: title bar (34) + status bar (26) = 60px.
-/// Drag the divider up and the terminal expands to full height.
 const TERMINAL_MAX_RESERVE: f32 = 60.0;
 
 impl Render for Workspace {
@@ -26,16 +19,12 @@ impl Render for Workspace {
         if let Some(path) = self.pending_open.take() {
             self.open_file(path, window, cx);
         }
-        // Enter in the commit box was pressed (the input's event callback has
-        // no window handle) — run the commit now that the window is here.
+
         if self.git_commit_pending {
             self.git_commit_pending = false;
             self.git_commit(window, cx);
         }
 
-        // Poll terminal processes for exit (Zed-style lifecycle monitoring).
-        // When a shell exits, its tab shows a red dot and the exit status
-        // without requiring the user to discover it by typing into a dead PTY.
         if self.show_terminal && !self.terminal_tabs.is_empty() {
             self.poll_terminal_processes(cx);
         }
@@ -45,11 +34,6 @@ impl Render for Workspace {
         let welcome = self.welcome_visible();
         let title = self.title();
 
-        // Clamp panel sizes against the current viewport so shrinking or
-        // maximizing the window never leaves a panel overflowing — and so
-        // the panels keep their absolute pixel size on window resize
-        // (VS Code behavior) instead of scaling proportionally. (Must happen
-        // before the field borrows below, since both mutate `self`.)
         let max_sidebar = f32::from(window.viewport_size().width - px(320.0)).max(220.0);
         let min_sidebar = if self.panel_resize.is_some() { 60.0 } else { 170.0 };
         self.sidebar_width = self.sidebar_width.clamp(min_sidebar, max_sidebar);
@@ -61,13 +45,10 @@ impl Render for Workspace {
         let terminal_h = self.terminal_height;
         let panel_resize = self.panel_resize;
 
-        // Borrowed views of state — the render helpers below only read these,
-        // so the per-frame deep clones (tabs, terminal_tabs, paths, strings,
-        // ...) are unnecessary and have been removed.
         let explorer_rows = &self.explorer_rows;
         let explorer_scroll_handle = self.explorer_scroll_handle.clone();
         let explorer_focus_handle = self.explorer_focus_handle.clone();
-        // Get the currently open file from active tab
+
         let open = self.active_path();
         let selected_path = self.selected_path.as_ref();
         let explorer_section_expanded = self.explorer_section_expanded;
@@ -86,15 +67,14 @@ impl Render for Workspace {
         let active_terminal = self.active_terminal;
         let terminal_maximized = self.terminal_maximized && self.show_terminal && !self.terminal_tabs.is_empty();
 
-        // Tab-related data
         let tabs = &self.tabs;
         let active_tab = self.active_tab;
         let is_settings = self.tabs.get(active_tab).map(|t| t.is_settings).unwrap_or(false);
-        // The active tab may be a Git diff view instead of an editor.
+
         let active_diff = self.tabs.get(active_tab).and_then(|t| t.diff.as_ref());
-        // Get the active editor from the current tab
+
         let editor = self.active_editor();
-        // Git state for the activity-bar badge / status bar.
+
         let git_repo = self.git.as_ref();
         let git_changes = git_repo.map(|g| g.change_count()).unwrap_or(0);
         let git_branch = git_repo.and_then(|g| g.branch.clone());
@@ -103,7 +83,7 @@ impl Render for Workspace {
         let git_changes_expanded = self.git_changes_expanded;
         let split_diff = self.split_diff;
         let git_commit_input = self.git_commit_input.clone();
-        // Active file language + LSP readiness for the status bar.
+
         let lang_label = open.and_then(|p| lang::language_for(p));
         let lsp_indicator = {
             let lsp = self.lsp.lock().unwrap();
@@ -121,7 +101,7 @@ impl Render for Workspace {
             .text_color(rgba(t.text))
             .font_family(crate::assets::SANS_FONT)
             .cursor_default()
-            // Commands handled directly by the workspace.
+
             .on_action(cx.listener(|this, _: &Save, window, cx| this.save(window, cx)))
             .on_action(cx.listener(|this, _: &Quit, _, cx| this.quit(cx)))
             .on_action(cx.listener(|this, _: &ShowExplorer, window, cx| {
@@ -148,7 +128,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
                 this.new_terminal(window, cx);
             }))
-            // Terminal navigation actions (Zed-style: Alt+arrows, Alt+1..5)
+
             .on_action(cx.listener(|this, _: &NextTerminal, window, cx| {
                 this.next_terminal_tab(window, cx);
             }))
@@ -226,7 +206,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ExplorerPaste, _, cx| {
                 this.explorer_paste(cx);
             }))
-            // Tab action handlers
+
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 this.handle_close_tab(&CloseTab, window, cx);
             }))
@@ -242,7 +222,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, action: &CloseTabAt, window, cx| {
                 this.handle_close_tab_at(action, window, cx);
             }))
-            // Font zoom actions
+
             .on_action(cx.listener(|this, _: &IncreaseFontSize, _, cx| {
                 this.increase_font_size(cx);
             }))
@@ -255,11 +235,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &CopyDiagnostic, _, cx| {
                 this.copy_active_diagnostic(cx);
             }))
-            // Format the active document via its language server.
+
             .on_action(cx.listener(|this, _: &FormatDocument, window, cx| {
                 this.format_document(window, cx);
             }))
-            // Git: source-control panel actions.
+
             .on_action(cx.listener(|this, _: &GitRefresh, _, cx| {
                 this.git_refresh(cx);
             }))
@@ -290,17 +270,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GitCommit, window, cx| {
                 this.git_commit(window, cx);
             }))
-            // Zed-style key context for workspace-level bindings. Note: do NOT
-            // put `track_focus` on this full-window div — its hitbox breaks
-            // the platform's client-decoration hit-testing, which kills
-            // title-bar dragging on Windows. The focus target lives on the
-            // tiny `workspace-focus-catcher` element below instead.
+
             .key_context("Workspace")
-            // Invisible 1x1 focus target: when no editor or terminal is
-            // focused, the workspace holds focus here so global keybindings
-            // always have a dispatch path (Zed keeps an equivalent workspace
-            // focus handle). 1x1px so its hitbox can't interfere with the
-            // title bar or window controls.
+
             .child(
                 div()
                     .id("workspace-focus-catcher")
@@ -321,8 +293,7 @@ impl Render for Workspace {
                     .child(ui::activity_bar::render_activity_bar(
                         activity, show_sidebar, git_changes, &t, cx,
                     ))
-                    // Sidebar: fixed pixel width, resized by dragging the thin
-                    // divider next to it. Not affected by window resize/maximize.
+
                     .when(show_sidebar, |row| {
                         row.child(
                             div()
@@ -365,21 +336,17 @@ impl Render for Workspace {
                                 }),
                         )
                     })
-                    // Sidebar resizer: always visible right next to the sidebar (or
-                    // activity bar when hidden), allowing click, drag, or double-click to
-                    // reveal and resize, matching VS Code.
+
                     .child(resize_handle(ResizeKind::Sidebar, &t, cx))
                     .child(
-                                // Editor column absorbs all remaining space; the
-                        // terminal panel below it is also a fixed-pixel panel
-                        // with its own drag divider.
+
                         div()
                             .flex_1()
                             .min_w(px(0.0))
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            // Editor area: hidden when terminal is full-screen maximized
+
                             .when(!terminal_maximized, |col| {
                                 col.child(
                                 div()
@@ -388,11 +355,11 @@ impl Render for Workspace {
                                     .flex()
                                     .flex_col()
                                     .bg(rgba(t.editor_bg))
-                                    // Tab bar - only show when tabs exist
+
                                     .when(!tabs.is_empty(), |d| {
                                         d.child(ui::tab_bar::render_tab_bar(tabs, active_tab, git_repo, &t, cx))
                                     })
-                                    // Editor area / Settings area / Welcome
+
                                     .when(welcome, |d| d.child(ui::welcome::render_welcome(&t, cx)))
                                     .when(!welcome, |d| {
                                         if is_settings {
@@ -423,8 +390,7 @@ impl Render for Workspace {
                                     }),
                                 )
                             })
-                            // Terminal resizer: always visible above the status bar
-                            // even when collapsed, allowing drag-to-reveal or click to open like VS Code.
+
                             .when(!terminal_tabs.is_empty(), |col| {
                                 col.child(resize_handle(ResizeKind::Terminal, &t, cx))
                                     .when(show_terminal, |col| {
@@ -470,12 +436,7 @@ impl Render for Workspace {
                 lsp_indicator,
                 &t,
             ))
-            // While a panel divider is being dragged, capture ALL mouse
-            // movement with a transparent full-window overlay. Without this
-            // the drag would freeze as soon as the cursor leaves the thin
-            // divider or crosses a mouse-blocking element (editor input,
-            // terminal, ...), because div listeners only fire while their
-            // own hitbox is hovered.
+
             .when(panel_resize.is_some(), |root| {
                 let kind = panel_resize.unwrap().kind;
                 let overlay = div()
@@ -492,8 +453,7 @@ impl Render for Workspace {
                             };
                             match rz.kind {
                                 ResizeKind::Sidebar => {
-                                    // Direct coordinate tracking (Zed formula): sidebar width is exactly
-                                    // distance from the right edge of activity bar (x=48px) to the cursor.
+
                                     let dist = f32::from(ev.position.x) - 48.0;
                                     if dist < 60.0 {
                                         this.show_sidebar = false;
@@ -510,16 +470,16 @@ impl Render for Workspace {
                                     let max_avail = (f32::from(window.viewport_size().height) - 26.0 - titlebar_h).max(120.0);
 
                                     if dist < 45.0 {
-                                        // Dragged down near status bar -> collapse to hide
+
                                         this.show_terminal = false;
                                         this.terminal_maximized = false;
                                     } else if dist >= max_avail - 45.0 {
-                                        // Dragged all the way up near the top titlebar -> totally full screen!
+
                                         this.show_terminal = true;
                                         this.terminal_maximized = true;
                                         this.terminal_height = max_avail;
                                     } else {
-                                        // Normal resizing
+
                                         this.show_terminal = true;
                                         this.terminal_maximized = false;
                                         this.terminal_height = dist.clamp(45.0, max_avail - 45.0);
@@ -576,8 +536,6 @@ impl Render for Workspace {
     }
 }
 
-/// Zed-style panel resize handle: a 5px transparent hit zone with a centered
-/// 1px border line that brightens on hover, with double-click to reset size.
 fn resize_handle(kind: ResizeKind, t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
     let idle = rgba(t.border_variant);
     let hot = rgba(t.icon);
@@ -622,14 +580,14 @@ fn resize_handle(kind: ResizeKind, t: &Colors, cx: &mut Context<Workspace>) -> i
                         this.show_terminal = !this.show_terminal;
                         if this.show_terminal {
                             if this.terminal_maximized {
-                                // Restore from full screen
+
                                 this.terminal_maximized = false;
                                 this.terminal_height = 320.0;
                             } else if this.terminal_height >= 500.0 {
                                 this.terminal_maximized = false;
                                 this.terminal_height = 320.0;
                             } else {
-                                // Maximize to full height
+
                                 this.terminal_maximized = true;
                             }
                         } else {

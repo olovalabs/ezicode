@@ -1,14 +1,6 @@
-//! Embedded assets (fonts, icons, theme JSONs) and font registration.
-//!
-//! Everything under `app/assets/` is compiled into the binary via
-//! rust-embed; [`CombinedAssets`] merges this app's assets with the widget
-//! library's own icon set so both resolve through one source.
-
 use gpui::{px, App};
 use rust_embed::RustEmbed;
 
-/// Zed's shipped fonts (`assets/fonts` in zed-industries/zed):
-/// IBM Plex Sans for the UI, Lilex for code buffers.
 pub const SANS_FONT: &str = "IBM Plex Sans";
 pub const MONO_FONT: &str = "Lilex";
 
@@ -46,7 +38,7 @@ impl gpui::AssetSource for CombinedAssets {
 }
 
 /// Register every embedded TTF under `assets/fonts/` with GPUI's text
-/// system — same approach as Zed's `load_embedded_fonts`.
+
 pub fn load_embedded_fonts(cx: &App) {
     let fonts: Vec<std::borrow::Cow<'static, [u8]>> = AppAssets::iter()
         .filter(|p| p.starts_with("fonts/") && p.ends_with(".ttf"))
@@ -61,7 +53,7 @@ pub fn load_embedded_fonts(cx: &App) {
 }
 
 /// Point the widget library at Zed's fonts (called after every
-/// `Theme::change`, which restores families from its built-in config).
+
 pub fn sync_component_fonts(cx: &mut App) {
     let theme = gpui_component::Theme::global_mut(cx);
     theme.font_family = SANS_FONT.into();

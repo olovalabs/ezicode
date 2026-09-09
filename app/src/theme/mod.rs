@@ -1,13 +1,3 @@
-//! A Zed-compatible JSON theme system.
-//!
-//! Theme files are the exact `assets/themes/*.json` files from
-//! zed-industries/zed (One / Ayu / Gruvbox families), embedded via rust-embed
-//! and parsed at first use. Color keys follow Zed's flat dotted schema
-//! ("element.hover", "panel.background", ...).
-//!
-//! Token extraction lives in [`colors`]; this module owns parsing and the
-//! theme registry.
-
 mod colors;
 
 pub use colors::Colors;
@@ -18,18 +8,16 @@ use serde_json::{json, Value};
 
 use self::colors::{parse_hex, FALLBACKS, KEY_MAP};
 
-/// Embedded theme families to load, in menu order. GitHub is the default.
 const THEME_FILES: &[&str] = &["themes/github.json", "themes/ayu.json", "themes/gruvbox.json"];
 
 #[derive(Clone, Debug)]
 pub struct Theme {
     pub name: String,
-    /// "dark" or "light", straight from the theme file.
+
     pub appearance: String,
     pub colors: Colors,
     pub terminal_palette: gpui_terminal::ColorPalette,
-    /// JSON in gpui-component's `HighlightTheme` format (Zed-compatible):
-    /// editor.* colors + the verbatim `syntax` token table.
+
     hl_json: String,
 }
 
@@ -41,8 +29,6 @@ fn hex_to_rgb(hex: u32) -> (u8, u8, u8) {
     )
 }
 
-/// Assemble the `gpui_terminal::ColorPalette` for the theme using the exact
-/// terminal.* and ANSI color definitions from Zed's theme files.
 fn build_terminal_palette(theme_obj: &Value) -> gpui_terminal::ColorPalette {
     let mut builder = gpui_terminal::ColorPalette::builder();
     let style = theme_obj.get("style").and_then(Value::as_object);
@@ -55,7 +41,6 @@ fn build_terminal_palette(theme_obj: &Value) -> gpui_terminal::ColorPalette {
             .map(hex_to_rgb)
     };
 
-    // Background: terminal.background -> editor.background -> background
     if let Some((r, g, b)) = get_color("terminal.background")
         .or_else(|| get_color("editor.background"))
         .or_else(|| get_color("background"))
@@ -63,7 +48,6 @@ fn build_terminal_palette(theme_obj: &Value) -> gpui_terminal::ColorPalette {
         builder = builder.background(r, g, b);
     }
 
-    // Foreground: terminal.foreground -> editor.foreground -> text
     if let Some((r, g, b)) = get_color("terminal.foreground")
         .or_else(|| get_color("editor.foreground"))
         .or_else(|| get_color("text"))
@@ -71,7 +55,6 @@ fn build_terminal_palette(theme_obj: &Value) -> gpui_terminal::ColorPalette {
         builder = builder.foreground(r, g, b);
     }
 
-    // Cursor: players[0].cursor -> text.accent -> terminal.bright_foreground -> terminal.foreground
     let cursor_color = theme_obj
         .get("players")
         .and_then(Value::as_array)
@@ -88,7 +71,6 @@ fn build_terminal_palette(theme_obj: &Value) -> gpui_terminal::ColorPalette {
         builder = builder.cursor(r, g, b);
     }
 
-    // 16 ANSI palette colors from Zed themes
     let ansi_keys = [
         ("terminal.ansi.black", 0),
         ("terminal.ansi.red", 1),
@@ -151,7 +133,7 @@ fn parse_family(json: &str, out: &mut Vec<Theme>) {
             .and_then(Value::as_str)
             .unwrap_or("dark")
             .to_string();
-        // `style` is a flat object of dotted keys (+ syntax/players arrays we skip).
+
         let Some(style) = t.get("style").and_then(Value::as_object) else {
             continue;
         };
@@ -182,7 +164,7 @@ fn parse_family(json: &str, out: &mut Vec<Theme>) {
                 0x21262dff
             };
         }
-        // Semantic fallbacks for tabs and terminal if omitted in theme files
+
         if colors.tab_bar == Colors::MISSING {
             colors.tab_bar = if colors.toolbar != Colors::MISSING {
                 colors.toolbar
@@ -235,11 +217,6 @@ fn parse_family(json: &str, out: &mut Vec<Theme>) {
     }
 }
 
-
-/// Assemble the JSON consumed by `gpui_component::highlighter::HighlightTheme`,
-/// whose schema is explicitly compatible with Zed's theme files. We forward
-/// the editor chrome colors and the entire `syntax` table untouched, so the
-/// tree-sitter captures are painted with exactly Zed's palette.
 fn build_highlight_theme(name: &str, theme_obj: &Value) -> String {
     let style = theme_obj.get("style").cloned().unwrap_or(json!({}));
     let hl = json!({
@@ -270,16 +247,15 @@ fn build_highlight_theme(name: &str, theme_obj: &Value) -> String {
 }
 
 impl Theme {
-    /// Deserialize into the widget library's highlighter theme.
+
     pub fn highlight_theme(&self) -> gpui_component::highlighter::HighlightTheme {
         serde_json::from_str(&self.hl_json).unwrap_or_else(|_| {
-            // Fall back to the library default if upstream JSON shifts.
+
             (*gpui_component::highlighter::HighlightTheme::default_dark()).clone()
         })
     }
 }
 
-/// All embedded themes, parsed once on first use.
 pub fn all() -> &'static [Theme] {
     static THEMES: OnceLock<Vec<Theme>> = OnceLock::new();
     THEMES.get_or_init(|| {
@@ -370,4 +346,3 @@ mod tests {
         }
     }
 }
-

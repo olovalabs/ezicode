@@ -9,12 +9,8 @@ use gpui::{
 
 use crate::menu::PopupMenu;
 
-/// A extension trait for adding a context menu to an element.
 pub trait ContextMenuExt: ParentElement + Styled {
-    /// Add a context menu to the element.
-    ///
-    /// This will changed the element to be `relative` positioned, and add a child `ContextMenu` element.
-    /// Because the `ContextMenu` element is positioned `absolute`, it will not affect the layout of the parent element.
+
     fn context_menu(
         self,
         f: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
@@ -179,7 +175,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                                 .snap_to_window_with_margin(px(8.))
                                                 .anchor(anchor)
                                                 .when_some(menu_view, |this, menu| {
-                                                    // Focus the menu, so that can be handle the action.
+
                                                     if !menu
                                                         .focus_handle(cx)
                                                         .contains_focused(window, cx)
@@ -246,7 +242,6 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
             element.paint(window, cx);
         }
 
-        // Take the builder before setting up element state to avoid borrow issues
         let builder = self.menu.clone();
 
         self.with_element_state(
@@ -256,7 +251,6 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
             |_view, state: &mut ContextMenuState, window, _| {
                 let shared_state = state.shared_state.clone();
 
-                // When right mouse click, to build content menu, and show it at the mouse position.
                 window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                     if phase.bubble()
                         && event.button == MouseButton::Right
@@ -264,15 +258,13 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                     {
                         {
                             let mut shared_state = shared_state.borrow_mut();
-                            // Clear any existing menu view to allow immediate replacement
-                            // Set the new position and open the menu
+
                             shared_state.menu_view = None;
                             shared_state._subscription = None;
                             shared_state.position = event.position;
                             shared_state.open = true;
                         }
 
-                        // Use defer to build the menu in the next frame, avoiding race conditions
                         window.defer(cx, {
                             let shared_state = shared_state.clone();
                             let builder = builder.clone();
@@ -284,7 +276,6 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     build(menu, window, cx)
                                 });
 
-                                // Set up the subscription for dismiss handling
                                 let _subscription = window.subscribe(&menu, cx, {
                                     let shared_state = shared_state.clone();
                                     move |_, _: &DismissEvent, window, _cx| {
@@ -293,7 +284,6 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     }
                                 });
 
-                                // Update the shared state with the built menu and subscription
                                 {
                                     let mut state = shared_state.borrow_mut();
                                     state.menu_view = Some(menu.clone());

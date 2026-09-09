@@ -17,13 +17,13 @@ pub enum ToggleVariant {
 }
 
 pub trait ToggleVariants: Sized {
-    /// Set the variant of the toggle.
+
     fn with_variant(self, variant: ToggleVariant) -> Self;
-    /// Set the variant to ghost.
+
     fn ghost(self) -> Self {
         self.with_variant(ToggleVariant::Ghost)
     }
-    /// Set the variant to outline.
+
     fn outline(self) -> Self {
         self.with_variant(ToggleVariant::Outline)
     }
@@ -163,7 +163,6 @@ impl RenderOnce for Toggle {
     }
 }
 
-/// A group of toggles.
 #[derive(IntoElement)]
 pub struct ToggleGroup {
     id: ElementId,

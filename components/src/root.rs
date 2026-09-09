@@ -23,9 +23,8 @@ pub(crate) fn init(cx: &mut App) {
     ]);
 }
 
-/// Extension trait for [`Window`] to add dialog, sheet .. functionality.
 pub trait WindowExt: Sized {
-    /// Opens a Sheet at right placement.
+
     fn open_sheet<F>(&mut self, cx: &mut App, build: F)
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
@@ -35,13 +34,10 @@ pub trait WindowExt: Sized {
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
 
-    /// Return true, if there is an active Sheet.
     fn has_active_sheet(&mut self, cx: &mut App) -> bool;
 
-    /// Closes the active Sheet.
     fn close_sheet(&mut self, cx: &mut App);
 
-    /// Opens a Dialog.
     fn open_dialog<F>(&mut self, cx: &mut App, build: F)
     where
         F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static;
@@ -61,15 +57,12 @@ pub trait WindowExt: Sized {
     /// Removes the notification with the given id.
     fn remove_notification<T: Sized + 'static>(&mut self, cx: &mut App);
 
-    /// Clears all notifications.
     fn clear_notifications(&mut self, cx: &mut App);
 
-    /// Returns number of notifications.
     fn notifications(&mut self, cx: &mut App) -> Rc<Vec<Entity<Notification>>>;
 
-    /// Return current focused Input entity.
     fn focused_input(&mut self, cx: &mut App) -> Option<Entity<InputState>>;
-    /// Returns true if there is a focused Input entity.
+
     fn has_focused_input(&mut self, cx: &mut App) -> bool;
 }
 
@@ -207,12 +200,8 @@ impl WindowExt for Window {
     }
 }
 
-/// Root is a view for the App window for as the top level view (Must be the first view in the window).
-///
-/// It is used to manage the Sheet, Dialog, and Notification.
 pub struct Root {
-    /// Used to store the focus handle of the previous view.
-    /// When the Dialog, Sheet closes, we will focus back to the previous view.
+
     previous_focus_handle: Option<FocusHandle>,
     active_sheet: Option<ActiveSheet>,
     pub(crate) active_dialogs: Vec<ActiveDialog>,
@@ -236,7 +225,7 @@ pub(crate) struct ActiveDialog {
 }
 
 impl Root {
-    /// Create a new Root view.
+
     pub fn new(view: impl Into<AnyView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             previous_focus_handle: None,
@@ -275,7 +264,6 @@ impl Root {
         }
     }
 
-    // Render Notification layer.
     pub fn render_notification_layer(
         window: &mut Window,
         cx: &mut App,
@@ -301,7 +289,6 @@ impl Root {
         )
     }
 
-    /// Render the Sheet layer.
     pub fn render_sheet_layer(
         window: &mut Window,
         cx: &mut App,
@@ -331,7 +318,6 @@ impl Root {
         None
     }
 
-    /// Render the Dialog layer.
     pub fn render_dialog_layer(
         window: &mut Window,
         cx: &mut App,
@@ -354,14 +340,10 @@ impl Root {
 
                 dialog = (active_dialog.builder)(dialog, window, cx);
 
-                // Give the dialog the focus handle, because `dialog` is a temporary value, is not possible to
-                // keep the focus handle in the dialog.
-                //
-                // So we keep the focus handle in the `active_dialog`, this is owned by the `Root`.
                 dialog.focus_handle = active_dialog.focus_handle.clone();
 
                 dialog.layer_ix = i;
-                // Find the dialog which one needs to show overlay.
+
                 if dialog.has_overlay() {
                     show_overlay_ix = Some(i);
                 }
@@ -379,7 +361,6 @@ impl Root {
         Some(div().children(dialogs))
     }
 
-    /// Return the root view of the Root.
     pub fn view(&self) -> &AnyView {
         &self.view
     }

@@ -3,9 +3,6 @@ use std::fmt::{self, Display, Formatter};
 use gpui::{AbsoluteLength, Axis, Length, Pixels};
 use serde::{Deserialize, Serialize};
 
-/// A enum for defining the placement of the element.
-///
-/// See also: [`Side`] if you need to define the left, right side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Placement {
     #[serde(rename = "top")]

@@ -1,5 +1,3 @@
-// @reference: https://d3js.org/d3-scale/point
-
 use itertools::Itertools;
 use num_traits::Zero;
 

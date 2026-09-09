@@ -6,7 +6,6 @@ use smallvec::SmallVec;
 
 use crate::{v_flex, ActiveTheme, StyledExt as _};
 
-/// The variant of the GroupBox.
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)]
 pub enum GroupBoxVariant {
     #[default]
@@ -15,21 +14,20 @@ pub enum GroupBoxVariant {
     Outline,
 }
 
-/// Trait to add GroupBox variant methods to elements.
 pub trait GroupBoxVariants: Sized {
-    /// Set the variant of the [`GroupBox`].
+
     fn with_variant(self, variant: GroupBoxVariant) -> Self;
-    /// Set to use [`GroupBoxVariant::Normal`] to GroupBox.
+
     fn normal(mut self) -> Self {
         self = self.with_variant(GroupBoxVariant::Normal);
         self
     }
-    /// Set to use [`GroupBoxVariant::Fill`] to GroupBox.
+
     fn fill(mut self) -> Self {
         self = self.with_variant(GroupBoxVariant::Fill);
         self
     }
-    /// Set to use [`GroupBoxVariant::Outline`] to GroupBox.
+
     fn outline(mut self) -> Self {
         self = self.with_variant(GroupBoxVariant::Outline);
         self
@@ -37,7 +35,7 @@ pub trait GroupBoxVariants: Sized {
 }
 
 impl GroupBoxVariant {
-    /// Create a GroupBoxVariant from a string.
+
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "fill" => GroupBoxVariant::Fill,
@@ -46,7 +44,6 @@ impl GroupBoxVariant {
         }
     }
 
-    /// Convert the GroupBoxVariant to a string.
     pub fn as_str(&self) -> &str {
         match self {
             GroupBoxVariant::Normal => "normal",
@@ -56,8 +53,6 @@ impl GroupBoxVariant {
     }
 }
 
-/// GroupBox is a styled container element that with
-/// an optional title to groups related content together.
 #[derive(IntoElement)]
 pub struct GroupBox {
     id: Option<ElementId>,
@@ -70,7 +65,7 @@ pub struct GroupBox {
 }
 
 impl GroupBox {
-    /// Create a new GroupBox.
+
     pub fn new() -> Self {
         Self {
             id: None,
@@ -83,25 +78,21 @@ impl GroupBox {
         }
     }
 
-    /// Set the id of the group box, default is None.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = Some(id.into());
         self
     }
 
-    /// Set the title of the group box, default is None.
     pub fn title(mut self, title: impl IntoElement) -> Self {
         self.title = Some(title.into_any_element());
         self
     }
 
-    /// Set the style of the title of the group box to override the default style, default is None.
     pub fn title_style(mut self, style: StyleRefinement) -> Self {
         self.title_style = style;
         self
     }
 
-    /// Set the style of the content of the group box to override the default style, default is None.
     pub fn content_style(mut self, style: StyleRefinement) -> Self {
         self.content_style = style;
         self

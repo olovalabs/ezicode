@@ -4,12 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{Dock, DockArea, DockItem, DockPlacement, Panel, PanelRegistry};
 
-/// Used to serialize and deserialize the DockArea
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DockAreaState {
-    /// The version is used to mark this persisted state is compatible with the current version
-    /// For example, some times we many totally changed the structure of the Panel,
-    /// then we can compare the version to decide whether we can use the state or ignore.
+
     #[serde(default)]
     pub version: Option<usize>,
     pub center: PanelState,
@@ -21,7 +18,6 @@ pub struct DockAreaState {
     pub bottom_dock: Option<DockState>,
 }
 
-/// Used to serialize and deserialize the Dock
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DockState {
     panel: PanelState,
@@ -42,7 +38,6 @@ impl DockState {
         }
     }
 
-    /// Convert the DockState to Dock
     pub fn to_dock(
         &self,
         dock_area: WeakEntity<DockArea>,
@@ -64,7 +59,6 @@ impl DockState {
     }
 }
 
-/// Used to serialize and deserialize the DockerItem
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PanelState {
     pub panel_name: String,
@@ -101,7 +95,7 @@ pub enum PanelInfo {
     #[serde(rename = "stack")]
     Stack {
         sizes: Vec<Pixels>,
-        axis: usize, // 0 for horizontal, 1 for vertical
+        axis: usize,
     },
     #[serde(rename = "tabs")]
     Tabs { active_index: usize },
@@ -213,7 +207,7 @@ impl PanelState {
                     .flat_map(|item| match item {
                         DockItem::Tabs { items, .. } => items.clone(),
                         _ => {
-                            // ignore invalid panels in tabs
+
                             vec![]
                         }
                     })

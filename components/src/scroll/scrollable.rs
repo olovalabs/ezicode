@@ -9,9 +9,8 @@ use gpui::{
     prelude::FluentBuilder,
 };
 
-/// A trait for elements that can be made scrollable with scrollbars.
 pub trait ScrollableElement: InteractiveElement + Styled + ParentElement + Element {
-    /// Adds a scrollbar to the element.
+
     #[track_caller]
     fn scrollbar<H: ScrollbarHandle + Clone>(
         self,
@@ -25,37 +24,32 @@ pub trait ScrollableElement: InteractiveElement + Styled + ParentElement + Eleme
         })
     }
 
-    /// Adds a vertical scrollbar to the element.
     #[track_caller]
     fn vertical_scrollbar<H: ScrollbarHandle + Clone>(self, scroll_handle: &H) -> Self {
         self.scrollbar(scroll_handle, ScrollbarAxis::Vertical)
     }
-    /// Adds a horizontal scrollbar to the element.
+
     #[track_caller]
     fn horizontal_scrollbar<H: ScrollbarHandle + Clone>(self, scroll_handle: &H) -> Self {
         self.scrollbar(scroll_handle, ScrollbarAxis::Horizontal)
     }
 
-    /// Almost equivalent to [`StatefulInteractiveElement::overflow_scroll`], but adds scrollbars.
     #[track_caller]
     fn overflow_scrollbar(self) -> Scrollable<Self> {
         Scrollable::new(self, ScrollbarAxis::Both)
     }
 
-    /// Almost equivalent to [`StatefulInteractiveElement::overflow_x_scroll`], but adds Horizontal scrollbar.
     #[track_caller]
     fn overflow_x_scrollbar(self) -> Scrollable<Self> {
         Scrollable::new(self, ScrollbarAxis::Horizontal)
     }
 
-    /// Almost equivalent to [`StatefulInteractiveElement::overflow_y_scroll`], but adds Vertical scrollbar.
     #[track_caller]
     fn overflow_y_scrollbar(self) -> Scrollable<Self> {
         Scrollable::new(self, ScrollbarAxis::Vertical)
     }
 }
 
-/// A scrollable element wrapper that adds scrollbars to an interactive element.
 #[derive(IntoElement)]
 pub struct Scrollable<E: InteractiveElement + Styled + ParentElement + Element> {
     id: ElementId,
@@ -182,8 +176,7 @@ fn render_scrollbar<H: ScrollbarHandle + Clone>(
     window: &mut Window,
     cx: &mut App,
 ) -> Div {
-    // Do not render scrollbar when inspector is picking elements,
-    // to allow us to pick the background elements.
+
     let is_inspector_picking = window.is_inspector_picking(cx);
     if is_inspector_picking {
         return div();

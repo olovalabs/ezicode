@@ -21,14 +21,13 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-/// The application menu bar, for Windows and Linux.
 pub struct AppMenuBar {
     menus: Vec<Entity<AppMenu>>,
     selected_ix: Option<usize>,
 }
 
 impl AppMenuBar {
-    /// Create a new app menu bar.
+
     pub fn new(window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
             let menu_bar = cx.entity();
@@ -103,7 +102,6 @@ impl Render for AppMenuBar {
     }
 }
 
-/// A menu in the menu bar.
 pub(super) struct AppMenu {
     menu_bar: Entity<AppMenuBar>,
     ix: usize,
@@ -226,7 +224,7 @@ impl Render for AppMenu {
                     .label(self.name.clone())
                     .selected(is_selected)
                     .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                        // Stop propagation to avoid dragging the window.
+
                         window.prevent_default();
                         cx.stop_propagation();
                     })

@@ -8,11 +8,7 @@ use ropey::Rope;
 use crate::input::{InputState, Lsp, RopeExt};
 
 pub trait DocumentColorProvider {
-    /// Fetches document colors for the specified range.
-    ///
-    /// textDocument/documentColor
-    ///
-    /// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentColor
+
     fn document_colors(
         &self,
         _text: &Rope,
@@ -22,9 +18,7 @@ pub trait DocumentColorProvider {
 }
 
 impl Lsp {
-    /// Get document colors that intersect with the visible range (0-based row).
-    ///
-    /// Returns byte ranges and colors.
+
     pub(crate) fn document_colors_for_range(
         &self,
         text: &Rope,

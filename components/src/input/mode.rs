@@ -12,24 +12,24 @@ use crate::input::{RopeExt as _, TabSize};
 
 #[derive(Clone)]
 pub(crate) enum InputMode {
-    /// A plain text input mode.
+
     PlainText {
         multi_line: bool,
         tab: TabSize,
         rows: usize,
     },
-    /// An auto grow input mode.
+
     AutoGrow {
         rows: usize,
         min_rows: usize,
         max_rows: usize,
     },
-    /// A code editor input mode.
+
     CodeEditor {
         multi_line: bool,
         tab: TabSize,
         rows: usize,
-        /// Show line number
+
         line_number: bool,
         language: SharedString,
         indent_guides: bool,
@@ -46,7 +46,7 @@ impl Default for InputMode {
 
 #[allow(unused)]
 impl InputMode {
-    /// Create a plain input mode with default settings.
+
     pub(super) fn plain_text() -> Self {
         InputMode::PlainText {
             multi_line: false,
@@ -55,7 +55,6 @@ impl InputMode {
         }
     }
 
-    /// Create a code editor input mode with default settings.
     pub(super) fn code_editor(language: impl Into<SharedString>) -> Self {
         InputMode::CodeEditor {
             rows: 2,
@@ -69,7 +68,6 @@ impl InputMode {
         }
     }
 
-    /// Create an auto grow input mode with given min and max rows.
     pub(super) fn auto_grow(min_rows: usize, max_rows: usize) -> Self {
         InputMode::AutoGrow {
             rows: min_rows,
@@ -138,7 +136,6 @@ impl InputMode {
         self.set_rows(wrapped_lines);
     }
 
-    /// At least 1 row be return.
     pub(super) fn rows(&self) -> usize {
         if !self.is_multi_line() {
             return 1;
@@ -152,7 +149,6 @@ impl InputMode {
         .max(1)
     }
 
-    /// At least 1 row be return.
     #[allow(unused)]
     pub(super) fn min_rows(&self) -> usize {
         match self {
@@ -174,7 +170,6 @@ impl InputMode {
         }
     }
 
-    /// Return false if the mode is not [`InputMode::CodeEditor`].
     #[allow(unused)]
     #[inline]
     pub(super) fn line_number(&self) -> bool {
@@ -216,14 +211,9 @@ impl InputMode {
                     return;
                 };
 
-                // When full text changed, the selected_range may be out of bound (The before version).
                 let mut selected_range = selected_range.clone();
                 selected_range.end = selected_range.end.min(text.len());
 
-                // If insert a chart, this is 1.
-                // If backspace or delete, this is -1.
-                // If selected to delete, this is the length of the selected text.
-                // let changed_len = new_text.len() as isize - selected_range.len() as isize;
                 let changed_len = new_text.len() as isize - selected_range.len() as isize;
                 let new_end = (selected_range.end as isize + changed_len) as usize;
 
