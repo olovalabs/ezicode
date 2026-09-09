@@ -190,6 +190,10 @@ pub(crate) struct Workspace {
     pub(crate) picker: Option<crate::ui::picker::PickerState>,
 
     pub(crate) picker_confirm_pending: bool,
+
+    pub(crate) workspace_files_cache: Option<(PathBuf, Vec<crate::ui::picker::PickerItem>)>,
+
+    pub(crate) cached_breadcrumbs: Option<(PathBuf, usize, usize, Vec<crate::ui::breadcrumbs::BreadcrumbItem>)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -446,6 +450,8 @@ impl Workspace {
             git_commit_pending: false,
             picker: None,
             picker_confirm_pending: false,
+            workspace_files_cache: None,
+            cached_breadcrumbs: None,
         }
     }
 
@@ -561,6 +567,7 @@ impl Workspace {
     }
 
     pub(crate) fn load_root(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.workspace_files_cache = None;
         self.root = Some(path.clone());
         self.root_display = display_name(&path);
         self.root_display_shared = SharedString::from(self.root_display.clone());
@@ -1336,6 +1343,7 @@ impl Workspace {
     }
 
     pub(crate) fn refresh_explorer(&mut self, cx: &mut Context<Self>) {
+        self.workspace_files_cache = None;
         let Some(root) = self.root.clone() else {
             return;
         };
@@ -3012,7 +3020,37 @@ impl Workspace {
             .iter()
             .filter_map(|t| t.path.clone())
             .collect();
-        let items = crate::ui::picker::scan_workspace_files(root_dir, &recent_files);
+
+        let items = if let Some((cached_root, cached_items)) = &self.workspace_files_cache {
+            if cached_root == root_dir {
+                // Instantly reuse cached workspace files with fresh recent files prioritization
+                let recent_set: std::collections::HashSet<_> = recent_files.iter().collect();
+                let mut ordered = Vec::with_capacity(cached_items.len());
+                for item in cached_items {
+                    let p = PathBuf::from(&item.id);
+                    if recent_set.contains(&p) {
+                        let mut it = item.clone();
+                        it.is_recent = true;
+                        ordered.push(it);
+                    }
+                }
+                for item in cached_items {
+                    let p = PathBuf::from(&item.id);
+                    if !recent_set.contains(&p) {
+                        ordered.push(item.clone());
+                    }
+                }
+                ordered
+            } else {
+                let scanned = crate::ui::picker::scan_workspace_files(root_dir, &recent_files);
+                self.workspace_files_cache = Some((root_dir.to_path_buf(), scanned.clone()));
+                scanned
+            }
+        } else {
+            let scanned = crate::ui::picker::scan_workspace_files(root_dir, &recent_files);
+            self.workspace_files_cache = Some((root_dir.to_path_buf(), scanned.clone()));
+            scanned
+        };
 
         let input = cx.new(|cx| {
             InputState::new(window, cx)

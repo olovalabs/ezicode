@@ -67,7 +67,7 @@ impl Render for Workspace {
         let explorer_scroll_handle = self.explorer_scroll_handle.clone();
         let explorer_focus_handle = self.explorer_focus_handle.clone();
 
-        let open = self.active_path();
+        let open = self.active_path().cloned();
         let selected_path = self.selected_path.as_ref();
         let explorer_section_expanded = self.explorer_section_expanded;
         let inline_creating = self.inline_creating.as_ref();
@@ -91,6 +91,37 @@ impl Render for Workspace {
 
         let active_diff = self.tabs.get(active_tab).and_then(|t| t.diff.as_ref());
 
+        let breadcrumb_items = if let (Some(p), Some(editor)) = (open.as_ref(), self.active_editor()) {
+            let cursor_line = {
+                let ed = editor.read(cx);
+                let offset = ed.cursor();
+                let text = ed.text();
+                (text.offset_to_position(offset).line + 1) as usize
+            };
+            let text_len = editor.read(cx).text().len();
+            let cache_hit = if let Some((cached_p, cached_line, cached_len, _)) = &self.cached_breadcrumbs {
+                cached_p == p && *cached_line == cursor_line && *cached_len == text_len
+            } else {
+                false
+            };
+
+            if !cache_hit {
+                let text = editor.read(cx).value().to_string();
+                let items = ui::breadcrumbs::extract_breadcrumbs(
+                    p,
+                    &text,
+                    cursor_line,
+                    self.root.as_deref(),
+                );
+                self.cached_breadcrumbs = Some((p.clone(), cursor_line, text_len, items));
+            }
+
+            self.cached_breadcrumbs.as_ref().map(|(_, _, _, items)| items.clone()).unwrap_or_default()
+        } else {
+            self.cached_breadcrumbs = None;
+            Vec::new()
+        };
+
         let editor = self.active_editor();
 
         let git_repo = self.git.as_ref();
@@ -102,7 +133,7 @@ impl Render for Workspace {
         let split_diff = self.split_diff;
         let git_commit_input = self.git_commit_input.clone();
 
-        let lang_label = open.and_then(|p| lang::language_for(p));
+        let lang_label = open.as_ref().and_then(|p| lang::language_for(p));
         let lsp_indicator = {
             let lsp = self.lsp.lock().unwrap();
             ui::status_bar::LspIndicator {
@@ -348,7 +379,7 @@ impl Render for Workspace {
                                             explorer_scroll_handle.clone(),
                                             explorer_focus_handle.clone(),
                                             Some(root.as_path()),
-                                            open,
+                                            open.as_ref(),
                                             selected_path,
                                             explorer_section_expanded,
                                             inline_creating,
@@ -409,22 +440,6 @@ impl Render for Workspace {
                                                 diff, font_size, split_diff, &t, cx,
                                             ))
                                         } else if let Some(editor) = editor {
-                                            let cursor_line = {
-                                                let ed = editor.read(cx);
-                                                let offset = ed.cursor();
-                                                let text = ed.text();
-                                                (text.offset_to_position(offset).line + 1) as usize
-                                            };
-                                            let breadcrumb_items = open.map(|p| {
-                                                let text = editor.read(cx).value().to_string();
-                                                ui::breadcrumbs::extract_breadcrumbs(
-                                                    p,
-                                                    &text,
-                                                    cursor_line,
-                                                    root_opt.map(|r| r.as_path()),
-                                                )
-                                            }).unwrap_or_default();
-
                                             d.when(!breadcrumb_items.is_empty(), |d| {
                                                 d.child(ui::breadcrumbs::render_breadcrumbs(
                                                     &breadcrumb_items,

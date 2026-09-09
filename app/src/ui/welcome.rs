@@ -95,7 +95,7 @@ pub(crate) fn render_no_folder_panel(t: &Colors, cx: &mut Context<Workspace>) ->
         .child(
             div()
                 .px(px(12.0))
-                .text_size(px(12.0))
+                .text_size(px(13.0))
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from("No folder opened")),
         )

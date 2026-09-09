@@ -22,7 +22,7 @@ use crate::theme::Colors;
 use crate::ui::common::icon_img;
 use crate::workspace::Workspace;
 
-const ROW_HEIGHT: f32 = 24.0;
+const ROW_HEIGHT: f32 = 26.0;
 
 fn kind_color(kind: ChangeKind, t: &Colors) -> u32 {
     match kind {
@@ -92,7 +92,7 @@ pub(crate) fn render_git_panel(
 
             let repo_section_header = div()
                 .id("git-repo-header")
-                .h(px(24.0))
+                .h(px(26.0))
                 .px(px(8.0))
                 .flex()
                 .flex_row()
@@ -101,15 +101,23 @@ pub(crate) fn render_git_panel(
                 .cursor_pointer()
                 .hover(|s| s.bg(rgba(t.ghost_hover)))
                 .child(
-                    svg()
-                        .path(repo_chevron)
-                        .w(px(14.0))
-                        .h(px(14.0))
-                        .text_color(rgba(t.icon_muted)),
+                    div()
+                        .w(px(16.0))
+                        .h(px(16.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            svg()
+                                .path(repo_chevron)
+                                .w(px(12.0))
+                                .h(px(12.0))
+                                .text_color(rgba(t.icon_muted)),
+                        ),
                 )
                 .child(
                     div()
-                        .text_size(px(11.0))
+                        .text_size(px(12.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(t.text))
                         .child(SharedString::from("Changes")),
@@ -134,7 +142,7 @@ pub(crate) fn render_git_panel(
                 let staged_header = div()
                     .id("git-staged-header")
                     .group("git-staged-header")
-                    .h(px(22.0))
+                    .h(px(26.0))
                     .px(px(8.0))
                     .flex()
                     .flex_row()
@@ -149,15 +157,23 @@ pub(crate) fn render_git_panel(
                             .items_center()
                             .gap(px(4.0))
                             .child(
-                                svg()
-                                    .path(staged_chevron)
-                                    .w(px(14.0))
-                                    .h(px(14.0))
-                                    .text_color(rgba(t.icon_muted)),
+                                div()
+                                    .w(px(16.0))
+                                    .h(px(16.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        svg()
+                                            .path(staged_chevron)
+                                            .w(px(12.0))
+                                            .h(px(12.0))
+                                            .text_color(rgba(t.icon_muted)),
+                                    ),
                             )
                             .child(
                                 div()
-                                    .text_size(px(11.0))
+                                    .text_size(px(12.0))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(rgba(t.text))
                                     .child(SharedString::from("Staged Changes")),
@@ -210,7 +226,7 @@ pub(crate) fn render_git_panel(
             let changes_header = div()
                 .id("git-changes-header")
                 .group("git-changes-header")
-                .h(px(22.0))
+                .h(px(26.0))
                 .px(px(8.0))
                 .flex()
                 .flex_row()
@@ -225,15 +241,23 @@ pub(crate) fn render_git_panel(
                         .items_center()
                         .gap(px(4.0))
                         .child(
-                            svg()
-                                .path(changes_chevron)
-                                .w(px(14.0))
-                                .h(px(14.0))
-                                .text_color(rgba(t.icon_muted)),
+                            div()
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    svg()
+                                        .path(changes_chevron)
+                                        .w(px(12.0))
+                                        .h(px(12.0))
+                                        .text_color(rgba(t.icon_muted)),
+                                ),
                         )
                         .child(
                             div()
-                                .text_size(px(11.0))
+                                .text_size(px(12.0))
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(rgba(t.text))
                                 .child(SharedString::from("Changes")),
@@ -302,14 +326,14 @@ fn header(
     _cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     div()
-        .h(px(35.0))
+        .h(px(36.0))
         .px(px(12.0))
         .flex()
         .items_center()
         .justify_between()
         .child(
             div()
-                .text_size(px(11.0))
+                .text_size(px(12.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from("Source Control")),
@@ -317,7 +341,7 @@ fn header(
         .child(
             div()
                 .id("git-header-more")
-                .size(px(22.0))
+                .size(px(26.0))
                 .rounded(px(4.0))
                 .flex()
                 .items_center()
@@ -327,8 +351,8 @@ fn header(
                 .child(
                     svg()
                         .path("ui_icons/ellipsis_tint.svg")
-                        .w(px(14.0))
-                        .h(px(14.0))
+                        .w(px(16.0))
+                        .h(px(16.0))
                         .text_color(rgba(t.icon_muted)),
                 )
                 .context_menu(|menu, _window, _cx| {
@@ -350,7 +374,7 @@ fn section_action(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
-        .size(px(18.0))
+        .size(px(22.0))
         .rounded(px(3.0))
         .flex()
         .items_center()
@@ -361,8 +385,8 @@ fn section_action(
         .child(
             svg()
                 .path(icon_path)
-                .w(px(13.0))
-                .h(px(13.0))
+                .w(px(14.0))
+                .h(px(14.0))
                 .text_color(rgba(t.icon_muted)),
         )
         .on_click(cx.listener(move |_this, _, window, cx| {
@@ -372,15 +396,15 @@ fn section_action(
 
 fn badge(count: usize) -> impl IntoElement {
     div()
-        .min_w(px(16.0))
-        .h(px(16.0))
+        .min_w(px(18.0))
+        .h(px(18.0))
         .px(px(5.0))
         .rounded_full()
         .bg(rgba(0x0078d4ff))
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(11.0))
+        .text_size(px(11.5))
         .font_weight(FontWeight::BOLD)
         .text_color(rgba(0xffffffff))
         .child(SharedString::from(count.to_string()))
@@ -397,7 +421,7 @@ fn commit_box(
 
     let input_field = match input {
         Some(input) => div()
-            .h(px(30.0))
+            .h(px(34.0))
             .px(px(8.0))
             .flex()
             .flex_row()
@@ -409,13 +433,13 @@ fn commit_box(
             .child(
                 Input::new(input)
                     .xsmall()
-                    .text_size(px(12.5))
+                    .text_size(px(13.0))
                     .appearance(false)
                     .bordered(false),
             )
             .into_any_element(),
         None => div()
-            .h(px(30.0))
+            .h(px(34.0))
             .px(px(8.0))
             .flex()
             .flex_row()
@@ -426,7 +450,7 @@ fn commit_box(
             .rounded(px(3.0))
             .child(
                 div()
-                    .text_size(px(12.0))
+                    .text_size(px(12.5))
                     .text_color(rgba(t.text_muted))
                     .child(SharedString::from(placeholder_text)),
             )
@@ -434,7 +458,7 @@ fn commit_box(
     };
 
     let commit_split_btn = div()
-        .h(px(28.0))
+        .h(px(32.0))
         .rounded(px(3.0))
         .bg(rgba(0x0078d4ff))
         .flex()
@@ -451,7 +475,7 @@ fn commit_box(
                 .justify_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(rgba(0x0086e6ff)))
-                .text_size(px(12.0))
+                .text_size(px(13.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(0xffffffff))
                 .child(
@@ -459,12 +483,12 @@ fn commit_box(
                         .flex()
                         .flex_row()
                         .items_center()
-                        .gap(px(4.0))
+                        .gap(px(5.0))
                         .child(
                             svg()
                                 .path("ui_icons/check_tint.svg")
-                                .w(px(14.0))
-                                .h(px(14.0))
+                                .w(px(16.0))
+                                .h(px(16.0))
                                 .text_color(rgba(0xffffffff)),
                         )
                         .child(SharedString::from("Commit")),
@@ -476,13 +500,13 @@ fn commit_box(
         .child(
             div()
                 .w(px(1.0))
-                .h(px(18.0))
+                .h(px(20.0))
                 .bg(rgba(0xffffff33)),
         )
         .child(
             div()
                 .id("git-commit-dropdown-btn")
-                .w(px(26.0))
+                .w(px(28.0))
                 .h_full()
                 .flex()
                 .items_center()
@@ -578,7 +602,7 @@ fn change_row(
         }));
 
     // Official File Type Icon
-    row = row.child(icon_img(file_icon_path, 16.0));
+    row = row.child(icon_img(file_icon_path, 18.0));
 
     // File name and folder subpath
     row = row.child(
@@ -595,7 +619,7 @@ fn change_row(
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .text_size(px(12.5))
+                    .text_size(px(13.5))
                     .text_color(rgba(t.text))
                     .child(SharedString::from(name)),
             )
@@ -603,7 +627,7 @@ fn change_row(
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(11.5))
+                        .text_size(px(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(parent)),
                 )
@@ -612,7 +636,7 @@ fn change_row(
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(11.0))
+                        .text_size(px(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(format!("← {old}"))),
                 )
@@ -758,7 +782,7 @@ fn row_icon_btn(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
-        .size(px(18.0))
+        .size(px(22.0))
         .rounded(px(3.0))
         .flex_none()
         .flex()
@@ -770,8 +794,8 @@ fn row_icon_btn(
         .child(
             svg()
                 .path(icon_path)
-                .w(px(13.0))
-                .h(px(13.0))
+                .w(px(14.0))
+                .h(px(14.0))
                 .text_color(rgba(t.icon_muted)),
         )
 }
@@ -786,7 +810,7 @@ fn empty_state(message: &str, t: &Colors) -> impl IntoElement {
         .px(px(20.0))
         .child(
             div()
-                .text_size(px(12.0))
+                .text_size(px(13.0))
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from(message.to_string())),
         )

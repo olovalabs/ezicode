@@ -82,17 +82,22 @@ impl PickerState {
         let mut scored = Vec::new();
 
         for item in &self.raw_items {
-            let target = match &item.subtitle {
-                Some(sub) => format!("{} {}", item.title, sub),
-                None => item.title.clone(),
-            };
-            if let Some(score) = matcher.fuzzy_match(&target, query_match) {
-                let mut it = item.clone();
-                it.score = score;
-                // Boost recently opened files slightly
-                if it.is_recent {
-                    it.score += 50;
+            let score = if let Some(sub) = &item.subtitle {
+                if let Some(s) = matcher.fuzzy_match(&item.title, query_match) {
+                    Some(s + 30)
+                } else {
+                    matcher.fuzzy_match(sub, query_match)
                 }
+            } else {
+                matcher.fuzzy_match(&item.title, query_match)
+            };
+
+            if let Some(mut score) = score {
+                let mut it = item.clone();
+                if it.is_recent {
+                    score += 50;
+                }
+                it.score = score;
                 scored.push(it);
             }
         }
@@ -123,6 +128,26 @@ impl PickerState {
     }
 }
 
+fn is_ignored_scan_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "target"
+            | "node_modules"
+            | ".pnpm-store"
+            | ".turbo"
+            | ".next"
+            | "dist"
+            | "build"
+            | "out"
+            | ".cache"
+            | "test-results"
+            | ".vscode"
+            | ".idea"
+            | ".gradle"
+    )
+}
+
 pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<PickerItem> {
     use ignore::WalkBuilder;
     let mut items = Vec::new();
@@ -131,8 +156,8 @@ pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<Picker
     // 1. Add recent files first
     for path in recent_files {
         if path.is_file() {
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-            if !seen.insert(canonical) {
+            let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+            if !seen.insert(rel) {
                 continue;
             }
             let file_name = path
@@ -165,13 +190,17 @@ pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<Picker
         }
     }
 
-    // 2. Scan remaining workspace files
+    // 2. Scan remaining workspace files without expensive canonicalize syscalls
     let walker = WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
         .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            name != ".git" && name != "target" && name != "node_modules"
+            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                let name = entry.file_name().to_string_lossy();
+                !is_ignored_scan_dir(&name)
+            } else {
+                true
+            }
         })
         .build();
 
@@ -179,8 +208,8 @@ pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<Picker
         if let Ok(entry) = result {
             if entry.file_type().map_or(false, |ft| ft.is_file()) {
                 let path = entry.path();
-                let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-                if !seen.insert(canonical) {
+                let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+                if !seen.insert(rel) {
                     continue;
                 }
                 let file_name = path
@@ -210,6 +239,10 @@ pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<Picker
                     is_recent: false,
                     score: 0,
                 });
+
+                if items.len() >= 15_000 {
+                    break;
+                }
             }
         }
     }

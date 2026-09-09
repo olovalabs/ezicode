@@ -21,10 +21,10 @@ use crate::workspace::{
     CreatingKind, ExplorerDrag, InlineCreating, InlineRenaming, Workspace,
 };
 
-const INDENT_STEP: f32 = 14.0;
+const INDENT_STEP: f32 = 16.0;
 const BASE_PAD: f32 = 12.0;
-const ROW_HEIGHT: f32 = 24.0;
-const ICON_SIZE: f32 = 16.0;
+const ROW_HEIGHT: f32 = 26.0;
+const ICON_SIZE: f32 = 18.0;
 
 pub(crate) fn render_tree(
     rows: Arc<[VisibleTreeRow]>,
@@ -64,7 +64,7 @@ pub(crate) fn render_tree(
 
     let header = div()
         .id("exp-root-header")
-        .h(px(34.0))
+        .h(px(36.0))
         .px(px(8.0))
         .flex()
         .flex_row()
@@ -116,8 +116,8 @@ pub(crate) fn render_tree(
                 .gap(px(4.0))
                 .child(
                     div()
-                        .w(px(14.0))
-                        .h(px(14.0))
+                        .w(px(16.0))
+                        .h(px(16.0))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -125,8 +125,8 @@ pub(crate) fn render_tree(
                         .child(
                             svg()
                                 .path(root_chevron)
-                                .w(px(10.0))
-                                .h(px(10.0))
+                                .w(px(12.0))
+                                .h(px(12.0))
                                 .text_color(rgba(t.icon_muted)),
                         ),
                 )
@@ -136,7 +136,7 @@ pub(crate) fn render_tree(
                         .min_w(px(0.0))
                         .overflow_hidden()
                         .text_ellipsis()
-                        .text_size(px(13.5))
+                        .text_size(px(14.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(t.text))
 
@@ -262,7 +262,7 @@ fn header_action_button(
 ) -> impl IntoElement {
     div()
         .id(id)
-        .size(px(24.0))
+        .size(px(26.0))
         .flex()
         .items_center()
         .justify_center()
@@ -273,8 +273,8 @@ fn header_action_button(
         .child(
             svg()
                 .path(icon_path)
-                .w(px(14.0))
-                .h(px(14.0))
+                .w(px(16.0))
+                .h(px(16.0))
                 .text_color(rgba(t.icon_muted)),
         )
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -334,14 +334,14 @@ fn inline_create_row(
         .items_center()
         .pl(px(pad))
         .pr(px(10.0))
-        .child(div().w(px(14.0)).h(px(14.0)).flex_none())
+        .child(div().w(px(16.0)).h(px(16.0)).flex_none())
         .child(div().w(px(4.0)).flex_none())
         .child(icon_img(icon, ICON_SIZE))
         .child(div().w(px(6.0)).flex_none())
         .child(
             div()
                 .flex_1()
-                .h(px(22.0))
+                .h(px(24.0))
                 .flex()
                 .items_center()
                 .bg(rgba(t.background))
@@ -352,7 +352,7 @@ fn inline_create_row(
                 .child(
                     Input::new(&creating.input)
                         .xsmall()
-                        .text_size(px(13.5))
+                        .text_size(px(14.0))
                         .appearance(false)
                         .bordered(false),
                 ),
@@ -381,15 +381,15 @@ fn inline_rename_row(
             "ui_icons/chevron-right_tint.svg"
         };
         div()
-            .w(px(14.0))
-            .h(px(14.0))
+            .w(px(16.0))
+            .h(px(16.0))
             .flex()
             .items_center()
             .justify_center()
             .flex_none()
-            .child(svg().path(path).w(px(10.0)).h(px(10.0)).text_color(rgba(t.icon_muted)))
+            .child(svg().path(path).w(px(12.0)).h(px(12.0)).text_color(rgba(t.icon_muted)))
     } else {
-        div().w(px(14.0)).h(px(14.0)).flex_none()
+        div().w(px(16.0)).h(px(16.0)).flex_none()
     };
 
     let mut row = div()
@@ -436,7 +436,7 @@ fn inline_rename_row(
             .child(
                 div()
                     .flex_1()
-                    .h(px(22.0))
+                    .h(px(24.0))
                     .flex()
                     .items_center()
                     .bg(rgba(t.background))
@@ -447,7 +447,7 @@ fn inline_rename_row(
                     .child(
                         Input::new(&renaming.input)
                             .xsmall()
-                            .text_size(px(13.5))
+                            .text_size(px(14.0))
                             .appearance(false)
                             .bordered(false),
                     ),
@@ -510,7 +510,6 @@ fn tree_row(
         file_icons::icon_for(&row_data.path)
     };
     let text_color = t.text;
-
     let chevron_element = if is_dir {
         let chev_path = if expanded {
             "ui_icons/chevron-down_tint.svg"
@@ -518,8 +517,8 @@ fn tree_row(
             "ui_icons/chevron-right_tint.svg"
         };
         div()
-            .w(px(14.0))
-            .h(px(14.0))
+            .w(px(16.0))
+            .h(px(16.0))
             .flex()
             .items_center()
             .justify_center()
@@ -527,12 +526,12 @@ fn tree_row(
             .child(
                 svg()
                     .path(chev_path)
-                    .w(px(10.0))
-                    .h(px(10.0))
+                    .w(px(12.0))
+                    .h(px(12.0))
                     .text_color(rgba(t.icon_muted)),
             )
     } else {
-        div().w(px(14.0)).h(px(14.0)).flex_none()
+        div().w(px(16.0)).h(px(16.0)).flex_none()
     };
 
     let content = div()
@@ -553,7 +552,7 @@ fn tree_row(
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .text_ellipsis()
-                .text_size(px(13.5))
+                .text_size(px(14.0))
                 .text_color(rgba(text_color))
                 .child(SharedString::from(name)),
         );
@@ -602,38 +601,35 @@ fn tree_row(
     let path_c3 = path.clone();
     let path_c4 = path.clone();
     let path_c5 = path.clone();
-    let parent_for_new = if is_dir {
-        Some(path.clone())
-    } else {
-        path.parent().map(|p| p.to_path_buf())
-    };
+    let path_c6 = path.clone();
+    let path_c7 = path.clone();
 
     row.context_menu(move |menu, _window, _cx| {
-        let p_new1 = parent_for_new.clone();
-        let p_new2 = parent_for_new.clone();
-        menu.menu("New File…", Box::new(ExplorerNewFile { parent: p_new1 }))
-            .menu("New Folder…", Box::new(ExplorerNewFolder { parent: p_new2 }))
-            .when(is_dir, |m| m.menu("Paste", Box::new(ExplorerPaste)))
-            .separator()
-            .menu("Cut", Box::new(ExplorerCut))
-            .menu("Copy", Box::new(ExplorerCopy))
-            .separator()
-            .menu(
-                "Reveal in File Explorer",
-                Box::new(ExplorerRevealInFinder { path: path_c1.clone() }),
-            )
-            .separator()
-            .menu(
-                "Copy Path",
-                Box::new(ExplorerCopyPath { path: path_c2.clone() }),
-            )
-            .menu(
-                "Copy Relative Path",
-                Box::new(ExplorerCopyRelativePath { path: path_c3.clone() }),
-            )
-            .separator()
-            .menu("Rename…", Box::new(ExplorerRename { path: path_c4.clone() }))
-            .menu("Delete", Box::new(ExplorerDelete { path: path_c5.clone() }))
+        menu.when(is_dir, |m| {
+            m.menu("New File…", Box::new(ExplorerNewFile { parent: Some(path_c6.clone()) }))
+                .menu("New Folder…", Box::new(ExplorerNewFolder { parent: Some(path_c7.clone()) }))
+                .separator()
+        })
+        .menu("Cut", Box::new(ExplorerCut))
+        .menu("Copy", Box::new(ExplorerCopy))
+        .menu("Paste", Box::new(ExplorerPaste))
+        .separator()
+        .menu(
+            "Reveal in File Explorer",
+            Box::new(ExplorerRevealInFinder { path: path_c1.clone() }),
+        )
+        .separator()
+        .menu(
+            "Copy Path",
+            Box::new(ExplorerCopyPath { path: path_c2.clone() }),
+        )
+        .menu(
+            "Copy Relative Path",
+            Box::new(ExplorerCopyRelativePath { path: path_c3.clone() }),
+        )
+        .separator()
+        .menu("Rename…", Box::new(ExplorerRename { path: path_c4.clone() }))
+        .menu("Delete", Box::new(ExplorerDelete { path: path_c5.clone() }))
     })
     .into_any_element()
 }
@@ -662,7 +658,7 @@ impl Render for ExplorerDrag {
             .bg(rgba(0x252526f0))
             .border_1()
             .border_color(rgba(0x454545ff))
-            .text_size(px(13.0))
+            .text_size(px(13.5))
             .text_color(rgba(0xccccccff))
             .child(icon_img(icon_path, ICON_SIZE))
             .child(div().w(px(6.0)).flex_none())
