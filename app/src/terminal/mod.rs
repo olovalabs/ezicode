@@ -651,6 +651,25 @@ mod tests {
     }
 
     #[test]
+    fn test_caps_lock_capitalization() {
+        let a = Keystroke::parse("a").unwrap();
+        let bytes = gpui_terminal::input::keystroke_to_bytes_with_caps(
+            &a,
+            alacritty_terminal::term::TermMode::empty(),
+            true,
+        );
+        assert_eq!(bytes, Some(b"A".to_vec()));
+
+        let shift_a = Keystroke::parse("shift-a").unwrap();
+        let bytes_inverted = gpui_terminal::input::keystroke_to_bytes_with_caps(
+            &shift_a,
+            alacritty_terminal::term::TermMode::empty(),
+            true,
+        );
+        assert_eq!(bytes_inverted, Some(b"a".to_vec()));
+    }
+
+    #[test]
     fn test_lowercase_letters() {
         let keystroke = Keystroke::parse("a").unwrap();
         let bytes = terminal_keystroke_to_bytes(&keystroke);

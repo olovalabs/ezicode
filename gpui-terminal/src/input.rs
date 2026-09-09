@@ -85,6 +85,21 @@
 
 use alacritty_terminal::term::TermMode;
 use gpui::Keystroke;
+/// Query the current Caps Lock state from the operating system.
+#[cfg(windows)]
+pub fn is_capslock_on() -> bool {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetKeyState(nVirtKey: i32) -> i16;
+    }
+    const VK_CAPITAL: i32 = 0x14;
+    unsafe { (GetKeyState(VK_CAPITAL) & 1) != 0 }
+}
+
+#[cfg(not(windows))]
+pub fn is_capslock_on() -> bool {
+    false
+}
 
 /// Convert a GPUI keystroke to terminal escape sequence bytes.
 ///
@@ -114,6 +129,23 @@ use gpui::Keystroke;
 /// assert_eq!(bytes, Some(b"\r".to_vec()));
 /// ```
 pub fn keystroke_to_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
+    keystroke_to_bytes_internal(keystroke, mode, is_capslock_on())
+}
+
+/// Convert a GPUI keystroke to terminal escape sequence bytes with an explicit Caps Lock state.
+pub fn keystroke_to_bytes_with_caps(
+    keystroke: &Keystroke,
+    mode: TermMode,
+    is_caps: bool,
+) -> Option<Vec<u8>> {
+    keystroke_to_bytes_internal(keystroke, mode, is_caps)
+}
+
+fn keystroke_to_bytes_internal(
+    keystroke: &Keystroke,
+    mode: TermMode,
+    is_caps: bool,
+) -> Option<Vec<u8>> {
     let key_lower = keystroke.key.to_ascii_lowercase();
 
     // Standard xterm modifier calculation: 1 + shift*1 + alt*2 + ctrl*4
@@ -343,60 +375,89 @@ pub fn keystroke_to_bytes(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u
         }
     }
 
-    // Handle regular printable characters:
-    // If key_char is available (from IME or platform event)
+    // Handle regular printable characters: Shift, CapsLock, symbols, letters
     if !keystroke.modifiers.control && !keystroke.modifiers.alt {
+        // Shift XOR CapsLock determines if a letter should be capitalized.
+        // On non-Windows platforms, also check if key_char contains an uppercase character.
+        let should_uppercase = if is_caps {
+            keystroke.modifiers.shift ^ true
+        } else {
+            keystroke.modifiers.shift
+                || keystroke
+                    .key_char
+                    .as_ref()
+                    .map_or(false, |s| s.chars().any(|c| c.is_ascii_uppercase()))
+        };
+
+        // Check if key is a single ASCII letter
+        let key = keystroke.key.as_str();
+        if key.len() == 1 {
+            let ch = key.chars().next().unwrap();
+            if ch.is_ascii_alphabetic() {
+                let out_char = if should_uppercase {
+                    ch.to_ascii_uppercase()
+                } else {
+                    ch.to_ascii_lowercase()
+                };
+                return Some(vec![out_char as u8]);
+            }
+        }
+
+        // If key_char is available (from IME or platform event)
         if let Some(key_char) = &keystroke.key_char {
+            if key_char.len() == 1 {
+                let ch = key_char.chars().next().unwrap();
+                if ch.is_ascii_alphabetic() {
+                    let out_char = if should_uppercase {
+                        ch.to_ascii_uppercase()
+                    } else {
+                        ch.to_ascii_lowercase()
+                    };
+                    return Some(vec![out_char as u8]);
+                }
+            }
             if !key_char.is_empty() {
                 return Some(key_char.as_bytes().to_vec());
             }
         }
-    }
 
-    // Fallback for shifted US keyboard layout symbols when key_char is None (common on Windows)
-    let key = keystroke.key.as_str();
-    if key.len() == 1 {
-        let ch = key.chars().next().unwrap();
-        if keystroke.modifiers.shift && !keystroke.modifiers.control && !keystroke.modifiers.alt {
-            let shifted = match ch {
-                '1' => '!',
-                '2' => '@',
-                '3' => '#',
-                '4' => '$',
-                '5' => '%',
-                '6' => '^',
-                '7' => '&',
-                '8' => '*',
-                '9' => '(',
-                '0' => ')',
-                '-' => '_',
-                '=' => '+',
-                '[' => '{',
-                ']' => '}',
-                '\\' => '|',
-                ';' => ':',
-                '\'' => '"',
-                ',' => '<',
-                '.' => '>',
-                '/' => '?',
-                '`' => '~',
-                _ if ch.is_ascii_alphabetic() => ch.to_ascii_uppercase(),
-                _ => ch,
-            };
-            return Some(vec![shifted as u8]);
-        }
+        // Fallback for shifted US keyboard layout symbols when key_char is None (common on Windows)
+        if key.len() == 1 {
+            let ch = key.chars().next().unwrap();
+            if keystroke.modifiers.shift {
+                let shifted = match ch {
+                    '1' => '!',
+                    '2' => '@',
+                    '3' => '#',
+                    '4' => '$',
+                    '5' => '%',
+                    '6' => '^',
+                    '7' => '&',
+                    '8' => '*',
+                    '9' => '(',
+                    '0' => ')',
+                    '-' => '_',
+                    '=' => '+',
+                    '[' => '{',
+                    ']' => '}',
+                    '\\' => '|',
+                    ';' => ':',
+                    '\'' => '"',
+                    ',' => '<',
+                    '.' => '>',
+                    '/' => '?',
+                    '`' => '~',
+                    _ if ch.is_ascii_alphabetic() => ch.to_ascii_uppercase(),
+                    _ => ch,
+                };
+                return Some(vec![shifted as u8]);
+            }
 
-        if ch.is_ascii() && !keystroke.modifiers.control && !keystroke.modifiers.alt {
-            let out_char = if ch.is_ascii_alphabetic() {
-                ch.to_ascii_lowercase()
-            } else {
-                ch
-            };
-            return Some(vec![out_char as u8]);
-        }
+            if ch.is_ascii() {
+                return Some(vec![ch as u8]);
+            }
 
-        // For non-ASCII characters, encode as UTF-8
-        if !keystroke.modifiers.control && !keystroke.modifiers.alt {
+            // For non-ASCII characters, encode as UTF-8
             return Some(key.as_bytes().to_vec());
         }
     }
@@ -630,5 +691,41 @@ mod tests {
         let shift_slash = Keystroke::parse("shift-/").unwrap();
         assert_eq!(keystroke_to_bytes(&shift_slash, mode), Some(b"?".to_vec()));
     }
-}
 
+    #[test]
+    fn test_caps_lock_capitalization() {
+        let mode = TermMode::empty();
+
+        // CapsLock ON, lower key -> uppercase
+        let a = Keystroke::parse("a").unwrap();
+        assert_eq!(keystroke_to_bytes_with_caps(&a, mode, true), Some(b"A".to_vec()));
+
+        let z = Keystroke::parse("z").unwrap();
+        assert_eq!(keystroke_to_bytes_with_caps(&z, mode, true), Some(b"Z".to_vec()));
+
+        // CapsLock ON + Shift -> lowercase (inverts)
+        let shift_a = Keystroke::parse("shift-a").unwrap();
+        assert_eq!(keystroke_to_bytes_with_caps(&shift_a, mode, true), Some(b"a".to_vec()));
+
+        // CapsLock OFF, shift -> uppercase
+        assert_eq!(keystroke_to_bytes_with_caps(&shift_a, mode, false), Some(b"A".to_vec()));
+
+        // CapsLock OFF, no shift -> lowercase
+        assert_eq!(keystroke_to_bytes_with_caps(&a, mode, false), Some(b"a".to_vec()));
+
+        // Numbers unaffected by CapsLock
+        let one = Keystroke::parse("1").unwrap();
+        assert_eq!(keystroke_to_bytes_with_caps(&one, mode, true), Some(b"1".to_vec()));
+    }
+
+    #[test]
+    fn test_key_char_with_caps_lock() {
+        let mode = TermMode::empty();
+        let mut keystroke = Keystroke::parse("a").unwrap();
+        keystroke.key_char = Some("a".to_string());
+
+        // Even if platform returns lowercase in key_char (like Windows with CapsLock),
+        // keystroke_to_bytes_with_caps capitalizes it when CapsLock is active.
+        assert_eq!(keystroke_to_bytes_with_caps(&keystroke, mode, true), Some(b"A".to_vec()));
+    }
+}
