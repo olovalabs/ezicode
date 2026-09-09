@@ -54,6 +54,10 @@ pub(crate) struct DiffTab {
     pub staged: bool,
     /// Cached unified-diff text, `None` while loading.
     pub text: Option<String>,
+    /// The diff parsed into render-ready rows, computed on the same
+    /// background thread as `text` and shared by `Arc`, so repaints never
+    /// re-run the (word-level) diff parser. `None` while loading.
+    pub parsed: Option<Arc<crate::ui::diff::ParsedDiff>>,
     /// Non-fatal load error (shown inside the diff view).
     pub error: Option<String>,
 }
@@ -222,6 +226,45 @@ pub(crate) struct PanelResizeDrag {
     /// Panel size at grab time.
     #[allow(dead_code)]
     pub(crate) start_size: f32,
+}
+
+/// A file read + decoded for the editor, produced off the UI thread by
+/// [`load_buffer_file`] so opening files never blocks input or painting.
+pub(crate) struct LoadedBuffer {
+    /// Decoded buffer text (lossy UTF-8).
+    pub text: String,
+    /// Language id for the highlighter and LSP (`"text"` when highlighting
+    /// is disabled for this file).
+    pub lang_id: &'static str,
+    /// False when the file is too big for tree-sitter highlighting.
+    pub highlight: bool,
+}
+
+/// Read and classify one file for opening in an editor. Pure I/O + pure
+/// computation, no GPUI handles — safe (and intended) to run on the
+/// background executor. The `Err` strings are user-facing status messages,
+/// worded exactly like the old synchronous open path produced them.
+fn load_buffer_file(path: &std::path::Path) -> Result<LoadedBuffer, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("open failed: {e}"))?;
+    if bytes.len() > 8_000_000 {
+        return Err(format!("{} is too large (>8MB)", display_name(path)));
+    }
+    if bytes.iter().take(8000).any(|&b| b == 0) {
+        return Err(format!("{} looks binary", display_name(path)));
+    }
+    let newline_count = bytes.iter().filter(|&&b| b == b'\n').count();
+    let highlight = bytes.len() <= 400_000 && newline_count <= 8_000;
+    let lang_id = if highlight {
+        lang::language_for(path).unwrap_or("text")
+    } else {
+        "text"
+    };
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    Ok(LoadedBuffer {
+        text,
+        lang_id,
+        highlight,
+    })
 }
 
 impl Workspace {
@@ -1091,6 +1134,55 @@ impl Workspace {
             return;
         }
 
+        // Zed-style: disk I/O, the binary/too-large checks and the UTF-8
+        // decode all run on the background executor, so opening a large file
+        // (or any file on a slow disk) never blocks input or painting. The
+        // tab itself is created on the UI thread once the load completes.
+        self.status = format!("Opening {}…", display_name(&path));
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let load_path = path.clone();
+            let loaded = cx
+                .background_spawn(async move { load_buffer_file(&load_path) })
+                .await;
+            let _ = this.update_in(cx, move |workspace, window, cx| {
+                workspace.finish_open_file(path, loaded, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Finish [`Self::open_file`] once the background read has completed:
+    /// create the editor, wire up LSP + change subscriptions, and install or
+    /// replace the tab. Runs on the UI thread.
+    fn finish_open_file(
+        &mut self,
+        path: PathBuf,
+        loaded: Result<LoadedBuffer, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let loaded = match loaded {
+            Ok(loaded) => loaded,
+            Err(message) => {
+                self.status = message;
+                cx.notify();
+                return;
+            }
+        };
+
+        // The file may have been opened again while the load was in flight
+        // (double-click then Enter, or two quick opens). Don't open a second
+        // tab for it.
+        if let Some(idx) = self.tabs.iter().position(|t| t.path.as_ref() == Some(&path)) {
+            self.active_tab = idx;
+            if let Some(tab) = self.tabs.get_mut(idx) {
+                tab.preview = false;
+            }
+            cx.notify();
+            return;
+        }
+
         // VS Code behavior: Check if current active tab is a preview tab
         // If yes, REPLACE it with the new file (don't add a new tab)
         // If no, ADD a new tab
@@ -1101,123 +1193,103 @@ impl Workspace {
             false
         };
 
-        // Read file content
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                if bytes.len() > 8_000_000 {
-                    self.status = format!("{} is too large (>8MB)", display_name(&path));
-                    cx.notify();
-                    return;
-                }
-                if bytes.iter().take(8000).any(|&b| b == 0) {
-                    self.status = format!("{} looks binary", display_name(&path));
-                    cx.notify();
-                    return;
-                }
-                let newline_count = bytes.iter().filter(|&&b| b == b'\n').count();
-                let highlight = bytes.len() <= 400_000 && newline_count <= 8_000;
-                let lang_id = if highlight {
-                    lang::language_for(&path).unwrap_or("text")
-                } else {
-                    "text"
-                };
-                let text = String::from_utf8_lossy(&bytes).into_owned();
+        let lang_id = loaded.lang_id;
+        let highlight = loaded.highlight;
+        let text = loaded.text;
 
-                // Create a new editor for this tab
-                let editor = cx.new(|cx| {
-                    let mut state = InputState::new(window, cx)
-                        .code_editor(lang_id)
-                        .line_number(true)
-                        .indent_guides(false)
-                        .soft_wrap(false)
-                        .searchable(true)
-                        .tab_size(TabSize {
-                            tab_size: 4,
-                            hard_tabs: false,
-                        });
-                    state.set_value(text.clone(), window, cx);
-                    state
+        // Create a new editor for this tab. `text` is moved in — no extra
+        // whole-buffer clone on open.
+        let editor = cx.new(move |cx| {
+            let mut state = InputState::new(window, cx)
+                .code_editor(lang_id)
+                .line_number(true)
+                .indent_guides(false)
+                .soft_wrap(false)
+                .searchable(true)
+                .tab_size(TabSize {
+                    tab_size: 4,
+                    hard_tabs: false,
                 });
+            state.set_value(text, window, cx);
+            state
+        });
 
-                // Notify LSP of document open and wire the editor up to the
-                // server: completions, hover, go-to-definition and code
-                // actions are driven by gpui-component's `InputState::lsp`
-                // provider hooks (the same surface Zed uses). If the server
-                // still has to be installed this returns false and the buffer
-                // is attached automatically once the install finishes.
-                self.attach_language_server(&path, lang_id, &editor, cx);
+        // Notify LSP of document open and wire the editor up to the
+        // server: completions, hover, go-to-definition and code
+        // actions are driven by gpui-component's `InputState::lsp`
+        // provider hooks (the same surface Zed uses). If the server
+        // still has to be installed this returns false and the buffer
+        // is attached automatically once the install finishes.
+        self.attach_language_server(&path, lang_id, &editor, cx);
 
-                // Subscribe to change events - also handles promoting preview to permanent
-                let path_clone = path.clone();
-                let lang_str = lang_id.to_string();
-                let editor_ent = editor.clone();
+        // Subscribe to change events - also handles promoting preview to permanent
+        let path_clone = path.clone();
+        let lang_str = lang_id.to_string();
+        let editor_ent = editor.clone();
 
-                cx.subscribe(&editor, move |this, _state, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        let mut ui_changed = false;
-                        if let Some(tab) = this.tabs.get_mut(this.active_tab) {
-                            if !tab.dirty {
-                                tab.dirty = true;
-                                ui_changed = true;
-                            }
-                            // VS Code: editing a preview tab promotes it to permanent
-                            if tab.preview {
-                                tab.preview = false;
-                                ui_changed = true;
-                            }
-                        }
-                        {
-                            let mut lsp = this.lsp.lock().unwrap();
-                            if lsp.has_client(&lang_str) {
-                                let text = editor_ent.read(cx).value().to_string();
-                                lsp.change_document(&path_clone, &lang_str, &text);
-                            }
-                        }
-                        // The editor view repaints itself. Only repaint the
-                        // workspace chrome (dirty dot / preview promotion)
-                        // when it actually changed, so steady-state typing
-                        // doesn't rebuild the whole window (explorer, tab
-                        // bar, status bar) on every keystroke.
-                        if ui_changed {
-                            cx.notify();
-                        }
-                        let tab_idx = this.active_tab;
-                        this.trigger_auto_save_after_delay(tab_idx, cx);
+        cx.subscribe(&editor, move |this, _state, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let mut ui_changed = false;
+                if let Some(tab) = this.tabs.get_mut(this.active_tab) {
+                    if !tab.dirty {
+                        tab.dirty = true;
+                        ui_changed = true;
                     }
-                })
-                .detach();
-
-                if replace_preview {
-                    // REPLACE the current preview tab with the new file
-                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                        tab.path = Some(path.clone());
-                        tab.dirty = false;
-                        tab.untitled = false;
-                        tab.preview = true; // New file is still in preview mode
-                        tab.is_settings = false;
-                        tab.editor = Some(editor);
+                    // VS Code: editing a preview tab promotes it to permanent
+                    if tab.preview {
+                        tab.preview = false;
+                        ui_changed = true;
                     }
-                } else {
-                    // ADD a new tab in preview mode (VS Code style)
-                    self.tabs.push(OpenTab {
-                        path: Some(path.clone()),
-                        editor: Some(editor),
-                        dirty: false,
-                        untitled: false,
-                        preview: true, // New tabs start as preview
-                        is_settings: false,
-                        diff: None,
-                    });
-                    self.active_tab = self.tabs.len() - 1;
                 }
-                self.status = if highlight {
-                    path.display().to_string()
-                } else {
-                    format!("{} (plain text — large file)", display_name(&path))
-                };
+                {
+                    let mut lsp = this.lsp.lock().unwrap();
+                    if lsp.has_client(&lang_str) {
+                        let text = editor_ent.read(cx).value().to_string();
+                        lsp.change_document(&path_clone, &lang_str, text);
+                    }
+                }
+                // The editor view repaints itself. Only repaint the
+                // workspace chrome (dirty dot / preview promotion)
+                // when it actually changed, so steady-state typing
+                // doesn't rebuild the whole window (explorer, tab
+                // bar, status bar) on every keystroke.
+                if ui_changed {
+                    cx.notify();
+                }
+                let tab_idx = this.active_tab;
+                this.trigger_auto_save_after_delay(tab_idx, cx);
             }
-            Err(e) => self.status = format!("open failed: {e}"),
+        })
+        .detach();
+
+        if replace_preview {
+            // REPLACE the current preview tab with the new file
+            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                tab.path = Some(path.clone());
+                tab.dirty = false;
+                tab.untitled = false;
+                tab.preview = true; // New file is still in preview mode
+                tab.is_settings = false;
+                tab.editor = Some(editor);
+            }
+        } else {
+            // ADD a new tab in preview mode (VS Code style)
+            self.tabs.push(OpenTab {
+                path: Some(path.clone()),
+                editor: Some(editor),
+                dirty: false,
+                untitled: false,
+                preview: true, // New tabs start as preview
+                is_settings: false,
+                diff: None,
+            });
+            self.active_tab = self.tabs.len() - 1;
         }
+        self.status = if highlight {
+            path.display().to_string()
+        } else {
+            format!("{} (plain text — large file)", display_name(&path))
+        };
         cx.notify();
     }
 
@@ -1243,32 +1315,81 @@ impl Workspace {
             return;
         }
 
-        // Save the file
+        // Save the file (disk write runs on the background executor).
         let path = tab.path.clone().unwrap();
         let Some(editor) = &tab.editor else {
             return;
         };
         let text = editor.read(cx).value().to_string();
-        match std::fs::write(&path, text.as_bytes()) {
-            Ok(()) => {
-                tab.dirty = false;
-                // Tell the server the file hit disk: ESLint, gopls and
-                // rust-analyzer run their heavier checks on save.
-                if let Some(lang_id) = lang::language_for(&path) {
-                    self.lsp
-                        .lock()
-                        .unwrap()
-                        .save_document(&path, lang_id, &text);
-                }
-                self.git_poke();
-                if path == crate::settings::settings_file_path() {
-                    self.reload_settings(cx);
-                }
-                self.status = format!("Saved {}", display_name(&path));
-            }
-            Err(e) => self.status = format!("save failed: {e}"),
-        }
+        self.write_file_async(path, text, "Saved", cx);
         cx.notify();
+    }
+
+    /// Write `text` to `path` without blocking the UI thread (Zed performs
+    /// file saves on a background executor for exactly this reason: a slow
+    /// disk, network mount or antivirus scan must never freeze the editor).
+    ///
+    /// The bookkeeping that used to follow the synchronous write happens on
+    /// the UI thread once the write finishes:
+    /// - the dirty marker is cleared **only when the buffer still matches
+    ///   the written snapshot** — if the user kept typing during the write,
+    ///   the newer text correctly stays dirty;
+    /// - the language server receives `didSave` (ESLint, gopls and
+    ///   rust-analyzer run their heavier checks on save);
+    /// - git status is poked and `settings.json` is reloaded when it was the
+    ///   saved file.
+    fn write_file_async(
+        &mut self,
+        path: PathBuf,
+        text: String,
+        done_label: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        self.status = format!("Saving {}…", display_name(&path));
+        cx.spawn(async move |this, cx| {
+            let write_path = path.clone();
+            let write_text = text.clone();
+            let result = cx
+                .background_spawn(
+                    async move { std::fs::write(&write_path, write_text.as_bytes()) },
+                )
+                .await;
+            let _ = this.update(cx, |workspace, cx| {
+                match result {
+                    Ok(()) => {
+                        if let Some(tab) = workspace
+                            .tabs
+                            .iter_mut()
+                            .find(|t| t.path.as_ref() == Some(&path))
+                        {
+                            if let Some(editor) = &tab.editor {
+                                if editor.read(cx).value().to_string() == text {
+                                    tab.dirty = false;
+                                }
+                            }
+                        }
+                        // Tell the server the file hit disk.
+                        if let Some(lang_id) = lang::language_for(&path) {
+                            workspace
+                                .lsp
+                                .lock()
+                                .unwrap()
+                                .save_document(&path, lang_id, &text);
+                        }
+                        workspace.git_poke();
+                        if path == crate::settings::settings_file_path() {
+                            workspace.reload_settings(cx);
+                        }
+                        workspace.status = format!("{done_label} {}", display_name(&path));
+                    }
+                    Err(e) => {
+                        workspace.status = format!("save failed: {e}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn save_as(&mut self, cx: &mut Context<Self>) {
@@ -2669,6 +2790,7 @@ impl Workspace {
             rel: rel.clone(),
             staged,
             text: None,
+            parsed: None,
             error: None,
         };
         self.tabs.push(OpenTab {
@@ -2687,14 +2809,16 @@ impl Workspace {
             format!("Diff: {}", display_name(path))
         };
 
-        // Load the diff text in the background.
+        // Load the diff text in the background and parse it there too —
+        // the word-level intra-line diff is the expensive part, and the UI
+        // thread only ever needs the finished row snapshot.
         let tab_path = path.to_path_buf();
         cx.spawn(async move |this, cx| {
             let tab_path_bg = tab_path.clone();
-            let text = cx
+            let (text, parsed) = cx
                 .background_spawn(async move {
                     let raw = git::diff(&root, &rel, staged).unwrap_or_default();
-                    if !raw.trim().is_empty() {
+                    let text = if !raw.trim().is_empty() {
                         Some(raw)
                     } else {
                         // Untracked files have no git diff yet — show the
@@ -2702,7 +2826,11 @@ impl Workspace {
                         std::fs::read_to_string(&tab_path_bg)
                             .ok()
                             .map(|content| git::new_file_diff(&rel, &content))
-                    }
+                    };
+                    let parsed = text
+                        .as_deref()
+                        .map(|t| Arc::new(crate::ui::diff::parse_diff(t)));
+                    (text, parsed)
                 })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
@@ -2713,6 +2841,7 @@ impl Workspace {
                 {
                     if let Some(diff) = &mut tab.diff {
                         diff.text = text;
+                        diff.parsed = parsed;
                         diff.error = None;
                     }
                     cx.notify();
@@ -2738,16 +2867,20 @@ impl Workspace {
         let tab_path = diff.path.clone();
         cx.spawn(async move |this, cx| {
             let tab_path_bg = tab_path.clone();
-            let text = cx
+            let (text, parsed) = cx
                 .background_spawn(async move {
                     let raw = git::diff(&root, &rel, staged).unwrap_or_default();
-                    if !raw.trim().is_empty() {
+                    let text = if !raw.trim().is_empty() {
                         Some(raw)
                     } else {
                         std::fs::read_to_string(&tab_path_bg)
                             .ok()
                             .map(|content| git::new_file_diff(&rel, &content))
-                    }
+                    };
+                    let parsed = text
+                        .as_deref()
+                        .map(|t| Arc::new(crate::ui::diff::parse_diff(t)));
+                    (text, parsed)
                 })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
@@ -2758,6 +2891,7 @@ impl Workspace {
                 {
                     if let Some(diff) = &mut tab.diff {
                         diff.text = text;
+                        diff.parsed = parsed;
                     }
                     cx.notify();
                 }
@@ -2881,6 +3015,8 @@ impl Workspace {
     }
 
     /// Quietly saves a single tab by index if dirty and has a valid path.
+    /// The disk write itself runs in the background (see
+    /// [`Self::write_file_async`]); returns `true` when a save was started.
     pub(crate) fn save_tab_quiet(&mut self, idx: usize, cx: &mut Context<Self>) -> bool {
         let Some(tab) = self.tabs.get_mut(idx) else {
             return false;
@@ -2893,24 +3029,8 @@ impl Workspace {
             return false;
         };
         let text = editor.read(cx).value().to_string();
-        if std::fs::write(&path, text.as_bytes()).is_ok() {
-            tab.dirty = false;
-            if let Some(lang_id) = lang::language_for(&path) {
-                self.lsp
-                    .lock()
-                    .unwrap()
-                    .save_document(&path, lang_id, &text);
-            }
-            self.git_poke();
-            if path == crate::settings::settings_file_path() {
-                self.reload_settings(cx);
-            }
-            self.status = format!("Auto-saved {}", display_name(&path));
-            cx.notify();
-            true
-        } else {
-            false
-        }
+        self.write_file_async(path, text, "Auto-saved", cx);
+        true
     }
 
     /// Saves all dirty tabs that have a file path on disk.
@@ -2927,6 +3047,12 @@ impl Workspace {
     }
 
     /// Triggers auto-save after debounce delay when typing stops.
+    ///
+    /// The wait uses the executor's async `timer` (Zed-style) instead of a
+    /// blocking `thread::sleep` inside a background task: sleeping tasks
+    /// occupy a worker thread for the whole delay, so a fast typist could
+    /// pile up a dozen of them and starve the pool that also runs LSP
+    /// requests and file scans.
     pub(crate) fn trigger_auto_save_after_delay(&mut self, _tab_idx: usize, cx: &mut Context<Self>) {
         if self.settings.editor_auto_save != crate::settings::AutoSaveMode::AfterDelay {
             return;
@@ -2936,10 +3062,7 @@ impl Workspace {
         let delay = std::time::Duration::from_millis(self.settings.editor_auto_save_delay);
 
         cx.spawn(async move |this, cx| {
-            cx.background_spawn(async move {
-                std::thread::sleep(delay);
-            })
-            .await;
+            cx.background_executor().timer(delay).await;
 
             let _ = this.update(cx, |workspace, cx| {
                 if workspace.auto_save_generation == current_gen {

@@ -430,6 +430,16 @@ pub struct TerminalView {
 
     /// Most recent rendered bounds of the terminal canvas
     last_bounds: Arc<parking_lot::Mutex<Bounds<Pixels>>>,
+
+    /// Whether `renderer.cell_width` / `renderer.cell_height` have been
+    /// measured against the current font configuration.
+    ///
+    /// Measuring shapes a reference glyph through the text system, which is
+    /// far too expensive to run on every frame. It is only redone when the
+    /// font family, size, or line-height multiplier actually changes
+    /// (see [`Self::update_config`]), matching Zed's approach of caching
+    /// font metrics per font configuration.
+    cell_metrics_valid: bool,
 }
 
 impl TerminalView {
@@ -565,6 +575,7 @@ impl TerminalView {
             mouse_down_button: None,
             last_reported_cell: None,
             last_bounds: Arc::new(parking_lot::Mutex::new(Bounds::default())),
+            cell_metrics_valid: false,
         }
     }
 
@@ -1404,6 +1415,12 @@ impl TerminalView {
     /// * `config` - The new configuration to apply
     /// * `cx` - The context for triggering a repaint
     pub fn update_config(&mut self, config: TerminalConfig, cx: &mut Context<Self>) {
+        // Detect whether the change affects glyph metrics. Palette-only
+        // changes (a theme switch) must not force a re-measure.
+        let metrics_changed = self.renderer.font_family != config.font_family
+            || self.renderer.font_size != config.font_size
+            || self.renderer.line_height_multiplier != config.line_height_multiplier;
+
         // Update renderer with new font settings and palette
         self.renderer.font_family = config.font_family.clone();
         self.renderer.font_size = config.font_size;
@@ -1413,7 +1430,13 @@ impl TerminalView {
         // Store the new config
         self.config = config;
 
-        // Trigger a repaint - cell dimensions will be recalculated via measure_cell()
+        if metrics_changed {
+            // Invalidate cached cell dimensions; they are recomputed on the
+            // next render (which has a window handle for the text system).
+            self.cell_metrics_valid = false;
+        }
+
+        // Trigger a repaint.
         cx.notify();
     }
 
@@ -1437,6 +1460,14 @@ impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Process any pending events
         self.process_events(window, cx);
+
+        // Measure cell dimensions once per font configuration, not once per
+        // frame: shaping the reference glyph on every paint was the biggest
+        // steady-state cost of an idle terminal.
+        if !self.cell_metrics_valid {
+            self.renderer.measure_cell(window);
+            self.cell_metrics_valid = true;
+        }
 
         // Get terminal state and renderer for rendering
         let state_arc = self.state.term_arc();
@@ -1467,17 +1498,16 @@ impl Render for TerminalView {
                         *last_bounds.lock() = bounds;
                         use alacritty_terminal::grid::Dimensions;
 
-                        // Measure actual cell dimensions from the font
-                        let mut measured_renderer = renderer.clone();
-                        measured_renderer.measure_cell(window);
+                        // `renderer` already carries measured cell dimensions
+                        // (computed once per font configuration in `render`).
 
                         // Calculate available space after padding
                         let available_width: f32 =
                             (bounds.size.width - padding.left - padding.right).into();
                         let available_height: f32 =
                             (bounds.size.height - padding.top - padding.bottom).into();
-                        let cell_width_f32: f32 = measured_renderer.cell_width.into();
-                        let cell_height_f32: f32 = measured_renderer.cell_height.into();
+                        let cell_width_f32: f32 = renderer.cell_width.into();
+                        let cell_height_f32: f32 = renderer.cell_height.into();
 
                         let cols = ((available_width / cell_width_f32) as usize).max(1);
                         let rows = ((available_height / cell_height_f32) as usize).max(1);
@@ -1521,7 +1551,7 @@ impl Render for TerminalView {
                         }
 
                         // Paint the terminal with measured dimensions, selection highlight, and focus
-                        measured_renderer.paint(
+                        renderer.paint(
                             bounds,
                             padding,
                             &term,

@@ -68,7 +68,8 @@ use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::vte::ansi::Color;
 use gpui::{
     App, Bounds, Edges, Font, FontFeatures, FontStyle, FontWeight, Hsla, Pixels, Point, Size,
-    StrikethroughStyle, TextRun, UnderlineStyle, Window, px, quad, transparent_black,
+    SharedString, StrikethroughStyle, TextRun, UnderlineStyle, Window, px, quad,
+    transparent_black,
 };
 
 /// A batched run of text with consistent styling.
@@ -1051,14 +1052,19 @@ impl TerminalRenderer {
             }
         }
 
-        // 3. Paint batched text runs using monospace cell_width hint (Zed technique)
+        // 3. Paint batched text runs using monospace cell_width hint (Zed technique).
+        // The font family string is converted to a SharedString once and cheaply
+        // reference-counted per run, rather than re-cloning + re-interning the
+        // family name for every run on every frame.
+        let font_family: SharedString = self.font_family.clone().into();
+        let font_features = FontFeatures::disable_ligatures();
         for run in batched_text_runs {
             let x = origin.x + self.cell_width * (run.start_col as f32);
             let y = origin.y + self.cell_height * (run.row as f32);
 
             let font = Font {
-                family: self.font_family.clone().into(),
-                features: FontFeatures::disable_ligatures(),
+                family: font_family.clone(),
+                features: font_features.clone(),
                 fallbacks: None,
                 weight: if run.bold {
                     FontWeight::BOLD

@@ -22,6 +22,11 @@ struct CompiledLanguageQuery {
     query: Arc<Query>,
     injection_queries: HashMap<SharedString, Arc<Query>>,
     injection_content_capture_index: Option<u32>,
+    /// Capture name per capture index, interned once per language.
+    /// Highlighting runs this for every visible token on every repaint;
+    /// without interning, each capture allocated a fresh `String` +
+    /// `SharedString`.
+    capture_names: Vec<SharedString>,
 }
 
 /// A syntax highlighter that supports incremental parsing, multiline text,
@@ -221,6 +226,15 @@ impl SyntaxHighlighter {
             }
         }
 
+        // Intern capture names once per language so the per-frame, per-token
+        // highlight pass can clone a reference-counted SharedString instead
+        // of re-allocating each name.
+        let capture_names: Vec<SharedString> = query
+            .capture_names()
+            .iter()
+            .map(|name| SharedString::from(name.to_string()))
+            .collect();
+
         let mut injection_queries = HashMap::new();
         for inj_language in config.injection_languages.iter() {
             if let Some(inj_config) = LanguageRegistry::singleton().language(&inj_language) {
@@ -243,6 +257,7 @@ impl SyntaxHighlighter {
             query: Arc::new(query),
             injection_queries,
             injection_content_capture_index,
+            capture_names,
         });
 
         cache.insert(config.name.clone(), Arc::clone(&compiled));
@@ -333,12 +348,12 @@ impl SyntaxHighlighter {
             for cap in query_match.captures {
                 let node = cap.node;
 
-                let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
+                let Some(highlight_name) = compiled.capture_names.get(cap.index as usize) else {
                     continue;
                 };
 
                 let node_range: Range<usize> = node.start_byte()..node.end_byte();
-                let highlight_name = SharedString::from(highlight_name.to_string());
+                let highlight_name = highlight_name.clone();
 
                 // Merge near range and same highlight name
                 let last_item = highlights.last();

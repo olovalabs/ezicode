@@ -7,6 +7,13 @@ resolver = "2"
 [profile.dev.package."*"]
 opt-level = 2
 
+# Release builds ship like Zed's: full optimizations, one codegen unit and
+# LTO so the LLVM backend can inline across the GPUI/tree-sitter boundary.
+# Costs build time, not runtime — exactly the trade Zed makes.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
 # Vendored copy of gpui-component 0.5.1 with fixes for two highlight-range
 # crashes (see components/gpui-component/src/input/element.rs and
 # popovers/completion_menu.rs): ranges ending one byte past the text tripped

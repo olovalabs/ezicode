@@ -153,7 +153,172 @@ calling `display_name(root)` per frame.
 2. **Explorer runtime check** — verify scroll-wheel behavior and keyboard
    focus with the exact desktop backend; the list now uses GPUI's verified
    `uniform_list` primitive.
-3. **Incremental LSP sync** (issue #3) — switch `content_changes` from
-   `range: None` to edit ranges once the editor exposes them.
+3. **Incremental LSP sync** (issue #3) — ~~switch `content_changes` from
+   `range: None` to edit ranges~~ **done in round 2** (see #13): sync is now
+   incremental whenever the server advertises it.
 4. Optional runtime check: `EZICODE_PERF=1 cargo run` exists for measuring the
    explorer reload cost against `perf::stat_count()`.
+
+---
+---
+
+# Round 2 — deep Zed-inspired pass (2026-09-09)
+
+A second full-codebase audit (`app/`, `components/`, `gpui-terminal/`),
+implemented against the same constraint as round 1 (no toolchain in the
+sandbox → every change uses only APIs already exercised elsewhere in this
+tree). All round-1 fixes were found in place and intact; the incremental-sync
+follow-up from round 1 had also already been completed (diffed
+`didChange` with ranged edits, covered by tests in `lsp/client.rs`).
+
+| # | Severity | Status | Issue |
+|---|----------|--------|-------|
+| 10 | 🔴 High | ✅ Fixed | Terminal re-shaped its font metrics glyph **every frame** |
+| 11 | 🔴 High | ✅ Fixed | Diff view re-ran the word-level diff parser on **every repaint** |
+| 12 | 🔴 High | ✅ Fixed | `open_file` / `save` did blocking disk I/O on the UI thread |
+| 13 | 🟠 Medium | ✅ Fixed | Auto-save debounce parked a worker thread per keystroke |
+| 14 | 🟠 Medium | ✅ Fixed | Git watcher spawned 2–3 processes per poll instead of 1 |
+| 15 | 🟠 Medium | ✅ Fixed | 3 whole-buffer copies per keystroke on the LSP sync path |
+| 16 | 🟡 Low | ✅ Fixed | Shebang detection read the *entire* file |
+| 17 | 🟡 Low | ✅ Fixed | Per-token `String`→`SharedString` allocations in the highlighter |
+| 18 | 🟡 Low | ✅ Fixed | Per-run font-family re-interning in the terminal painter |
+| 19 | 🔵 Build | ✅ Fixed | Release profile had no LTO / default codegen units |
+
+## 10. ✅ Terminal font metrics: measure once per font config, not per frame
+
+**`gpui-terminal/src/view.rs`** — the canvas paint closure called
+`measure_cell(window)` on *every frame*, shaping a reference glyph through
+the text system even while the terminal was idle — the single biggest
+steady-state cost of the terminal panel. `TerminalView` now carries a
+`cell_metrics_valid` flag; metrics are (re)measured in `render()` only when
+`update_config` saw a family/size/line-height change. Theme switches
+(palette-only) no longer re-measure. This mirrors Zed, which caches font
+metrics per font configuration in its terminal element.
+
+## 11. ✅ Diff view: parse once on a background thread, share via `Arc`
+
+**`app/src/ui/diff.rs` + `app/src/workspace/mod.rs`** — `render_diff_view`
+ran `parse_side_by_side_diff` (which includes the expensive word-level
+intra-line diffing) on **every workspace repaint** while a diff tab was
+open: git status refreshes, theme switches, panel toggles all re-parsed the
+entire diff. Now:
+
+- `DiffTab` stores `parsed: Option<Arc<ParsedDiff>>` next to the raw text.
+- Both loaders (`open_diff`, `refresh_active_diff`) parse on the same
+  background task that produces the diff text.
+- Repaints clone the cached row snapshot (cheap struct clones) instead of
+  re-running the parser. Zed's diff view likewise keeps a parsed
+  representation and re-renders from it.
+
+## 12. ✅ File open/save off the UI thread (Zed-style async I/O)
+
+**`app/src/workspace/mod.rs`** —
+
+- `open_file` used to `std::fs::read` (up to 8 MB), null-scan, UTF-8 decode
+  and language-detect **synchronously on the UI thread**, then cloned the
+  whole buffer once more for `set_value`. Now `load_buffer_file` runs all of
+  that on the background executor; `finish_open_file` creates the editor on
+  the UI thread when the load completes, re-checks the file wasn't opened
+  again in flight, and **moves** the decoded text into the editor (one fewer
+  full-buffer copy per open).
+- `save` / `save_tab_quiet` wrote the file synchronously (`std::fs::write`),
+  freezing the window for the whole write on slow disks or network mounts.
+  `write_file_async` now writes on the background executor and does the
+  bookkeeping on completion: the dirty marker is cleared only when the
+  buffer still matches the written snapshot (typing during an in-flight
+  save correctly stays dirty), `didSave` goes to the language server, git is
+  poked, and `settings.json` reload still fires. Zed performs buffer saves
+  on its background executor for exactly this reason.
+- `save_as` intentionally keeps its synchronous write: it already follows a
+  blocking native dialog and must settle the tab path before the LSP attach.
+
+## 13. ✅ Auto-save: async executor timer instead of sleeping worker threads
+
+**`app/src/workspace/mod.rs`** — the debounce waited via
+`background_spawn(thread::sleep(delay))`: every keystroke parked one of the
+executor's worker threads for the whole delay (default 1 s), so a fast
+typist accumulated a dozen sleeping threads that could starve the same pool
+running LSP requests and directory scans. Now it awaits
+`cx.background_executor().timer(delay)` (the same primitive the component
+library already uses), which schedules the wake-up without holding a thread.
+
+## 14. ✅ Git status: one process per poll
+
+**`app/src/git.rs`** — the watcher thread polls every ~1.5 s and used to
+spawn `git status` **plus** `git rev-parse --abbrev-ref` (and on a detached
+HEAD a second `rev-parse --short`): up to 3 process spawns per poll.
+`status()` now passes `--branch`, parses the `## <branch>` header record
+(including `No commits yet on …` and upstream/tracking suffixes), and only
+falls back to `rev-parse` in the rare detached-HEAD case — halving the
+steady-state process churn. `parse_porcelain` skips the header record (its
+third byte is a space too and would otherwise parse as a bogus `##` change);
+new tests pin the header shapes.
+
+## 15. ✅ LSP sync path: 3 → 2 whole-buffer copies per keystroke
+
+**`app/src/lsp/client.rs`** — per keystroke the workspace materialized the
+buffer once (`value().to_string()`), then `did_change` cloned it into
+`last_texts` **and** again into `pending_changes`. `change_document` /
+`did_change` now take an owned `String`: one clone feeds `last_texts`, the
+original moves into `pending_changes`. On a 400 KB file that is ~400 KB less
+memcpy per keystroke. (The workspace read itself can't go lower — the editor
+rope is UI-thread-only and the LSP maps live behind `Mutex`.)
+
+## 16. ✅ Shebang detection: read 256 bytes, not the whole file
+
+**`app/src/lang.rs`** — `shebang_language` used `std::fs::read` on the entire
+file just to look at its first line, so opening a huge extension-less file
+(log, dump, minified bundle) paid a full read for language detection. It now
+opens the file and reads one 256-byte block. Also removed the unconditional
+`to_ascii_lowercase()` allocation in `language_for` (it runs on every render
+for the status bar's language label): the extension is only folded when it
+actually contains uppercase letters.
+
+## 17. ✅ Highlighter: intern tree-sitter capture names per language
+
+**`components/src/highlighter/highlighter.rs`** — the visible-range
+highlight pass ran `SharedString::from(name.to_string())` for **every
+capture on every repaint** — two allocations per visible token. Capture
+names are fixed per compiled query, so `CompiledLanguageQuery` now interns
+them once (`capture_names: Vec<SharedString>`); the hot loop clones a
+refcount instead. Zed likewise interns its highlight-name strings.
+
+## 18. ✅ Terminal painter: hoist font-family interning out of the run loop
+
+**`gpui-terminal/src/render.rs`** — each batched text run converted the font
+family `String` → `SharedString` (allocation) and rebuilt the
+`FontFeatures`. The family is now converted once per frame and cloned by
+refcount per run; the ligature-disable features value is built once and
+cloned. Same visuals, fewer per-frame allocations on busy terminal output.
+
+## 19. ✅ Release profile: LTO + single codegen unit
+
+**`Cargo.toml`** — added `[profile.release] lto = "thin", codegen-units = 1`
+(Zed's trade of build time for runtime: cross-crate inlining across the
+GPUI/tree-sitter boundary).
+
+## Verified-but-left-alone (why they are not problems)
+
+- **Explorer rows** — `flatten_visible` only runs on tree mutations; the
+  per-frame path is `Arc::clone` + `uniform_list` viewport rows. ✔
+- **LSP writer thread** — 120 ms `recv_timeout` wake-ups are negligible, and
+  the coalesced incremental flush is covered by unit tests. ✔
+- **Editor element (vendored)** — visible-range shaping, `longest_row`
+  shaping and line-number shaping all hit GPUI's `LineLayout` cache on
+  unchanged text; incremental tree-sitter updates already happen per edit. ✔
+- **Terminal palette lookups** — `palette.resolve` is an array index per
+  cell, and background quads are already 2D-merged before `paint_quad`. ✔
+- **`git.rs` run_git** — callers already run it on background threads. ✔
+
+## Round-2 items that still need human/CI verification
+
+1. `cargo build -p app && cargo test -p app && cargo clippy -p app` (still no
+   toolchain in this sandbox). Highest-risk spots to eyeball: the
+   `spawn_in`/`update_in` dance in `open_file`/`finish_open_file`, the borrow
+   ordering in `save`/`save_tab_quiet`/`write_file_async`, and the terminal
+   `cell_metrics_valid` invalidation paths.
+2. Runtime check that the first terminal paint after a font-size zoom
+   re-measures correctly (Ctrl+= / Ctrl-- is currently editor-only, so the
+   practical path is a theme or config change).
+3. Soak test: type fast with `editor.autoSave: "afterDelay"` enabled and a
+   language server running — should no longer saturate the background pool.
