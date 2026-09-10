@@ -136,6 +136,7 @@ fn main() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitleBar::title_bar_options()),
                     window_decorations: Some(WindowDecorations::Client),
+                    app_id: Some("ezicode".to_string()),
                     ..Default::default()
                 },
                 |window, cx| {

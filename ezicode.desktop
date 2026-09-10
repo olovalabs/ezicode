@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=ezicode
+GenericName=Code Editor
+Comment=Fast, modern code editor powered by GPUI
+Exec=app %F
+Icon=ezicode
+Terminal=false
+Type=Application
+Categories=Development;IDE;TextEditor;
+StartupWMClass=ezicode
+MimeType=text/plain;inode/directory;

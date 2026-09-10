@@ -1,8 +1,8 @@
-use std::path::Path;
+#[cfg(windows)]
+mod windows_res {
+    use std::path::Path;
 
-fn main() {
-    if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows" {
-
+    pub fn embed() {
         let ico_path = if Path::new("assets/logo/ezicode.ico").exists() {
             "assets/logo/ezicode.ico"
         } else if Path::new("app/assets/logo/ezicode.ico").exists() {
@@ -25,6 +25,11 @@ fn main() {
             }
         }
     }
+}
+
+fn main() {
+    #[cfg(windows)]
+    windows_res::embed();
 
     println!("cargo:rerun-if-changed=assets/logo/ezicode.ico");
     println!("cargo:rerun-if-changed=assets/logo/ezicode.png");
