@@ -1,12 +1,12 @@
 use gpui::{
-    AnyElement, App, Bounds, Context, Corner, DismissEvent, ElementId, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement,
-    Pixels, Point, Render, RenderOnce, StyleRefinement, Styled, Subscription, Window, anchored,
-    canvas, deferred, div, prelude::FluentBuilder as _, px,
+    anchored, canvas, deferred, div, prelude::FluentBuilder as _, px, AnyElement, App, Bounds,
+    Context, Corner, DismissEvent, ElementId, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement, Pixels, Point,
+    Render, RenderOnce, StyleRefinement, Styled, Subscription, Window,
 };
 use std::rc::Rc;
 
-use crate::{Selectable, StyledExt as _, actions::Cancel, v_flex};
+use crate::{actions::Cancel, v_flex, Selectable, StyledExt as _};
 
 const CONTEXT: &str = "Popover";
 pub(crate) fn init(cx: &mut App) {
@@ -38,7 +38,6 @@ pub struct Popover {
 }
 
 impl Popover {
-
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -304,6 +303,7 @@ impl RenderOnce for Popover {
             .on_mouse_down(self.mouse_button, {
                 let state = state.clone();
                 move |_, window, cx| {
+                    cx.stop_propagation();
                     state.update(cx, |state, cx| {
                         // We force set open to false to toggle it correctly.
                         // Because if the mouse down out will toggle open first.
