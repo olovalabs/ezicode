@@ -1,14 +1,13 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
-    white,
+    h_flex, white, ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt,
 };
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Decorations, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, TitlebarOptions, Window, WindowControlArea, div,
-    prelude::FluentBuilder as _, px,
+    div, prelude::FluentBuilder as _, px, AnyElement, App, ClickEvent, Context, Decorations, Hsla,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
+    Pixels, Point, Render, RenderOnce, StatefulInteractiveElement as _, StyleRefinement, Styled,
+    TitlebarOptions, Window, WindowControlArea,
 };
 use smallvec::SmallVec;
 
@@ -55,7 +54,6 @@ pub struct TitleBar {
 }
 
 impl TitleBar {
-
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
@@ -222,7 +220,9 @@ impl ControlIcon {
         caption_font.fallbacks = Some(gpui::FontFallbacks::from_fonts(vec![
             caption_font_fallback().to_string(),
         ]));
-        div().id(self.id()).font(caption_font)
+        div()
+            .id(self.id())
+            .font(caption_font)
             .flex()
             .justify_center()
             .content_center()
@@ -290,7 +290,6 @@ impl ControlIcon {
 
 impl RenderOnce for ControlIcon {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-
         match PlatformStyle::platform() {
             PlatformStyle::Windows => self.render_windows_button(window, cx).into_any_element(),
             PlatformStyle::Linux => self.render_linux_button(cx).into_any_element(),
@@ -307,7 +306,6 @@ struct WindowControls {
 
 impl RenderOnce for WindowControls {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
-
         match PlatformStyle::platform() {
             PlatformStyle::Mac => return div().id("window-controls"),
             _ => {}
@@ -323,7 +321,6 @@ impl RenderOnce for WindowControls {
 
         let supported = window.window_controls();
         let show_minimize = match PlatformStyle::platform() {
-
             PlatformStyle::Linux => supported.minimize,
             _ => true,
         };
@@ -381,7 +378,7 @@ impl ParentElement for TitleBar {
 }
 
 struct TitleBarState {
-    should_move: bool,
+    mouse_down_pos: Option<Point<Pixels>>,
 }
 
 impl Render for TitleBarState {
@@ -397,7 +394,9 @@ impl RenderOnce for TitleBar {
         let is_linux = platform_style == PlatformStyle::Linux;
         let is_macos = platform_style == PlatformStyle::Mac;
 
-        let state = window.use_state(cx, |_, _| TitleBarState { should_move: false });
+        let state = window.use_state(cx, |_, _| TitleBarState {
+            mouse_down_pos: None,
+        });
 
         div().flex_shrink_0().child(
             div()
@@ -419,26 +418,39 @@ impl RenderOnce for TitleBar {
                     this.on_double_click(|_, window, _| window.titlebar_double_click())
                 })
                 .on_mouse_down_out(window.listener_for(&state, |state, _, _, _| {
-                    state.should_move = false;
+                    state.mouse_down_pos = None;
                 }))
                 .on_mouse_down(
                     MouseButton::Left,
-                    window.listener_for(&state, |state, _, _, _| {
-                        state.should_move = true;
+                    window.listener_for(&state, |state, ev: &MouseDownEvent, _, _| {
+                        state.mouse_down_pos = Some(ev.position);
                     }),
                 )
                 .on_mouse_up(
                     MouseButton::Left,
                     window.listener_for(&state, |state, _, _, _| {
-                        state.should_move = false;
+                        state.mouse_down_pos = None;
                     }),
                 )
-                .on_mouse_move(window.listener_for(&state, |state, _, window, _| {
-                    if state.should_move {
-                        state.should_move = false;
-                        window.start_window_move();
-                    }
-                }))
+                .on_mouse_move(window.listener_for(
+                    &state,
+                    |state, ev: &MouseMoveEvent, window, _| {
+                        if ev.pressed_button != Some(MouseButton::Left) {
+                            state.mouse_down_pos = None;
+                            return;
+                        }
+                        if let Some(start_pos) = state.mouse_down_pos {
+                            let dx = (ev.position.x - start_pos.x).to_f64();
+                            let dy = (ev.position.y - start_pos.y).to_f64();
+                            // Drag threshold of 8px (8^2 = 64) avoids micro-jitter on clicks
+                            // triggering premature window movement or unmaximizing.
+                            if dx * dx + dy * dy >= 64.0 {
+                                state.mouse_down_pos = None;
+                                window.start_window_move();
+                            }
+                        }
+                    },
+                ))
                 .child(
                     h_flex()
                         .id("bar")

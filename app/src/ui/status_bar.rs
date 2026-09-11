@@ -3,10 +3,8 @@ use gpui::{div, prelude::*, px, rgba, svg, FontWeight, IntoElement, SharedString
 use crate::theme::Colors;
 
 #[allow(clippy::too_many_arguments)]
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LspIndicator {
-
     pub server: Option<&'static str>,
     pub state: Option<crate::lsp::ServerStatus>,
 }
@@ -18,9 +16,7 @@ impl LspIndicator {
         match (&self.state, self.server) {
             (Some(Running), Some(name)) => ("●", t.vc_added, name.to_string()),
             (Some(Starting), Some(name)) => ("◐", t.vc_modified, format!("{name}: starting…")),
-            (Some(Installing), Some(name)) => {
-                ("◌", t.vc_modified, format!("{name}: installing…"))
-            }
+            (Some(Installing), Some(name)) => ("◌", t.vc_modified, format!("{name}: installing…")),
             (Some(Failed(reason)), _) => ("○", t.vc_deleted, reason.clone()),
             (None, Some(name)) => ("○", t.text_muted, name.to_string()),
             _ => ("○", t.text_muted, "no language server".to_string()),
@@ -62,7 +58,6 @@ pub(crate) fn render_status_bar(
                 .flex()
                 .items_center()
                 .gap(px(12.0))
-
                 .when_some(git_branch, |bar, branch| {
                     bar.child(
                         div()
@@ -90,7 +85,6 @@ pub(crate) fn render_status_bar(
                             ),
                     )
                 })
-
                 .when_some(lang, |bar, lang| {
                     let (dot, dot_color, label) = lsp.parts(t);
                     bar.child(
@@ -105,7 +99,6 @@ pub(crate) fn render_status_bar(
                                     .child(SharedString::from(dot)),
                             )
                             .child(SharedString::from(lang.to_string()))
-
                             .child(
                                 div()
                                     .text_size(px(11.0))
@@ -115,11 +108,26 @@ pub(crate) fn render_status_bar(
                     )
                 })
                 .child(
-                    svg()
-                        .path("ui_icons/settings-gear_tint.svg")
-                        .w(px(13.0))
-                        .h(px(13.0))
-                        .text_color(rgba(t.text)),
+                    div()
+                        .id("status-settings-btn")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .rounded(px(3.0))
+                        .px(px(2.0))
+                        .py(px(1.0))
+                        .hover(|s| s.bg(rgba(t.ghost_hover)))
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(crate::actions::OpenSettings), cx);
+                        })
+                        .child(
+                            svg()
+                                .path("ui_icons/settings-gear_tint.svg")
+                                .w(px(13.0))
+                                .h(px(13.0))
+                                .text_color(rgba(t.text)),
+                        ),
                 )
                 .child(SharedString::from(theme_name.to_string()))
                 .child(SharedString::from("UTF-8"))
