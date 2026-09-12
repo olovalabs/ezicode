@@ -764,11 +764,17 @@ impl Workspace {
             .and_then(|term| term.read(cx).working_dir.clone())
             .or_else(|| self.root.clone());
 
-        let id = self.next_terminal_id;
+        let _id = self.next_terminal_id;
         self.next_terminal_id += 1;
 
         let shell_name = crate::terminal::Terminal::detect_shell_name();
-        let label = format!("{shell_name} {id}");
+        let folder = working_dir
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .or_else(|| self.root.as_ref().and_then(|p| p.file_name()).and_then(|s| s.to_str()))
+            .unwrap_or("app");
+        let label = format!("{folder} \u{2013} {shell_name}");
         let palette = self.theme().terminal_palette.clone();
         let term = cx.new(|cx| {
             crate::terminal::Terminal::new(working_dir.as_deref(), label, palette, window, cx)

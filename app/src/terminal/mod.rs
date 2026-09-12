@@ -223,17 +223,7 @@ impl Terminal {
 
     pub fn detect_shell() -> (String, String) {
         if cfg!(windows) {
-
-            for path in &[
-                r"C:\Program Files\Git\bin\bash.exe",
-                r"C:\Program Files (x86)\Git\bin\bash.exe",
-            ] {
-                if std::path::Path::new(path).exists() {
-                    return (path.to_string(), "bash".to_string());
-                }
-            }
-
-            ("powershell.exe".to_string(), "PowerShell".to_string())
+            ("powershell.exe".to_string(), "powershell.exe".to_string())
         } else {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
             let name = if shell.ends_with("zsh") {
@@ -340,6 +330,18 @@ impl Terminal {
     }
 }
 
+const TAB_BAR_BG: u32 = 0x010409ff;
+const TAB_BAR_BORDER_TOP: u32 = 0x394049ff;
+const TAB_BAR_BORDER_BOTTOM: u32 = 0x383e47ff;
+const TAB_ACTIVE_BG: u32 = 0x0d1117ff;
+const TAB_ACTIVE_BORDER_L: u32 = 0x31373fff;
+const TAB_ACTIVE_BORDER_R: u32 = 0x2c3139ff;
+const TAB_INACTIVE_BORDER_R: u32 = 0x252a31ff;
+const TAB_ACTIVE_TEXT: u32 = 0xf0f6fcff;
+const TAB_INACTIVE_TEXT: u32 = 0xc9d1d9ff;
+const TAB_INACTIVE_HOVER: u32 = 0x161b22ff;
+const TAB_CLOSE_HOVER: u32 = 0x30363dff;
+
 pub fn render_terminal_panel(
     tabs: &[Entity<Terminal>],
     active: usize,
@@ -347,7 +349,6 @@ pub fn render_terminal_panel(
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-
     let active_view = tabs
         .get(active)
         .map(|term| term.read(cx).view.clone())
@@ -357,17 +358,15 @@ pub fn render_terminal_panel(
         .size_full()
         .flex()
         .flex_col()
-        .bg(rgba(t.terminal_bg))
-
+        .bg(rgba(TAB_BAR_BG))
         .child(render_terminal_tab_bar(tabs, active, maximized, t, cx))
-
         .child(
             div()
                 .flex_1()
                 .w_full()
                 .min_h(px(0.0))
                 .overflow_hidden()
-                .bg(rgba(t.terminal_bg))
+                .bg(rgba(TAB_BAR_BG))
                 .when_some(active_view, |d, view| d.child(view)),
         )
 }
@@ -383,30 +382,11 @@ fn render_terminal_tab_bar(
         .id("terminal-tab-bar")
         .h(px(28.0))
         .w_full()
-        .px(px(6.0))
         .flex()
         .flex_row()
-        .items_center()
-        .gap(px(2.0))
-        .bg(rgba(t.toolbar))
-        .border_b_1()
-        .border_color(rgba(t.border_variant))
-        .child(
-
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(6.0))
-                .mr(px(4.0))
-                .child(
-                    svg()
-                        .path("ui_icons/terminal_tint.svg")
-                        .w(px(13.0))
-                        .h(px(13.0))
-                        .text_color(rgba(t.icon)),
-                ),
-        );
+        .bg(rgba(TAB_BAR_BG))
+        .border_t_1()
+        .border_color(rgba(TAB_BAR_BORDER_TOP));
 
     let with_tabs = tabs_root.children(tabs.iter().enumerate().map(|(idx, _)| {
         let is_active = idx == active;
@@ -417,39 +397,55 @@ fn render_terminal_tab_bar(
     }));
 
     with_tabs
-        .child(div().flex_1())
         .child(render_new_terminal_button(t, cx))
+        .child(
+            div()
+                .flex_1()
+                .h_full()
+                .border_b_1()
+                .border_color(rgba(TAB_BAR_BORDER_BOTTOM)),
+        )
+        .child(
+            div()
+                .h_full()
+                .flex()
+                .items_center()
+                .border_b_1()
+                .border_color(rgba(TAB_BAR_BORDER_BOTTOM))
+                .child(div().w(px(1.0)).h(px(14.0)).bg(rgba(0x383e47ff))),
+        )
         .child(render_maximize_terminal_button(maximized, t, cx))
         .child(render_hide_panel_button(t, cx))
 }
 
 fn render_maximize_terminal_button(
     maximized: bool,
-    t: &Colors,
+    _t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let icon_path = if maximized {
-        "window-restore.svg"
+        "ui_icons/screen_normal.svg"
     } else {
-        "window-maximize.svg"
+        "ui_icons/screen_full.svg"
     };
 
     div()
         .id("term-max-btn")
-        .w(px(22.0))
-        .h(px(20.0))
+        .w(px(28.0))
+        .h_full()
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(4.0))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(t.element_hover)))
+        .border_b_1()
+        .border_color(rgba(TAB_BAR_BORDER_BOTTOM))
+        .hover(|s| s.bg(rgba(TAB_INACTIVE_HOVER)))
         .child(
             svg()
                 .path(icon_path)
-                .w(px(11.0))
-                .h(px(11.0))
-                .text_color(rgba(t.text_muted)),
+                .w(px(14.0))
+                .h(px(14.0))
+                .text_color(rgba(0x8b949eff)),
         )
         .on_click(cx.listener(|this, _, _, cx| {
             this.toggle_terminal_maximized(cx);
@@ -461,16 +457,16 @@ fn render_terminal_tab(
     state: TerminalState,
     index: usize,
     is_active: bool,
-    t: &Colors,
+    _t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let bg = if is_active { t.tab_active_bg } else { t.tab_inactive_bg };
-    let fg = if is_active { t.tab_active_fg } else { t.tab_inactive_fg };
+    let tab_bg = if is_active { TAB_ACTIVE_BG } else { TAB_BAR_BG };
+    let text_color = if is_active { TAB_ACTIVE_TEXT } else { TAB_INACTIVE_TEXT };
 
-    let status_color = match state {
-        TerminalState::Running => 0xFF_4CAF50,
-        TerminalState::Exited(_) => 0xFF_F44336,
-        TerminalState::Error => 0xFF_FF9800,
+    let icon_path = if name.contains("bash") {
+        "file_icons/file_type_shell.svg"
+    } else {
+        "file_icons/file_type_powershell.svg"
     };
 
     let display_name = match state {
@@ -479,44 +475,54 @@ fn render_terminal_tab(
         TerminalState::Error => format!("{name} (error)"),
     };
 
-    div()
+    let mut tab = div()
         .id(("terminal-tab", index))
-        .h(px(22.0))
-        .pl(px(8.0))
-        .pr(px(4.0))
+        .w(px(180.0))
+        .h_full()
+        .pl(px(12.0))
+        .pr(px(8.0))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(4.0))
-        .rounded(px(4.0))
-        .bg(rgba(bg))
+        .gap(px(8.0))
+        .bg(rgba(tab_bg))
         .cursor_pointer()
-        .text_size(px(11.5))
-        .text_color(rgba(fg))
         .on_click(cx.listener(move |this, _, window, cx| {
             this.activate_terminal(index, window, cx);
-        }))
-        .hover(|h| if is_active { h } else { h.bg(rgba(t.element_hover)) })
+        }));
 
-        .child(
-            div()
-                .w(px(6.0))
-                .h(px(6.0))
-                .rounded_full()
-                .bg(rgba(status_color))
-                .flex_shrink_0(),
-        )
+    if is_active {
+        tab = tab
+            .border_l_1()
+            .border_color(rgba(TAB_ACTIVE_BORDER_L))
+            .border_r_1()
+            .border_color(rgba(TAB_ACTIVE_BORDER_R))
+            .border_b_1()
+            .border_color(rgba(TAB_ACTIVE_BG));
+    } else {
+        tab = tab
+            .border_r_1()
+            .border_color(rgba(TAB_INACTIVE_BORDER_R))
+            .border_b_1()
+            .border_color(rgba(TAB_BAR_BORDER_BOTTOM))
+            .hover(|h| h.bg(rgba(TAB_INACTIVE_HOVER)));
+    }
 
+    tab = tab
+        .child(crate::ui::common::icon_img(icon_path, 15.0))
         .child(
             div()
                 .child(display_name)
+                .text_size(px(12.0))
+                .text_color(rgba(text_color))
                 .overflow_x_hidden()
                 .text_ellipsis()
                 .whitespace_nowrap()
-                .max_w(px(120.0)),
-        )
+                .flex_1(),
+        );
 
-        .child(
+    if is_active {
+        tab = tab.child(
             div()
                 .id(("terminal-tab-close", index))
                 .w(px(16.0))
@@ -524,53 +530,67 @@ fn render_terminal_tab(
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(3.0))
+                .rounded(px(2.0))
                 .cursor_pointer()
-                .opacity(0.5)
-                .hover(|h| h.opacity(1.0).bg(rgba(t.element_hover)))
-                .child(div().text_size(px(11.0)).text_color(rgba(fg)).child("×"))
+                .hover(|h| h.bg(rgba(TAB_CLOSE_HOVER)))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgba(TAB_ACTIVE_TEXT))
+                        .line_height(px(11.0))
+                        .child("✕"),
+                )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.close_terminal(index, window, cx);
                 })),
-        )
+        );
+    }
+
+    tab
 }
 
-fn render_new_terminal_button(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
+fn render_new_terminal_button(_t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
     div()
         .id("term-new-btn")
-        .w(px(22.0))
-        .h(px(20.0))
+        .w(px(28.0))
+        .h_full()
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(4.0))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(t.element_hover)))
-        .text_size(px(15.0))
-        .text_color(rgba(t.text_muted))
-        .child("+")
+        .border_b_1()
+        .border_color(rgba(TAB_BAR_BORDER_BOTTOM))
+        .hover(|s| s.bg(rgba(TAB_INACTIVE_HOVER)))
+        .child(
+            div()
+                .text_size(px(14.0))
+                .text_color(rgba(0x8b949eff))
+                .line_height(px(14.0))
+                .child("+"),
+        )
         .on_click(cx.listener(|this, _, window, cx| {
             this.new_terminal(window, cx);
         }))
 }
 
-fn render_hide_panel_button(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
+fn render_hide_panel_button(_t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
     div()
         .id("term-hide-btn")
-        .w(px(22.0))
-        .h(px(20.0))
+        .w(px(28.0))
+        .h_full()
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(4.0))
         .cursor_pointer()
-        .hover(|s| s.bg(rgba(t.element_hover)))
+        .border_b_1()
+        .border_color(rgba(TAB_BAR_BORDER_BOTTOM))
+        .hover(|s| s.bg(rgba(TAB_INACTIVE_HOVER)))
         .child(
             svg()
-                .path("ui_icons/chevron-down_tint.svg")
+                .path("ui_icons/panel_close.svg")
                 .w(px(14.0))
                 .h(px(14.0))
-                .text_color(rgba(t.text_muted)),
+                .text_color(rgba(0x8b949eff)),
         )
         .on_click(cx.listener(|this, _, window, cx| {
             this.hide_terminal(window, cx);
