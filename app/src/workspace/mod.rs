@@ -567,12 +567,19 @@ impl Workspace {
     }
 
     pub(crate) fn load_root(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let switching_project = self.root.as_ref() != Some(&path);
+
         self.workspace_files_cache = None;
         self.root = Some(path.clone());
         self.root_display = display_name(&path);
         self.root_display_shared = SharedString::from(self.root_display.clone());
 
         self.lsp.lock().unwrap().set_root(Some(path.clone()));
+
+        // Opening a different folder must drop the previous project's editors.
+        if switching_project {
+            self.close_all_project_tabs(cx);
+        }
 
         self.tree.clear();
         self.explorer_section_expanded = true;
@@ -625,6 +632,29 @@ impl Workspace {
         self.start_git_watcher(&path, cx);
 
         cx.notify();
+    }
+
+    /// Close every open editor when leaving a project so the next folder
+    /// starts clean. Unsaved buffers are flushed first.
+    fn close_all_project_tabs(&mut self, cx: &mut Context<Self>) {
+        self.save_all_dirty_quiet(cx);
+
+        for tab in &self.tabs {
+            if let Some(p) = &tab.path {
+                if let Some(lang_id) = lang::language_for(p) {
+                    self.lsp.lock().unwrap().close_document(p, lang_id);
+                }
+            }
+        }
+
+        self.tabs.clear();
+        self.active_tab = 0;
+        self.diagnostics_by_path.clear();
+        self.cached_breadcrumbs = None;
+        self.pending_open = None;
+        self.picker = None;
+        self.git_commit_input = None;
+        self.git_commit_pending = false;
     }
 
     pub(crate) fn start_git_watcher(&mut self, root: &Path, cx: &mut Context<Self>) {
@@ -684,15 +714,40 @@ impl Workspace {
     }
 
     pub(crate) fn open_folder_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(path) = rfd::FileDialog::new().pick_folder() {
-            self.load_root(path, cx);
-        }
+        self.status = "Choose folder…".into();
+        cx.notify();
+        // Native dialogs pump Windows messages; run them outside the App borrow.
+        cx.spawn(async move |this, cx| {
+            let path = rfd::FileDialog::new().pick_folder();
+            let _ = this.update(cx, |workspace, cx| {
+                match path {
+                    Some(path) => workspace.load_root(path, cx),
+                    None => {
+                        workspace.status = "Open folder cancelled".into();
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn open_file_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(path) = rfd::FileDialog::new().pick_file() {
-            self.open_file(path, window, cx);
-        }
+        self.status = "Choose file…".into();
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let path = rfd::FileDialog::new().pick_file();
+            let _ = this.update_in(cx, |workspace, window, cx| {
+                match path {
+                    Some(path) => workspace.open_file(path, window, cx),
+                    None => {
+                        workspace.status = "Open file cancelled".into();
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1262,14 +1317,6 @@ impl Workspace {
     }
 
     fn save_as(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = rfd::FileDialog::new()
-            .set_file_name("untitled.txt")
-            .save_file()
-        else {
-            return;
-        };
-
-        // Get text first before mutable borrow
         let active_idx = self.active_tab;
         let text = {
             let tab = match self.tabs.get(active_idx) {
@@ -1285,36 +1332,64 @@ impl Workspace {
             editor.read(cx).value().to_string()
         };
 
-        match std::fs::write(&path, text.as_bytes()) {
-            Ok(()) => {
-                let lang_id = lang::language_for(&path).unwrap_or("text");
-                // Now update tab
-                if let Some(tab) = self.tabs.get_mut(active_idx) {
-                    tab.path = Some(path.clone());
-                    tab.untitled = false;
-                    tab.dirty = false;
-                    tab.is_settings = false;
-                    if let Some(editor) = &tab.editor {
-                        editor.update(cx, |state, cx| {
-                            state.set_highlighter(lang_id, cx);
-                        });
-                    }
-                }
-                // Bring the language server up for the new file and connect
-                // the editor's LSP providers to it.
-                if let Some(editor) = self.tabs.get(active_idx).and_then(|t| t.editor.clone()) {
-                    self.attach_language_server(&path, lang_id, &editor, cx);
-                }
-                self.selected_path = Some(path.clone());
-                if let Some(parent) = path.parent().map(|path| path.to_path_buf()) {
-                    self.reload_dir(&parent, cx);
-                }
-                self.git_poke();
-                self.status = format!("Saved {}", display_name(&path));
-            }
-            Err(e) => self.status = format!("save failed: {e}"),
-        }
+        self.status = "Choose save location…".into();
         cx.notify();
+
+        // Native save dialogs pump Windows messages; never call them while App is borrowed.
+        cx.spawn(async move |this, cx| {
+            let path = rfd::FileDialog::new()
+                .set_file_name("untitled.txt")
+                .save_file();
+
+            let Some(path) = path else {
+                let _ = this.update(cx, |workspace, cx| {
+                    workspace.status = "Save cancelled".into();
+                    cx.notify();
+                });
+                return;
+            };
+
+            let write_path = path.clone();
+            let write_text = text.clone();
+            let result = cx
+                .background_spawn(async move {
+                    std::fs::write(&write_path, write_text.as_bytes())
+                })
+                .await;
+
+            let _ = this.update(cx, move |workspace, cx| {
+                match result {
+                    Ok(()) => {
+                        let lang_id = lang::language_for(&path).unwrap_or("text");
+                        if let Some(tab) = workspace.tabs.get_mut(active_idx) {
+                            tab.path = Some(path.clone());
+                            tab.untitled = false;
+                            tab.dirty = false;
+                            tab.is_settings = false;
+                            if let Some(editor) = &tab.editor {
+                                editor.update(cx, |state, cx| {
+                                    state.set_highlighter(lang_id, cx);
+                                });
+                            }
+                        }
+                        if let Some(editor) =
+                            workspace.tabs.get(active_idx).and_then(|t| t.editor.clone())
+                        {
+                            workspace.attach_language_server(&path, lang_id, &editor, cx);
+                        }
+                        workspace.selected_path = Some(path.clone());
+                        if let Some(parent) = path.parent().map(|p| p.to_path_buf()) {
+                            workspace.reload_dir(&parent, cx);
+                        }
+                        workspace.git_poke();
+                        workspace.status = format!("Saved {}", display_name(&path));
+                    }
+                    Err(e) => workspace.status = format!("save failed: {e}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn active_tab_mut(&mut self) -> Option<&mut OpenTab> {
