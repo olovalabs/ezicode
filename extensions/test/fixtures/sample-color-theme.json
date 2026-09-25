@@ -1,0 +1,110 @@
+{
+  // A realistic (Dracula-flavoured) VS Code colour theme, written with the
+  // comments and trailing commas real themes ship with.
+  "name": "Sample Dark",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#282a36",
+    "editor.foreground": "#f8f8f2",
+    "editor.lineHighlightBackground": "#44475a75",
+    "editorLineNumber.foreground": "#6272a4",
+    "editorLineNumber.activeForeground": "#f8f8f2",
+    "editorCursor.foreground": "#f8f8f0",
+    "editor.selectionBackground": "#44475a",
+    "foreground": "#f8f8f2",
+    "descriptionForeground": "#6272a4",
+    "focusBorder": "#bd93f9",
+    "textLink.foreground": "#8be9fd",
+    "sideBar.background": "#21222c",
+    "panel.border": "#bd93f930",
+    "titleBar.activeBackground": "#21222c",
+    "statusBar.background": "#191a21",
+    "editorGroupHeader.tabsBackground": "#191a21",
+    "tab.activeBackground": "#282a36",
+    "tab.inactiveBackground": "#21222c",
+    "tab.activeForeground": "#f8f8f2",
+    "tab.inactiveForeground": "#6272a4",
+    "list.hoverBackground": "#44475a75",
+    "list.activeSelectionBackground": "#44475a",
+    "input.background": "#21222c",
+    "editorWidget.background": "#21222c",
+    "gitDecoration.addedResourceForeground": "#50fa7b",
+    "gitDecoration.modifiedResourceForeground": "#ffb86c",
+    "gitDecoration.deletedResourceForeground": "#ff5555",
+    "terminal.background": "#282a36",
+    "terminal.foreground": "#f8f8f2",
+    "terminal.ansiBlack": "#21222c",
+    "terminal.ansiRed": "#ff5555",
+    "terminal.ansiGreen": "#50fa7b",
+    "terminal.ansiYellow": "#f1fa8c",
+    "terminal.ansiBlue": "#bd93f9",
+    "terminal.ansiMagenta": "#ff79c6",
+    "terminal.ansiCyan": "#8be9fd",
+    "terminal.ansiWhite": "#f8f8f2",
+    "terminal.ansiBrightBlack": "#6272a4",
+    "terminal.ansiBrightRed": "#ff6e6e",
+    "terminal.ansiBrightGreen": "#69ff94",
+    "terminal.ansiBrightYellow": "#ffffa5",
+    "terminal.ansiBrightBlue": "#d6acff",
+    "terminal.ansiBrightMagenta": "#ff92df",
+    "terminal.ansiBrightCyan": "#a4ffff",
+    "terminal.ansiBrightWhite": "#ffffff",
+  },
+  "tokenColors": [
+    {
+      "scope": "comment",
+      "settings": { "foreground": "#6272a4", "fontStyle": "italic" }
+    },
+    {
+      "scope": ["string", "string.quoted"],
+      "settings": { "foreground": "#f1fa8c" }
+    },
+    {
+      "scope": "constant.numeric",
+      "settings": { "foreground": "#bd93f9" }
+    },
+    {
+      "scope": "constant.language.boolean",
+      "settings": { "foreground": "#bd93f9" }
+    },
+    {
+      "scope": "keyword",
+      "settings": { "foreground": "#ff79c6" }
+    },
+    {
+      "scope": "keyword.operator",
+      "settings": { "foreground": "#ff79c6" }
+    },
+    {
+      "scope": "entity.name.function",
+      "settings": { "foreground": "#50fa7b", "fontStyle": "bold" }
+    },
+    {
+      "scope": "entity.name.type",
+      "settings": { "foreground": "#8be9fd", "fontStyle": "italic" }
+    },
+    {
+      "scope": "variable.parameter",
+      "settings": { "foreground": "#ffb86c", "fontStyle": "italic" }
+    },
+    {
+      "scope": "entity.name.tag",
+      "settings": { "foreground": "#ff79c6" }
+    },
+    {
+      "scope": "entity.other.attribute-name",
+      "settings": { "foreground": "#50fa7b" }
+    },
+    {
+      "scope": "constant.character.escape",
+      "settings": { "foreground": "#ff79c6" }
+    },
+    {
+      "scope": "punctuation",
+      "settings": { "foreground": "#f8f8f2" }
+    },
+  ],
+  "semanticTokenColors": {
+    "property": "#ffb86c"
+  }
+}

@@ -76,6 +76,16 @@ _Combining the raw speed and hardware-accelerated rendering of Zed with the frie
 - **Curated Typography**: Pre-bundled with **IBM Plex Sans** (for UI) and **Lilex** (for the code buffer and terminal), automatically registered with GPUI at launch.
 - **Rich File Icons**: Zed's complete SVG icon theme mapping file extensions to high-fidelity icons.
 
+### 🧩 VS Code-Compatible Extensions
+
+- **Install Real `.vsix` Extensions**: `ezicode-ext install <publisher.name>` pulls from the [Open VSX](https://open-vsx.org) registry (the vendor-neutral registry VSCodium, Gitpod and Theia use) or from any local `.vsix`.
+- **Any VS Code Colour Theme**: Themes are converted to ezicode's format at install time — workbench colours, the 16 ANSI terminal colours and TextMate `tokenColors` (italics and bolds included) all come across, and the theme appears in the theme menu on next launch.
+- **A Real Extension Host**: Extensions run unmodified against a `vscode` API shim in an isolated Node process, talking JSON-RPC to the editor — commands, messages, status bar items, quick picks, hovers, completions, formatters and diagnostics. A wedged extension can never block a GPUI frame.
+- **Author Without a Toolchain**: `ezicode-ext link ./my-extension` for the dev loop, `ezicode-ext pack` to build a `.vsix` — no `vsce`, no `node_modules`.
+- **Know Before You Install**: `ezicode-ext inspect <id>` reports, contribution point by contribution point, what ezicode supports in that extension.
+
+See [`docs/extensions/README.md`](docs/extensions/README.md) for the architecture, the supported API surface and the roadmap.
+
 ---
 
 ## 🚀 Quick Start
@@ -264,6 +274,7 @@ ezicode/
 │   │   └── ui_icons/         # Activity bar & panel glyphs
 │   └── src/
 │       ├── actions.rs        # GPUI actions and command declarations
+│       ├── extensions/       # Installed-extension discovery & theme contributions
 │       ├── fs_tree.rs        # Virtualized file tree model & filesystem ops
 │       ├── git.rs            # Native Git porcelain parser and process runner
 │       ├── lang.rs           # Language detection & LSP server mapping
@@ -273,6 +284,12 @@ ezicode/
 │       ├── ui/               # UI components: tabs, status bar, diffs, settings
 │       └── workspace/        # Main workspace entity, state management & render loop
 ├── components/               # Vendored and optimized GPUI components
+├── docs/extensions/          # Extension architecture, API coverage & roadmap
+├── extensions/               # `ezicode-ext` CLI, VSIX tooling & the Node extension host
+│   ├── bin/                  # ezicode-ext command line entry point
+│   ├── examples/             # Sample VS Code extension used by the tests
+│   ├── src/host/             # Extension host process & the `vscode` API shim
+│   └── test/                 # node --test suite (no dependencies)
 ├── gpui-terminal/            # Alacritty terminal emulator bindings for GPUI
 ├── run.cmd                   # Windows developer helper script
 ├── run.sh                    # Unix developer helper script

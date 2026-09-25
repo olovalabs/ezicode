@@ -1,5 +1,6 @@
 mod actions;
 mod assets;
+mod extensions;
 mod file_icons;
 mod fs_tree;
 mod git;

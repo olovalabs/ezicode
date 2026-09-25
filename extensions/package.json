@@ -1,0 +1,18 @@
+{
+  "name": "@ezicode/extensions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ezicode extension toolchain: VSIX reader/packer, VS Code theme importer and the Node extension host that runs VS Code-compatible extensions.",
+  "license": "MIT OR Apache-2.0",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "ezicode-ext": "./bin/ezicode-ext.js"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {}
+}

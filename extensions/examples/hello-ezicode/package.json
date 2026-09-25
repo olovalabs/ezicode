@@ -1,0 +1,31 @@
+{
+  "name": "hello-ezicode",
+  "displayName": "Hello ezicode",
+  "publisher": "ezicode",
+  "version": "0.1.0",
+  "description": "Sample extension showing the VS Code API surface ezicode implements: commands, messages, status bar, hover and completion.",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "hello.sayHello", "title": "Say Hello", "category": "Hello" },
+      { "command": "hello.insertBanner", "title": "Insert Banner Comment", "category": "Hello" },
+      { "command": "hello.countWords", "title": "Count Words In File", "category": "Hello" }
+    ],
+    "configuration": {
+      "title": "Hello ezicode",
+      "properties": {
+        "hello.greeting": {
+          "type": "string",
+          "default": "Hello from a VS Code extension running inside ezicode",
+          "description": "Message shown by the Say Hello command."
+        }
+      }
+    }
+  }
+}

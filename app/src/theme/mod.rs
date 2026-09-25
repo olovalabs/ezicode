@@ -256,15 +256,32 @@ impl Theme {
     }
 }
 
+fn load_builtin(out: &mut Vec<Theme>) {
+    for file in THEME_FILES {
+        if let Some(data) = crate::assets::AppAssets::get(file) {
+            parse_family(std::str::from_utf8(&data.data).unwrap_or(""), out);
+        }
+    }
+}
+
+/// Themes contributed by installed extensions, converted to ezicode's format
+/// at install time by `ezicode-ext` and dropped in `<data>/ezicode/themes/`.
+fn load_user_themes(out: &mut Vec<Theme>) {
+    for (file, json) in crate::extensions::user_theme_sources() {
+        let before = out.len();
+        parse_family(&json, out);
+        if out.len() == before {
+            eprintln!("theme file contributed no themes: {file}");
+        }
+    }
+}
+
 pub fn all() -> &'static [Theme] {
     static THEMES: OnceLock<Vec<Theme>> = OnceLock::new();
     THEMES.get_or_init(|| {
         let mut out = Vec::new();
-        for file in THEME_FILES {
-            if let Some(data) = crate::assets::AppAssets::get(file) {
-                parse_family(std::str::from_utf8(&data.data).unwrap_or(""), &mut out);
-            }
-        }
+        load_builtin(&mut out);
+        load_user_themes(&mut out);
         out
     })
 }
@@ -281,10 +298,19 @@ pub fn default_index() -> usize {
 mod tests {
     use super::*;
 
+    fn builtin() -> Vec<Theme> {
+        let mut out = Vec::new();
+        load_builtin(&mut out);
+        out
+    }
+
     #[test]
     fn loads_all_themes() {
+        // `all()` also picks up themes installed from extensions, so only the
+        // built-in set has a fixed count.
+        assert_eq!(builtin().len(), 18, "9 GitHub + 3 Ayu + 6 Gruvbox");
         let themes = all();
-        assert_eq!(themes.len(), 18, "9 GitHub + 3 Ayu + 6 Gruvbox");
+        assert!(themes.len() >= 18);
         assert!(themes.iter().any(|t| t.name == "GitHub Dark"));
         assert!(themes.iter().any(|t| t.name == "Ayu Mirage"));
         assert!(themes.iter().any(|t| t.name == "Gruvbox Light"));
