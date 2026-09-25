@@ -197,3 +197,38 @@ Copy the new release over this directory, delete `examples/`, `tests/`, `docs/`
 and `Cargo.lock`, strip the `[[example]]`, `[[test]]` and `[dev-dependencies]`
 sections from its `Cargo.toml`, then re-apply the eight patches above. The
 manifest header says the same thing where Cargo will show it.
+
+**Keep `resources/`.** It is easy to miss because nothing on Linux or macOS
+reads it, so a copy that looks complete on those platforms can still be missing
+it. `build.rs` embeds `resources/windows/gpui.rc` and
+`resources/windows/gpui.manifest.xml` into the binary on Windows, by path
+relative to the crate root, and `.rc` in turn references the manifest by that
+same relative path. Drop the directory and the Windows build dies with
+
+```
+fatal error RC1110: could not find resources/windows/gpui.rc
+thread 'main' panicked at build.rs:275:14:
+called `Result::unwrap()` on an `Err` value: Failed("RC.EXE failed to compile specified resource file")
+```
+
+which is what happened to the first 0.1.0 release attempt -- the directory was
+never committed, so only CI, which builds all three platforms, ever noticed.
+
+`src/platform/windows/shaders.hlsl` is needed too, for the same reason and with
+no such error: `compile_shaders()` runs in release builds and reads it from
+`CARGO_MANIFEST_DIR`, so a missing file is a silent no-op rather than a
+failure. It is in `src/`, which is copied wholesale, so it cannot go missing
+the way `resources/` did.
+
+To check a re-vendor is complete, diff the file list against the published
+crate rather than eyeballing it:
+
+```sh
+curl -sL -o gpui.crate https://static.crates.io/crates/gpui/gpui-0.2.2.crate
+tar xzf gpui.crate
+comm -23 <(cd gpui-0.2.2 && find . -type f | sed 's|^\./||' | grep -vE '^(docs|examples|tests)/' | sort) \
+         <(cd components/gpui && find . -type f | sed 's|^\./||' | sort)
+```
+
+Anything listed there is either an intentional exclusion (`Cargo.lock`,
+`Cargo.toml.orig`, `.cargo_vcs_info.json`) or a mistake.
