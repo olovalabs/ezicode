@@ -256,6 +256,57 @@ impl ColorPalette {
     pub fn cursor(&self) -> Hsla {
         self.cursor
     }
+
+    /// Resolve a raw terminal color slot (the same indices alacritty's
+    /// [`alacritty_terminal::term::color::Colors`] uses) back to an RGB triple.
+    ///
+    /// | Indices  | Description       |
+    /// | -------- | ----------------- |
+    /// | 0..256   | Indexed colors    |
+    /// | 256      | Foreground        |
+    /// | 257      | Background        |
+    /// | 258      | Cursor            |
+    /// | 259..267 | Dim colors        |
+    /// | 267      | Bright foreground |
+    /// | 268      | Dim background    |
+    ///
+    /// This is what answers `OSC 4 / 10 / 11 / 12` color queries coming from
+    /// programs running inside the terminal (`TermMode` independent).
+    pub fn rgb_at(&self, index: usize) -> Rgb {
+        let hsla = match index {
+            0..=255 => self.extended_colors[index],
+            256 => self.foreground,
+            257 => self.background,
+            258 => self.cursor,
+            259..=266 => {
+                let mut dim = self.ansi_colors[index - 259];
+                dim.l *= 0.7;
+                dim
+            }
+            267 => {
+                let mut bright = self.foreground;
+                bright.l = (bright.l * 1.2).min(1.0);
+                bright
+            }
+            268 => {
+                let mut dim = self.background;
+                dim.l *= 0.7;
+                dim
+            }
+            _ => self.foreground,
+        };
+        hsla_to_rgb(hsla)
+    }
+}
+
+/// Convert a GPUI [`Hsla`] into an alacritty [`Rgb`].
+pub fn hsla_to_rgb(hsla: Hsla) -> Rgb {
+    let rgba: gpui::Rgba = hsla.into();
+    Rgb {
+        r: (rgba.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        g: (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        b: (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    }
 }
 
 fn rgb_to_hsla(rgb: Rgb) -> Hsla {

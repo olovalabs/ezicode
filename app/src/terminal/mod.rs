@@ -109,6 +109,7 @@ impl Terminal {
                     line_height_multiplier: 1.2,
                     padding: Edges::all(px(6.0)),
                     colors: palette,
+                    ..TerminalConfig::default()
                 };
                 let (dummy_reader, dummy_writer) = Self::create_dummy_pty();
                 let pty_writer = Arc::new(Mutex::new(dummy_writer));
@@ -152,6 +153,7 @@ impl Terminal {
                     line_height_multiplier: 1.2,
                     padding: Edges::all(px(6.0)),
                     colors: palette,
+                    ..TerminalConfig::default()
                 };
                 let (dummy_reader, dummy_writer) = Self::create_dummy_pty();
                 let pty_writer = Arc::new(Mutex::new(dummy_writer));
@@ -181,10 +183,17 @@ impl Terminal {
             font_size: px(13.5),
             cols: 80,
             rows: 24,
-            scrollback: 10_000,
+            // 100k lines of scrollback, like Zed's default `max_scroll_history_lines`.
+            scrollback: 100_000,
             line_height_multiplier: 1.2,
             padding: Edges::all(px(6.0)),
             colors: palette,
+            cursor_blink: true,
+            copy_on_select: false,
+            alternate_scroll: true,
+            detect_path_links: true,
+            show_scrollbar: true,
+            ..TerminalConfig::default()
         };
 
         let pty_for_resize = pty_master.clone();
@@ -391,7 +400,16 @@ fn render_terminal_tab_bar(
     let with_tabs = tabs_root.children(tabs.iter().enumerate().map(|(idx, _)| {
         let is_active = idx == active;
         let term = tabs[idx].read(cx);
-        let name = term.name.clone();
+        // Prefer the title the shell/TUI reported via `OSC 0 / 2` (this is what
+        // makes the tab follow `vim`, `htop`, ssh sessions, …).
+        let name = term
+            .view
+            .read(cx)
+            .title()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(|title| title.to_string())
+            .unwrap_or_else(|| term.name.clone());
         let state = term.state;
         render_terminal_tab(name, state, idx, is_active, t, cx)
     }));

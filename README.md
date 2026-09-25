@@ -41,6 +41,15 @@ _Combining the raw speed and hardware-accelerated rendering of Zed with the frie
 - **Multi-Tab Sessions**: Launch and switch between multiple shell instances with process lifecycle tracking (running, exited, error status dots).
 - **Auto-Detected Shells**: Automatically finds Git Bash, PowerShell, or `pwsh` on Windows, and `zsh`, `fish`, or `bash` on Unix systems.
 - **Zed-Style Navigation**: Dedicated shortcuts for splitting, cycling, quick-switching (`Alt+1..5`), and maximizing terminal views.
+- **Real Scrollback & Auto-Scroll**: 100 000 lines of configurable history, viewport pinned to the newest output, jump-to-bottom on keypress, and drag-past-the-edge auto-scrolling while selecting.
+- **Answered Terminal Queries**: Cursor position reports, device attributes, `CSI 14t`/`CSI 18t` text-area sizing and `OSC 4/10/11/12` colour queries are replied to inline, so full-screen TUIs never stall.
+- **Alacritty-Grade Selection**: Character, semantic (double-click), line (triple-click) and block (`Alt`-drag) selections that span the scrollback, with optional copy-on-select and bracketed paste.
+- **Mouse Reporting**: X10/SGR/UTF-8 encodings, motion and drag tracking, alternate-scroll, and `Shift` to bypass the application and select text anyway.
+- **Clickable Hyperlinks**: `OSC 8` links, URLs, and `path:line:column` targets underline on `Ctrl`/`Cmd` hover and open on click.
+- **Buffer Search & Vi Mode**: Regex or literal search with highlighted matches and next/previous cycling, plus a keyboard-driven vi mode (motions, visual/block/line selection, yank).
+- **Faithful Text Rendering**: Straight, double, dotted, dashed and curly underlines with custom underline colours, strikethrough, dim/bold/italic/inverse/hidden, wide glyphs, combining marks, and hand-rasterised box-drawing characters.
+- **Cursor & Focus Fidelity**: All DECSCUSR shapes, blink following the application's request, hollow cursor when unfocused, and focus reporting (DEC mode 1004).
+- **Live Window Title**: Terminal tabs follow the `OSC 0/2` title the shell or TUI sets.
 
 ### 🔌 Zero-Config Language Server Protocol (LSP)
 
