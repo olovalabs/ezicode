@@ -313,12 +313,45 @@ impl rwh::HasDisplayHandle for RawWindow {
 
 impl rwh::HasWindowHandle for X11Window {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        unimplemented!()
+        let Some(non_zero) = NonZeroU32::new(self.0.x_window) else {
+            log::error!("X11Window.x_window zero when getting window handle.");
+            return Err(rwh::HandleError::Unavailable);
+        };
+        // The visual id is not kept next to the window id, so it has to come
+        // back off the server. `XcbWindowHandle::visual_id` is optional, but
+        // consumers that build a GL/Vulkan context for the window need the real
+        // one rather than a default screen visual.
+        let visual_id = self
+            .0
+            .xcb
+            .get_window_attributes(self.0.x_window)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .and_then(|attributes| NonZeroU32::new(attributes.visual));
+        let mut handle = rwh::XcbWindowHandle::new(non_zero);
+        handle.visual_id = visual_id;
+        Ok(unsafe { rwh::WindowHandle::borrow_raw(handle.into()) })
     }
 }
 impl rwh::HasDisplayHandle for X11Window {
     fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
-        unimplemented!()
+        let screen_index = self
+            .0
+            .xcb
+            .setup()
+            .roots
+            .iter()
+            .position(|root| root.root == self.0.state.borrow().x_root_window)
+            .ok_or(rwh::HandleError::Unavailable)?;
+        let connection =
+            as_raw_xcb_connection::AsRawXcbConnection::as_raw_xcb_connection(&*self.0.xcb)
+                as *mut _;
+        let Some(non_null) = NonNull::new(connection) else {
+            log::error!("Null X11Window xcb connection when getting display handle.");
+            return Err(rwh::HandleError::Unavailable);
+        };
+        let handle = rwh::XcbDisplayHandle::new(Some(non_null), screen_index as i32);
+        Ok(unsafe { rwh::DisplayHandle::borrow_raw(handle.into()) })
     }
 }
 

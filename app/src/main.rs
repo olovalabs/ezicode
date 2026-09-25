@@ -5,6 +5,8 @@ mod fs_tree;
 mod git;
 mod lang;
 mod lsp;
+#[cfg(target_os = "linux")]
+mod linux_desktop;
 mod settings;
 mod terminal;
 mod theme;
@@ -62,6 +64,18 @@ fn chrono_like_timestamp() -> String {
 
 fn main() {
     install_panic_logger();
+
+    // Windows gets its taskbar icon from the .ico resource that build.rs links
+    // into the executable. Linux has no such thing: panels and compositors look
+    // the logo up through a desktop entry and the hicolor icon theme, and
+    // `_NET_WM_ICON` covers the X11 panels that skip the desktop entry. Install
+    // all of it *before* the first window is created, otherwise the compositor
+    // maps the window before the files it needs exist. See linux_desktop.rs.
+    #[cfg(target_os = "linux")]
+    if linux_desktop::preflight() {
+        return;
+    }
+
     Application::new()
         .with_assets(CombinedAssets)
         .run(|cx: &mut App| {
@@ -140,6 +154,11 @@ fn main() {
                     ..Default::default()
                 },
                 |window, cx| {
+                    // No-op on Wayland; sets `_NET_WM_ICON` on X11 so panels
+                    // that never read the desktop entry still show the logo.
+                    #[cfg(target_os = "linux")]
+                    linux_desktop::apply_window_icon(window);
+
                     let view = cx.new(|cx| Workspace::new(window, cx));
                     cx.new(|cx| Root::new(view, window, cx))
                 },

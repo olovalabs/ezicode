@@ -267,6 +267,7 @@ ezicode/
 │       ├── fs_tree.rs        # Virtualized file tree model & filesystem ops
 │       ├── git.rs            # Native Git porcelain parser and process runner
 │       ├── lang.rs           # Language detection & LSP server mapping
+│       ├── linux_desktop.rs  # Linux desktop entry, icon theme & _NET_WM_ICON
 │       ├── lsp/              # LSP JSON-RPC client, Node auto-installer & adapters
 │       ├── terminal/         # Integrated GPU terminal panel & process lifecycle
 │       ├── theme/            # Zed JSON theme loader & color token extraction
@@ -286,6 +287,7 @@ ezicode/
 - **Panic Logger**: On unexpected crashes, `ezicode` automatically generates detailed trace logs in your system temporary directory (`ezicode-panic.log`) instead of silently exiting.
 - **Linux Linker Errors (`unable to find library -lxkbcommon-x11`)**: If compilation fails at the linking stage with `cannot find -lxkbcommon-x11`, install the development package providing the shared library symlinks (`sudo apt install -y libxkbcommon-x11-dev`).
 - **Node LSP Debugging**: If language servers fail to download or start, verify that Node.js is accessible on your system PATH (`node -v`). Downloaded language servers are located in `~/.local/share/ezicode/language-servers`.
+- **Taskbar Icon Missing on Linux**: unlike Windows, Linux has no icon resource inside the executable — panels and compositors resolve the logo from a desktop entry and the hicolor icon theme instead. `ezicode` writes both for the current user on every launch (`~/.local/share/applications/ezicode.desktop` and `~/.local/share/icons/hicolor/<size>x<size>/apps/ezicode.png`), and also sets `_NET_WM_ICON` on the window for X11 panels that skip the desktop entry. Run `./run.sh install` to install them without starting the editor, and log out and back in if a panel caches icons aggressively. A distro package must ship `ezicode.desktop` and the hicolor PNGs too — see the template in the repository root.
 
 ---
 

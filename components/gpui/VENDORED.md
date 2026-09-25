@@ -138,6 +138,23 @@ instead, which is all a test ever needs.
   error. This warning was invisible while gpui came from crates.io, because Cargo
   does not re-emit warnings for a cached dependency — vendoring made it visible.
 
+### 8. `src/platform/linux/x11/window.rs`
+
+- `rwh::HasWindowHandle for X11Window` and `rwh::HasDisplayHandle for X11Window`
+  are implemented instead of `unimplemented!()`. They return the handle built from
+  the state `X11WindowStatePtr` already holds, exactly as the `RawWindow` impl
+  just above them does.
+
+  This is not a cosmetic fix. `gpui::Window` forwards both trait methods to
+  `self.platform_window`, which on X11 is an `X11Window`, so *any* caller of
+  `window_handle()` on an X11 window — `app/src/linux_desktop.rs` setting
+  `_NET_WM_ICON` is the first one we wrote — aborted the process with
+  `not implemented` instead of returning a handle. The visual id is not kept
+  next to the window id, so it is read back off the server; the screen index for
+  the display handle is recovered by matching `x_root_window` against the setup's
+  roots. `RawWindow` keeps its own impl because `BladeRenderer::new` still takes a
+  `&RawWindow` before the `X11WindowState` exists.
+
 ## Feature gating
 
 Everything above is behind `#[cfg(any(test, feature = "test-support"))]`, so none
@@ -178,5 +195,5 @@ headless box install Mesa's lavapipe (`mesa-vulkan-drivers`) and use
 
 Copy the new release over this directory, delete `examples/`, `tests/`, `docs/`
 and `Cargo.lock`, strip the `[[example]]`, `[[test]]` and `[dev-dependencies]`
-sections from its `Cargo.toml`, then re-apply the seven patches above. The manifest
-header says the same thing where Cargo will show it.
+sections from its `Cargo.toml`, then re-apply the eight patches above. The
+manifest header says the same thing where Cargo will show it.

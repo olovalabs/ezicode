@@ -127,6 +127,7 @@ dependencies = [
  "lsp-types",
  "notify",
  "portable-pty 0.8.1",
+ "raw-window-handle",
  "rfd",
  "rust-embed",
  "serde",
@@ -135,6 +136,7 @@ dependencies = [
  "tree-sitter-typescript",
  "url",
  "winres",
+ "x11rb",
 ]
 
 [[package]]

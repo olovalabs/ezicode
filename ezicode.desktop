@@ -1,11 +1,27 @@
+# Desktop entry template for packaging (Debian/RPM/Flatpak/AppImage).
+#
+# On Linux the taskbar icon is not stored inside the executable the way Windows
+# stores it as a .ico resource. Panels and composoders resolve it from THIS file
+# plus the hicolor icon theme, so a package that ships the binary without also
+# shipping `ezicode.desktop` and `icons/hicolor/<size>x<size>/apps/ezicode.png`
+# will show a blank or generic logo in the taskbar.
+#
+# `Exec` is rewritten to the absolute path of the running binary when the app
+# installs the entry for the current user (see app/src/linux_desktop.rs), so
+# this copy only matters for a real system-wide install.
 [Desktop Entry]
 Name=ezicode
 GenericName=Code Editor
 Comment=Fast, modern code editor powered by GPUI
-Exec=app %F
+Exec=ezicode %F
 Icon=ezicode
 Terminal=false
 Type=Application
 Categories=Development;IDE;TextEditor;
+# We never answer org.freedesktop.Startup; claiming to would leave a ghost
+# taskbar entry behind for the whole launch.
+StartupNotify=false
+# Must equal the WM_CLASS / Wayland app_id the app sets from `app_id` in
+# main.rs, or desktop-file matching silently falls back to a generic icon.
 StartupWMClass=ezicode
 MimeType=text/plain;inode/directory;
