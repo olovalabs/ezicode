@@ -28,6 +28,13 @@ pub fn language_for(path: &Path) -> Option<&'static str> {
         return Some(lang);
     }
 
+    // File types contributed by installed Zed-compatible language extensions.
+    // Checked after the built-ins so extensions never shadow first-class
+    // languages, but before the shebang fallback.
+    if let Some(lang) = crate::extension::languages::language_for_extension(ext) {
+        return Some(lang);
+    }
+
     shebang_language(path)
 }
 

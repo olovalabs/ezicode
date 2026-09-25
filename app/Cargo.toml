@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[features]
+default = []
+# Experimental: load and run compiled extension WASM components (see
+# app/src/extension/wasm.rs). Pulls in wasmtime + WASI.
+wasm-extensions = ["dep:wasmtime", "dep:wasmtime-wasi"]
+
 [dependencies]
 anyhow = "1"
 gpui = "0.2.2"
@@ -12,6 +18,17 @@ gpui-component-assets = "0.5.1"
 rust-embed = "8.12.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
+
+# Optional host for running compiled Zed extension logic (`extension.wasm`).
+# Off by default: keeps the standard build free of the heavy wasmtime tree.
+# Enable with `cargo run --features wasm-extensions`.
+wasmtime = { version = "27", optional = true, default-features = false, features = [
+    "cranelift",
+    "component-model",
+    "runtime",
+] }
+wasmtime-wasi = { version = "27", optional = true }
 rfd = "0.15"
 lsp-types = "0.97.0"
 url = "2"

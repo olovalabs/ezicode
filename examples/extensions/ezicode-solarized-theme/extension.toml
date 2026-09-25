@@ -1,0 +1,7 @@
+id = "solarized"
+name = "Solarized"
+version = "1.0.0"
+schema_version = 1
+authors = ["ezicode <hello@ezicode.dev>"]
+description = "The classic Solarized Dark & Light color themes, in Zed format."
+repository = "https://github.com/olovalabs/ezicode"

@@ -1,0 +1,4 @@
+name = "Nim"
+grammar = "nim"
+path_suffixes = ["nim", "nims", "nimble"]
+line_comments = ["# "]

@@ -1,5 +1,6 @@
 mod actions;
 mod assets;
+mod extension;
 mod file_icons;
 mod fs_tree;
 mod git;
@@ -60,8 +61,84 @@ fn chrono_like_timestamp() -> String {
     format!("unix:{secs}")
 }
 
+/// Headless extension-management CLI, invoked like Zed's / VS Code's
+/// `--install-extension`. Returns `true` when a command was handled and the
+/// process should exit without opening a window.
+fn handle_extension_cli() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    let mut handled = false;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--install-extension" | "--install" => {
+                handled = true;
+                if let Some(src) = args.get(i + 1) {
+                    let is_git = src.starts_with("http")
+                        || src.starts_with("git@")
+                        || src.starts_with("ssh://")
+                        || (src.split('/').count() == 2 && !std::path::Path::new(src).exists());
+                    let result = if is_git {
+                        extension::store::install_from_git(src)
+                    } else {
+                        extension::store::install_from_path(std::path::Path::new(src))
+                    };
+                    match result {
+                        Ok(id) => println!("Installed extension `{id}`."),
+                        Err(e) => eprintln!("Install failed: {e}"),
+                    }
+                    i += 2;
+                    continue;
+                } else {
+                    eprintln!("--install-extension needs a path or Git URL");
+                }
+            }
+            "--uninstall-extension" | "--uninstall" => {
+                handled = true;
+                if let Some(id) = args.get(i + 1) {
+                    match extension::store::uninstall(id) {
+                        Ok(true) => println!("Uninstalled `{id}`."),
+                        Ok(false) => println!("`{id}` is not installed."),
+                        Err(e) => eprintln!("Uninstall failed: {e}"),
+                    }
+                    i += 2;
+                    continue;
+                } else {
+                    eprintln!("--uninstall-extension needs an extension id");
+                }
+            }
+            "--list-extensions" => {
+                handled = true;
+                let exts = extension::store::scan();
+                if exts.is_empty() {
+                    println!("No extensions installed.");
+                }
+                for e in exts {
+                    println!(
+                        "{}  {}  v{}",
+                        e.manifest.effective_id(),
+                        e.manifest.name,
+                        e.manifest.version
+                    );
+                }
+            }
+            "--extensions-dir" => {
+                handled = true;
+                println!("{}", extension::store::installed_dir().display());
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    handled
+}
+
 fn main() {
     install_panic_logger();
+
+    if handle_extension_cli() {
+        return;
+    }
+
     Application::new()
         .with_assets(CombinedAssets)
         .run(|cx: &mut App| {
@@ -125,6 +202,7 @@ fn main() {
             gpui_component::Theme::global_mut(cx).highlight_theme =
                 Arc::new(default_theme.highlight_theme());
 
+            extension::init();
             lang::init_languages();
 
             load_embedded_fonts(cx);

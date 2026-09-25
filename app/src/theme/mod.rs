@@ -265,6 +265,20 @@ pub fn all() -> &'static [Theme] {
                 parse_family(std::str::from_utf8(&data.data).unwrap_or(""), &mut out);
             }
         }
+        // Themes contributed by installed Zed-compatible extensions. They use
+        // the identical family/style JSON shape, so the same parser applies.
+        // A theme added while running becomes selectable after a restart.
+        let builtin_count = out.len();
+        for family_json in crate::extension::themes::theme_family_jsons() {
+            parse_family(&family_json, &mut out);
+        }
+        if out.len() > builtin_count {
+            println!(
+                "themes: {} from extensions ({} total)",
+                out.len() - builtin_count,
+                out.len()
+            );
+        }
         out
     })
 }

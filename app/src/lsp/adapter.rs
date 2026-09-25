@@ -321,12 +321,24 @@ pub static ADAPTERS: &[ServerAdapter] = &[
 ];
 
 pub fn adapter_for_language(lang: &str) -> Option<&'static ServerAdapter> {
-    ADAPTERS.iter().find(|a| a.languages.contains(&lang))
+    // Built-in servers take precedence; extension-contributed servers fill in
+    // languages the editor doesn't already cover.
+    if let Some(a) = ADAPTERS.iter().find(|a| a.languages.contains(&lang)) {
+        return Some(a);
+    }
+    crate::extension::lsp::extension_adapters()
+        .iter()
+        .find(|a| a.languages.contains(&lang))
 }
 
 /// The adapter with this server name.
 pub fn adapter_by_name(name: &str) -> Option<&'static ServerAdapter> {
-    ADAPTERS.iter().find(|a| a.name == name)
+    if let Some(a) = ADAPTERS.iter().find(|a| a.name == name) {
+        return Some(a);
+    }
+    crate::extension::lsp::extension_adapters()
+        .iter()
+        .find(|a| a.name == name)
 }
 
 #[cfg(test)]

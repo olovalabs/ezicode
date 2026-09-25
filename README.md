@@ -76,6 +76,18 @@ _Combining the raw speed and hardware-accelerated rendering of Zed with the frie
 - **Curated Typography**: Pre-bundled with **IBM Plex Sans** (for UI) and **Lilex** (for the code buffer and terminal), automatically registered with GPUI at launch.
 - **Rich File Icons**: Zed's complete SVG icon theme mapping file extensions to high-fidelity icons.
 
+### 🧩 Zed-Compatible Extensions
+
+- **Drop-in Zed Extensions**: Loads extensions in [Zed](https://github.com/zed-industries/zed)'s exact format — the same `extension.toml` manifest and `themes/`, `icon_themes/`, `languages/` layout. Copy a Zed extension repo in and it loads.
+- **Theme Extensions**: Any Zed theme extension appears directly in the theme picker (full UI + 46 syntax tokens + terminal palette).
+- **Language Extensions**: `languages/<lang>/config.toml` adds file-type associations (and syntax highlighting when a matching Tree-sitter grammar is built in).
+- **Extension Language Servers**: A language extension can wire an LSP that ezicode launches natively (`command`/`args`, resolved on `$PATH`) — diagnostics, completion, hover and go-to-definition, no WASM required.
+- **Install Anywhere**: From a Git URL (`ezicode --install-extension owner/repo`), a local folder, or by dropping a folder into the extensions directory. Manage with `--list-extensions` / `--uninstall-extension`.
+- **Live Extensions Panel**: `Ctrl+Shift+X` lists installed extensions with capability badges (Theme / Language / Grammar / LSP / WASM).
+- **WASM Host + Vendored WIT**: An optional `wasmtime` + WASI host (`--features wasm-extensions`) loads, validates and instantiates compiled `extension.wasm` components; the complete `zed:extension` WIT (v0.6.0) is vendored in [`app/wit/`](app/wit) ready for full binding.
+
+See **[docs/EXTENSIONS.md](docs/EXTENSIONS.md)** for the authoring & install guide, and **[`examples/extensions/`](examples/extensions)** for working samples.
+
 ---
 
 ## 🚀 Quick Start

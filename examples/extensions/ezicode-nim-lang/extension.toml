@@ -1,0 +1,25 @@
+id = "nim"
+name = "Nim"
+version = "1.0.0"
+schema_version = 1
+authors = ["ezicode <hello@ezicode.dev>"]
+description = "File-type support for the Nim programming language."
+repository = "https://github.com/olovalabs/ezicode"
+
+# A language extension can also declare a Tree-sitter grammar to fetch and a
+# language server to run. Those are recognised from this manifest and shown in
+# the Extensions panel. (Executing a compiled language-server component requires
+# building ezicode with the `wasm-extensions` feature.)
+# The commit below is illustrative — grammar fetching/compilation is not yet
+# executed natively (see docs/EXTENSIONS.md compatibility matrix).
+[grammars.nim]
+repository = "https://github.com/alaviss/tree-sitter-nim"
+commit = "a2ba0d8b0ea3b9a53a4bdb46e2fd3e6e9d5f0c11"
+
+[language_servers.nimlangserver]
+name = "Nim Language Server"
+language = "Nim"
+# ezicode extension (ignored by Zed): launch this binary from $PATH directly,
+# so the language server works without executing a WASM component.
+command = "nimlangserver"
+args = []
