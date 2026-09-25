@@ -1,5 +1,9 @@
 [workspace]
 members = ["app"]
+# components/gpui is a patched-in vendored crate, not a package we build or
+# test directly: its own examples/tests would otherwise be pulled into the
+# workspace and `cargo test` would try to run them.
+exclude = ["components/gpui"]
 resolver = "2"
 
 # GPUI + tree-sitter are extremely slow in unoptimized debug builds.
@@ -20,7 +24,12 @@ codegen-units = 1
 # GPUI's `debug_assert!(text.is_char_boundary(run.end))` and closed the app
 # while editing or using the completion menu. Keep this patch until upstream
 # ships the fixes.
+#
+# Vendored copy of gpui 0.2.2 plus headless rendering: upstream's test platform
+# throws the scene away, so no test can ever see a pixel. See
+# components/gpui/VENDORED.md for the patch list.
 [patch.crates-io]
+gpui = { path = "components/gpui" }
 gpui-component = { path = "components" }
 gpui-terminal = { path = "gpui-terminal" }
 

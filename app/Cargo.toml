@@ -30,3 +30,11 @@ libc = "0.2"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
+
+# `test-support` is what makes TestAppContext able to actually render: without it
+# the test platform has a no-op text system and throws every Scene away, so
+# VisualTestContext::draw cannot return pixels. It is a dev-dependency feature on
+# purpose -- the shipped binary must not pay for leak detection.
+[dev-dependencies]
+gpui = { version = "0.2.2", features = ["test-support"] }
+image = "0.25"
