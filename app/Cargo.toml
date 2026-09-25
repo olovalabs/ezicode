@@ -7,6 +7,16 @@
 # in app_icon.rs and the README layout for no benefit -- Cargo keys `-p` off the
 # package name, not the folder.
 name = "ezicode"
+# 0.1.0 rather than 0.0.1: the feature set -- LSP, an integrated terminal,
+# Git, themes, file icons -- is already substantial, and 0.0.x reads as "expect
+# all of this to move". Pre-1.0 is the honest signal that interfaces may still
+# change; a `-alpha.N` suffix is not used because that would mark the GitHub
+# Release a prerelease, and it would then never become `latest`, so
+# `releases/latest/download/ezicode-installer.sh` would keep serving nothing.
+#
+# The release tag has to be exactly `v<this value>` or dist refuses to plan.
+# A prerelease suffix is fine here (the packaging splits it per ecosystem, see
+# .github/workflows/linux-packages.yml) but it is not what we want yet.
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"

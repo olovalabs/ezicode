@@ -141,20 +141,26 @@ publish a release** — a pull request only runs the (fast) plan check.
 ### Cutting a release
 
 1. Bump `version` in `app/Cargo.toml` and commit.
-2. Tag that commit `vX.Y.Z` and push the tag.
+2. Tag that commit `v<version>` and push the tag.
 3. **Publish a GitHub Release** for the tag.
 
 Step 3 is the build trigger. Creating the release from the GitHub UI does not
 fire a tag-push event, which is why the workflow listens for `release:
-published` rather than for tag pushes.
+published` rather than for tag pushes. The tag must match the `version` in
+`app/Cargo.toml` exactly, or dist refuses to plan; `dist plan` will tell you the
+tag it expects.
+
+A semver prerelease (`0.1.0-alpha.1`) is published as a GitHub **prerelease**,
+so it never becomes `latest` and the `curl | sh` installer keeps serving the
+most recent stable build.
 
 ```bash
 # 1. and 2.
-sed -i 's/^version = ".*"/version = "0.2.0"/' app/Cargo.toml
-git commit -am "chore: release 0.2.0"
-git tag v0.2.0 && git push --follow-tags
+sed -i 's/^version = ".*"/version = "0.1.0"/' app/Cargo.toml
+git commit -am "chore: release 0.1.0"
+git tag v0.1.0 && git push --follow-tags
 
-# 3. then: Releases -> Draft a new release -> choose v0.2.0 -> Publish
+# 3. then: Releases -> Draft a new release -> choose v0.1.0 -> Publish
 ```
 
 Expect roughly 20–40 minutes: the LTO release build of GPUI plus the tree-sitter
@@ -173,20 +179,25 @@ to the release. There is also a source tarball.
 
 ### Installing
 
+Artifact names follow the version. For a prerelease such as `0.1.0-alpha.1`,
+Debian and RPM spell the pre-release with `~` and Arch with a dot, because
+`makepkg` and `rpmbuild` both reject a hyphen in a version field:
+
 ```bash
-# Debian / Ubuntu
-sudo apt install ./ezicode_X.Y.Z_amd64.deb
+# Debian / Ubuntu          (ezicode_0.1.0~alpha.1_amd64.deb for a prerelease)
+sudo apt install ./ezicode_0.1.0_amd64.deb
 
-# Fedora / RHEL / openSUSE
-sudo dnf install ./ezicode-X.Y.Z-1.x86_64.rpm
+# Fedora / RHEL / openSUSE   (ezicode-0.1.0~alpha.1-1.x86_64.rpm)
+sudo dnf install ./ezicode-0.1.0-1.x86_64.rpm
 
-# Arch
-sudo pacman -U ./ezicode-X.Y.Z-1-x86_64.pkg.tar.zst
+# Arch                       (ezicode-0.1.0.alpha.1-1-x86_64.pkg.tar.zst)
+sudo pacman -U ./ezicode-0.1.0-1-x86_64.pkg.tar.zst
 
 # Any distro, no package manager
-chmod +x ezicode-X.Y.Z-x86_64.AppImage && ./ezicode-X.Y.Z-x86_64.AppImage
+chmod +x ezicode-0.1.0-x86_64.AppImage && ./ezicode-0.1.0-x86_64.AppImage
 
-# Or, on anything with a shell
+# Or, on anything with a shell. Note this follows `latest`, which is the most
+# recent *stable* release, so it will not hand you a prerelease.
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/olovalabs/ezicode/releases/latest/download/ezicode-installer.sh | sh
 ```
 
