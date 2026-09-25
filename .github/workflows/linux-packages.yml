@@ -199,17 +199,38 @@ jobs:
           dpkg-deb --contents "ezicode_${VERSION}_amd64.deb"
 
       # --- .rpm (Fedora, RHEL, openSUSE) ------------------------------------
+      # The spec installs from %{buildroot} inside %install, the way every RPM
+      # in existence is built. The first attempt at this instead pre-populated
+      # an external buildroot and left %install empty, and rpmbuild then
+      # reported every %files entry as missing -- on Ubuntu's rpm 4.17, which
+      # is Debian's build rather than Fedora's, so the fragile pattern could
+      # not be relied on to work anywhere. %files entries are listed one per
+      # line rather than globbed too: rpm's glob handling in %files is
+      # unreliable enough that a non-matching pattern silently ships no icons.
       - name: Build .rpm
         run: |
           set -euo pipefail
           VERSION="${{ steps.payload.outputs.rpm_version }}"
 
-          mkdir -p rpmspec/{SPECS,RPMS,SRPMS,BUILD,BUILDROOT}
+          rm -rf rpmbuild
+          mkdir -p rpmbuild/{SPECS,RPMS,SRPMS,BUILD,SOURCES} rpmbuild/BUILD/icons
 
-          # The spec takes a %license file, so the tree needs one. There is no
-          # LICENSE in the repo even though app/Cargo.toml says MIT, so write it
-          # rather than dropping the tag and shipping a package with no licence.
-          cat > rpmspec/BUILDROOT/LICENSE <<'EOF'
+          # %install runs with its working directory set to %{_topdir}/BUILD,
+          # so these are the files the spec installs from.
+          cp payload/usr/bin/ezicode rpmbuild/BUILD/ezicode
+          cp payload/usr/share/applications/ezicode.desktop rpmbuild/BUILD/ezicode.desktop
+          for size in 16 24 32 48 64 128 256 512; do
+            mkdir -p "rpmbuild/BUILD/icons/${size}x${size}"
+            cp "payload/usr/share/icons/hicolor/${size}x${size}/apps/ezicode.png" \
+               "rpmbuild/BUILD/icons/${size}x${size}/ezicode.png"
+          done
+
+          # There is no LICENSE in the repo even though app/Cargo.toml says
+          # MIT. Rather than shipping a package with no licence, install one at
+          # the path Fedora expects by hand -- %license would relocate it to a
+          # version-stamped directory, and which directory that is has changed
+          # between rpm releases.
+          cat > rpmbuild/BUILD/LICENSE <<'EOF'
           MIT License
 
           Copyright (c) olovalabs
@@ -233,11 +254,6 @@ jobs:
           DEALINGS IN THE SOFTWARE.
           EOF
 
-          cp -a payload/usr rpmspec/BUILDROOT/usr
-
-          # %files entries are listed one per line rather than globbed: rpm's
-          # glob handling in %files is unreliable enough that a non-matching
-          # pattern silently ships no icons at all.
           {
             echo "Name:           ezicode"
             echo "Version:        $VERSION"
@@ -259,22 +275,31 @@ jobs:
             echo "%prep"
             echo "%build"
             echo "%install"
+            echo "mkdir -p %{buildroot}/usr/bin"
+            echo "install -m 755 ezicode %{buildroot}/usr/bin/ezicode"
+            echo "install -Dm644 ezicode.desktop %{buildroot}/usr/share/applications/ezicode.desktop"
+            echo "install -Dm644 LICENSE %{buildroot}/usr/share/licenses/%{name}/LICENSE"
+            echo "for size in 16 24 32 48 64 128 256 512; do"
+            echo "  install -Dm644 icons/\${size}x\${size}/ezicode.png \\"
+            echo "    %{buildroot}/usr/share/icons/hicolor/\${size}x\${size}/apps/ezicode.png"
+            echo "done"
             echo
             echo "%files"
-            echo "%license LICENSE"
             echo "/usr/bin/ezicode"
             echo "/usr/share/applications/ezicode.desktop"
+            echo "/usr/share/licenses/%{name}/LICENSE"
             for size in 16 24 32 48 64 128 256 512; do
               echo "/usr/share/icons/hicolor/${size}x${size}/apps/ezicode.png"
             done
-          } > rpmspec/SPECS/ezicode.spec
+          } > rpmbuild/SPECS/ezicode.spec
 
-          rpmbuild --define "_topdir $PWD/rpmspec" \
+          # No --buildroot: let rpmbuild manage its own, so %install and %files
+          # agree on where the staged files are.
+          rpmbuild --define "_topdir $PWD/rpmbuild" \
                    --define "_build_idlinks none" \
-                   --buildroot "$PWD/rpmspec/BUILDROOT" \
-                   -bb rpmspec/SPECS/ezicode.spec
+                   -bb rpmbuild/SPECS/ezicode.spec
 
-          find rpmspec/RPMS -name '*.rpm' -exec mv {} . \;
+          find rpmbuild/RPMS -name '*.rpm' -exec mv {} . \;
           rpm -qip ezicode-*.rpm
           rpm -qlp ezicode-*.rpm
 
