@@ -1,8 +1,40 @@
 [package]
-name = "app"
+# The directory is `app/` but the package is not called "app": cargo-dist names
+# every release artifact after the *package*, so a package called "app" ships
+# `app-x86_64-unknown-linux-gnu.tar.gz` and an `app-x86_64-pc-windows-msvc.msi`,
+# and titles the GitHub Release "app 0.1.0". The name is also what users type.
+# Renaming the directory instead would churn build.rs, the embedded asset paths
+# in app_icon.rs and the README layout for no benefit -- Cargo keys `-p` off the
+# package name, not the folder.
+name = "ezicode"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
+description = "Fast, modern code editor powered by GPUI"
+license = "MIT"
+authors = ["olovalabs"]
+repository = "https://github.com/olovalabs/ezicode"
+homepage = "https://github.com/olovalabs/ezicode"
+readme = "../README.md"
+# Metadata `cargo publish` wants but which is meaningless for a desktop app
+# that is only ever distributed as a built artifact. dist reads `publish` as
+# "do not distribute", so it has to be told otherwise explicitly.
+publish = false
+
+[package.metadata.dist]
+# ...here. Without this, `dist` sees no distable binary and refuses to plan.
+dist = true
+
+[package.metadata.wix]
+upgrade-guid = "73777BB8-7869-4628-A155-E84CACDC8666"
+path-guid = "79DC5E44-EDC7-499A-8192-B4C834244FAB"
+license = false
+eula = false
+
+# One binary, named after the package: `ezicode`.
+[[bin]]
+name = "ezicode"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"

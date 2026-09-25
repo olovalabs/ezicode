@@ -10,12 +10,12 @@ goto usage
 
 :dev
 echo [run] launching editor...
-cargo run -p app
+cargo run -p ezicode
 goto :eof
 
 :build
 echo [run] release build...
-cargo build --release -p app
+cargo build --release -p ezicode
 goto :eof
 
 :usage

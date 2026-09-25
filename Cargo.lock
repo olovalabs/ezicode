@@ -110,36 +110,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "app"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "anyhow",
- "async-channel 2.5.0",
- "fuzzy-matcher",
- "gpui",
- "gpui-component",
- "gpui-component-assets",
- "gpui-terminal",
- "ignore",
- "image",
- "libc",
- "lsp-types",
- "notify",
- "portable-pty 0.8.1",
- "raw-window-handle",
- "rfd",
- "rust-embed",
- "serde",
- "serde_json",
- "tree-sitter",
- "tree-sitter-typescript",
- "url",
- "winres",
- "x11rb",
-]
-
-[[package]]
 name = "ar_archive_writer"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1768,6 +1738,36 @@ dependencies = [
  "rayon-core",
  "smallvec",
  "zune-inflate",
+]
+
+[[package]]
+name = "ezicode"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "async-channel 2.5.0",
+ "fuzzy-matcher",
+ "gpui",
+ "gpui-component",
+ "gpui-component-assets",
+ "gpui-terminal",
+ "ignore",
+ "image",
+ "libc",
+ "lsp-types",
+ "notify",
+ "portable-pty 0.8.1",
+ "raw-window-handle",
+ "rfd",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-typescript",
+ "url",
+ "winres",
+ "x11rb",
 ]
 
 [[package]]

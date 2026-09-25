@@ -41,5 +41,97 @@ opt-level = 2
 [profile.dev.package.gpui-terminal]
 opt-level = 2
 
-[profile.dev.package.app]
+[profile.dev.package.ezicode]
 opt-level = 2
+
+# The profile cargo-dist builds release artifacts with. It inherits everything
+# from `release` above, so a release artifact and a local `cargo build
+# --release` are the same build; the separate profile exists so the aggressive
+# LTO/codegen-units settings can be dialled back for local work without
+# changing what ships.
+[profile.dist]
+inherits = "release"
+
+# --- cargo-dist (https://axodotdev.github.io/cargo-dist/) -------------------
+#
+# Builds the Windows, macOS and Linux binaries and installers on GitHub Actions
+# and uploads them to a GitHub Release. `dist generate --mode=ci` writes
+# .github/workflows/release.yml; do not edit that file by hand without also
+# reading the "allow-dirty" note below.
+#
+# This lives in Cargo.toml rather than a dist-workspace.toml on purpose: the
+# custom-job hook (`global-artifacts-jobs`) only works in this v0 config, and
+# moving it to the v1 file silently drops the Linux packaging job.
+[workspace.metadata.dist]
+# Recorded by `dist init`; CI fetches exactly this version of dist.
+cargo-dist-version = "0.33.0"
+
+# CI backends to support. Also inferred from `repository` in app/Cargo.toml.
+ci = ["github"]
+
+# The release is driven from the GitHub Release UI rather than from a tag push,
+# so the trigger in release.yml is `release: published` instead of dist's
+# default `push: tags`. Creating a release from the UI does not fire a tag-push
+# event, so the default trigger would never run.
+#
+# `allow-dirty` is what stops dist from overwriting that hand-edited trigger
+# (and from failing `dist generate` over it). It also pairs with
+# `create-release = false`: the release already exists, so dist only uploads
+# artifacts to it and undrafts it at the end.
+#
+# To regenerate release.yml: comment out `allow-dirty`, run
+# `dist generate --mode=ci`, re-apply the trigger edit, restore `allow-dirty`.
+allow-dirty = ["ci"]
+create-release = false
+
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+]
+
+installers = ["shell", "powershell", "msi"]
+
+# cargo-dist's installer backends are shell, powershell, npm, homebrew, msi and
+# macpkg. There is no deb, rpm, AppImage or Arch backend (the project lists
+# flatpak and dmg as unimplemented), so the four Linux package formats are built
+# from the binary tarball by the extra job this pulls in.
+global-artifacts-jobs = ["./linux-packages"]
+
+# Prereleases are still built, but never announced as `latest` and never
+# published to a package manager.
+publish-prereleases = false
+
+install-success-msg = "ezicode is installed."
+
+# The defaults are .tar.xz on unix and .zip on Windows; .tar.xz on a 300MB GUI
+# binary costs a lot of CI time for very little size.
+unix-archive = ".tar.gz"
+windows-archive = ".zip"
+
+checksum = "sha256"
+
+# Plan-only on pull requests. Nothing is built or uploaded unless a release is
+# published, which is the whole point of the trigger above.
+pr-run-mode = "plan"
+
+# Build deps for the Linux target, mirroring the list in the README, plus
+# pkg-config because that is how the -dev packages get found.
+#
+# The binary itself only links libc, libgcc_s, libm, libxcb, libxkbcommon and
+# libxkbcommon-x11 (see `readelf -d`). The runtime package dependencies for the
+# .deb/.rpm/PKGBUILD live in .github/workflows/linux-packages.yml, next to the
+# package layouts they belong to.
+[workspace.metadata.dist.dependencies.apt]
+pkg-config = "*"
+libxkbcommon-x11-dev = "*"
+libxkbcommon-dev = "*"
+libfontconfig1-dev = "*"
+libfreetype6-dev = "*"
+libxcb1-dev = "*"
+
+# One consequence worth knowing: the Linux binary is built on ubuntu-22.04, so
+# its glibc is 2.35. The .deb therefore only installs on Ubuntu 22.04+ and
+# Debian 12+, and the shell installer refuses to run on anything older. To
+# support older distributions, set `min-glibc-version` and build in a matching
+# older container via `github-custom-runners`.
