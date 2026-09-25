@@ -3251,6 +3251,15 @@ impl Workspace {
         if self.picker.take().is_some() {
             self.focus_active_editor_or_self(window, cx);
             cx.notify();
+        } else {
+            // Nothing of ours was open, so let Escape keep travelling. GPUI's
+            // action bubble phase stops propagation by default (see
+            // `App::propagate`), and this handler sits on the focused
+            // terminal's dispatch path — so without this, `on_key_down` never
+            // runs, no 0x1b reaches the PTY, and vim/htop/fzf modals can't be
+            // dismissed. Deliberately not propagated when a picker *was*
+            // closed, so that path keeps its existing behaviour.
+            cx.propagate();
         }
     }
 
