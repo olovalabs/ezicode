@@ -358,7 +358,15 @@ jobs:
             # makepkg refuses to run as root.
             useradd -m builder
             chown -R builder:builder /build
-            su builder -c "cd /build && makepkg --noconfirm --cleanbuild --clean --noprogressbar"
+            # --nodeps skips makepkg resolving depends=[] against the build
+            # machine. It still records them in the package metadata, which is
+            # all that matters to whoever installs it; without this it refuses
+            # to build at all, because the container has base-devel and none of
+            # the runtime libraries:
+            #   ==> Missing dependencies:
+            #     -> vulkan-icd-loader  -> libxcb  -> libxkbcommon  -> libxkbcommon-x11
+            #   ==> ERROR: Could not resolve all dependencies.
+            su builder -c "cd /build && makepkg --noconfirm --nodeps --cleanbuild --clean --noprogressbar"
           '
 
           mv build-arch/*.pkg.tar.zst ./
