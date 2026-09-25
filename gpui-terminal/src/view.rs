@@ -347,6 +347,18 @@ impl TerminalView {
         self
     }
 
+    /// Install (or replace) the `OSC 0 / 2` title callback after construction.
+    ///
+    /// Hosts that draw a tab strip want the title in *their* entity: reading it
+    /// back out of this view would subscribe the strip to this entity, and this
+    /// entity notifies on every single PTY write.
+    pub fn set_title_callback(
+        &mut self,
+        callback: impl Fn(&mut Window, &mut Context<TerminalView>, &str) + 'static,
+    ) {
+        self.title_callback = Some(Box::new(callback));
+    }
+
     pub fn with_clipboard_store_callback(
         mut self,
         callback: impl Fn(&mut Window, &mut Context<TerminalView>, &str) + 'static,

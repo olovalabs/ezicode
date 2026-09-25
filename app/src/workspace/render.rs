@@ -83,6 +83,7 @@ impl Render for Workspace {
         let font_size = self.font_size;
         let terminal_tabs = &self.terminal_tabs;
         let active_terminal = self.active_terminal;
+        let terminal_tab_scroll = self.terminal_tab_scroll.clone();
         let terminal_maximized = self.terminal_maximized && self.show_terminal && !self.terminal_tabs.is_empty();
 
         let tabs = &self.tabs;
@@ -487,6 +488,7 @@ impl Render for Workspace {
                                                         terminal_tabs,
                                                         active_terminal,
                                                         true,
+                                                        &terminal_tab_scroll,
                                                         &t,
                                                         cx,
                                                     )),
@@ -501,6 +503,7 @@ impl Render for Workspace {
                                                         terminal_tabs,
                                                         active_terminal,
                                                         false,
+                                                        &terminal_tab_scroll,
                                                         &t,
                                                         cx,
                                                     )),

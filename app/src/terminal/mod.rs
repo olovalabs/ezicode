@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use gpui::{
-    div, prelude::*, px, rgba, svg, Context, Edges, Entity, FocusHandle, IntoElement, Window,
+    div, prelude::*, px, rgba, svg, Context, Edges, Entity, FocusHandle, IntoElement,
+    ScrollHandle, SharedString, Window,
 };
 use gpui_terminal::{TerminalConfig, TerminalView};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -21,10 +22,28 @@ pub enum TerminalState {
     Error,
 }
 
+/// Decide what a terminal's state becomes after probing its child process.
+/// `None` means "no state to move to", i.e. the probe was skipped.
+fn next_state_after_probe(state: TerminalState, pid: Option<u32>) -> Option<TerminalState> {
+    // Only live processes are worth probing; once a state is recorded the pid
+    // is gone (or was never there), so there is nothing left to ask about.
+    if state != TerminalState::Running {
+        return None;
+    }
+    let pid = pid?;
+    (!Terminal::process_is_alive(pid)).then_some(TerminalState::Exited(0))
+}
+
 pub struct Terminal {
     pub view: Entity<TerminalView>,
 
-    pub name: String,
+    /// Fallback tab label ("folder – bash"), used until the child process
+    /// reports a title of its own.
+    pub name: SharedString,
+
+    /// Last title reported through `OSC 0 / 2`, mirrored here so the tab strip
+    /// never has to read the view. See [`Terminal::set_osc_title`].
+    pub osc_title: Option<SharedString>,
 
     pub state: TerminalState,
 
@@ -83,6 +102,7 @@ impl Terminal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let name = SharedString::from(name);
 
         let (shell_cmd, shell_path) = Self::detect_shell();
         let working_dir = root_dir
@@ -119,6 +139,7 @@ impl Terminal {
                 return Self {
                     view,
                     name,
+                    osc_title: None,
                     state: TerminalState::Error,
                     working_dir,
                     shell_path: shell_path.clone(),
@@ -163,6 +184,7 @@ impl Terminal {
                 return Self {
                     view,
                     name,
+                    osc_title: None,
                     state: TerminalState::Error,
                     working_dir,
                     shell_path,
@@ -222,6 +244,7 @@ impl Terminal {
         Self {
             view,
             name,
+            osc_title: None,
             state: TerminalState::Running,
             working_dir,
             shell_path,
@@ -262,18 +285,21 @@ impl Terminal {
         )
     }
 
+    /// Returns `true` only when the state *just* changed.
+    ///
+    /// Callers use the return value to decide whether to re-render, so an
+    /// already-exited terminal has to report "no change" — otherwise every
+    /// render would schedule another one, forever, and with several terminals
+    /// open the `kill(2)` probe below would run once per terminal per frame.
     pub fn check_process_exit(&mut self) -> bool {
-        if self.state != TerminalState::Running {
-            return true;
+        let Some(next) = next_state_after_probe(self.state, self.pid) else {
+            return false;
+        };
+        if self.state == next {
+            return false;
         }
-
-        if let Some(pid) = self.pid {
-            if !Self::process_is_alive(pid) {
-                self.state = TerminalState::Exited(0);
-                return true;
-            }
-        }
-        false
+        self.state = next;
+        true
     }
 
     #[cfg(unix)]
@@ -320,9 +346,37 @@ impl Terminal {
         }
     }
 
+    /// Label for this terminal's tab: the title reported by the child process
+    /// (`OSC 0 / 2`) when it has one, otherwise the shell label.
+    ///
+    /// Returns a `SharedString` so re-rendering the tab strip costs zero
+    /// allocations no matter how many terminals are open.
+    pub fn tab_label(&self) -> SharedString {
+        match &self.osc_title {
+            Some(title) => title.clone(),
+            None => self.name.clone(),
+        }
+    }
+
+    /// Cache the title the child process reported through `OSC 0 / 2` (an
+    /// empty title means "no title", so the shell label shows again).
+    pub fn set_osc_title(&mut self, title: &str, cx: &mut Context<Self>) {
+        let title = title.trim();
+        let next = if title.is_empty() {
+            None
+        } else {
+            Some(SharedString::new(title.to_string()))
+        };
+        if self.osc_title == next {
+            return;
+        }
+        self.osc_title = next;
+        cx.notify();
+    }
+
     #[allow(dead_code)]
     pub fn rename(&mut self, new_name: String, cx: &mut Context<Self>) {
-        self.name = new_name;
+        self.name = SharedString::from(new_name);
         cx.notify();
     }
 
@@ -351,10 +405,16 @@ const TAB_INACTIVE_TEXT: u32 = 0xc9d1d9ff;
 const TAB_INACTIVE_HOVER: u32 = 0x161b22ff;
 const TAB_CLOSE_HOVER: u32 = 0x30363dff;
 
+/// Tabs grow to fill the strip while there is room, shrink to this width when
+/// there isn't, and only start scrolling once even the minimum doesn't fit.
+const TAB_MIN_WIDTH: f32 = 84.0;
+const TAB_MAX_WIDTH: f32 = 180.0;
+
 pub fn render_terminal_panel(
     tabs: &[Entity<Terminal>],
     active: usize,
     maximized: bool,
+    tab_scroll: &ScrollHandle,
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -368,7 +428,14 @@ pub fn render_terminal_panel(
         .flex()
         .flex_col()
         .bg(rgba(TAB_BAR_BG))
-        .child(render_terminal_tab_bar(tabs, active, maximized, t, cx))
+        .child(render_terminal_tab_bar(
+            tabs,
+            active,
+            maximized,
+            tab_scroll,
+            t,
+            cx,
+        ))
         .child(
             div()
                 .flex_1()
@@ -384,6 +451,7 @@ fn render_terminal_tab_bar(
     tabs: &[Entity<Terminal>],
     active: usize,
     maximized: bool,
+    tab_scroll: &ScrollHandle,
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -397,35 +465,44 @@ fn render_terminal_tab_bar(
         .border_t_1()
         .border_color(rgba(TAB_BAR_BORDER_TOP));
 
-    let with_tabs = tabs_root.children(tabs.iter().enumerate().map(|(idx, _)| {
-        let is_active = idx == active;
-        let term = tabs[idx].read(cx);
-        // Prefer the title the shell/TUI reported via `OSC 0 / 2` (this is what
-        // makes the tab follow `vim`, `htop`, ssh sessions, …).
-        let name = term
-            .view
-            .read(cx)
-            .title()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .map(|title| title.to_string())
-            .unwrap_or_else(|| term.name.clone());
-        let state = term.state;
-        render_terminal_tab(name, state, idx, is_active, t, cx)
-    }));
+    // The tabs get their own scroll container. They used to be laid out inline
+    // with a fixed width, so opening enough of them pushed the `+` and the
+    // window buttons off the right edge where they couldn't be reached.
+    //
+    // Scrolling horizontally (wheel / trackpad) is handled by GPUI; the
+    // scrollbar itself is zero-width, and the active tab is scrolled into view
+    // whenever the selection changes.
+    let tab_strip = div()
+        .id("terminal-tab-strip")
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .flex()
+        .flex_row()
+        .items_center()
+        .overflow_x_scroll()
+        .scrollbar_width(px(0.0))
+        .track_scroll(tab_scroll)
+        .border_b_1()
+        .border_color(rgba(TAB_BAR_BORDER_BOTTOM))
+        .children(tabs.iter().enumerate().map(|(idx, _)| {
+            let is_active = idx == active;
+            let term = tabs[idx].read(cx);
+            // Cached label (title reported via `OSC 0 / 2`, else the shell
+            // label) — reading the view here would subscribe the whole strip
+            // to every terminal, re-rendering all of them on every PTY write.
+            let label = term.tab_label();
+            let state = term.state;
+            render_terminal_tab(label, state, idx, is_active, t, cx)
+        }));
 
-    with_tabs
+    tabs_root
+        .child(tab_strip)
         .child(render_new_terminal_button(t, cx))
         .child(
             div()
-                .flex_1()
                 .h_full()
-                .border_b_1()
-                .border_color(rgba(TAB_BAR_BORDER_BOTTOM)),
-        )
-        .child(
-            div()
-                .h_full()
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .border_b_1()
@@ -451,6 +528,7 @@ fn render_maximize_terminal_button(
         .id("term-max-btn")
         .w(px(28.0))
         .h_full()
+        .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
@@ -471,7 +549,7 @@ fn render_maximize_terminal_button(
 }
 
 fn render_terminal_tab(
-    name: String,
+    name: SharedString,
     state: TerminalState,
     index: usize,
     is_active: bool,
@@ -489,13 +567,15 @@ fn render_terminal_tab(
 
     let display_name = match state {
         TerminalState::Running => name,
-        TerminalState::Exited(code) => format!("{name} (exit {code})"),
-        TerminalState::Error => format!("{name} (error)"),
+        TerminalState::Exited(code) => SharedString::from(format!("{name} (exit {code})")),
+        TerminalState::Error => SharedString::from(format!("{name} (error)")),
     };
 
     let mut tab = div()
         .id(("terminal-tab", index))
-        .w(px(180.0))
+        .flex_1()
+        .min_w(px(TAB_MIN_WIDTH))
+        .max_w(px(TAB_MAX_WIDTH))
         .h_full()
         .pl(px(12.0))
         .pr(px(8.0))
@@ -503,6 +583,7 @@ fn render_terminal_tab(
         .flex_row()
         .items_center()
         .gap(px(8.0))
+        .overflow_hidden()
         .bg(rgba(tab_bg))
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -527,7 +608,11 @@ fn render_terminal_tab(
     }
 
     tab = tab
-        .child(crate::ui::common::icon_img(icon_path, 15.0))
+        .child(
+            div()
+                .flex_shrink_0()
+                .child(crate::ui::common::icon_img(icon_path, 15.0)),
+        )
         .child(
             div()
                 .child(display_name)
@@ -536,6 +621,7 @@ fn render_terminal_tab(
                 .overflow_x_hidden()
                 .text_ellipsis()
                 .whitespace_nowrap()
+                .min_w(px(0.0))
                 .flex_1(),
         );
 
@@ -545,6 +631,7 @@ fn render_terminal_tab(
                 .id(("terminal-tab-close", index))
                 .w(px(16.0))
                 .h(px(16.0))
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -553,9 +640,9 @@ fn render_terminal_tab(
                 .hover(|h| h.bg(rgba(TAB_CLOSE_HOVER)))
                 .child(
                     div()
-                        .text_size(px(11.0))
+                        .text_size(px(13.0))
                         .text_color(rgba(TAB_ACTIVE_TEXT))
-                        .line_height(px(11.0))
+                        .line_height(px(13.0))
                         .child("✕"),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -572,6 +659,7 @@ fn render_new_terminal_button(_t: &Colors, cx: &mut Context<Workspace>) -> impl 
         .id("term-new-btn")
         .w(px(28.0))
         .h_full()
+        .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
@@ -581,9 +669,9 @@ fn render_new_terminal_button(_t: &Colors, cx: &mut Context<Workspace>) -> impl 
         .hover(|s| s.bg(rgba(TAB_INACTIVE_HOVER)))
         .child(
             div()
-                .text_size(px(14.0))
+                .text_size(px(16.0))
                 .text_color(rgba(0x8b949eff))
-                .line_height(px(14.0))
+                .line_height(px(16.0))
                 .child("+"),
         )
         .on_click(cx.listener(|this, _, window, cx| {
@@ -596,6 +684,7 @@ fn render_hide_panel_button(_t: &Colors, cx: &mut Context<Workspace>) -> impl In
         .id("term-hide-btn")
         .w(px(28.0))
         .h_full()
+        .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
@@ -619,6 +708,33 @@ fn render_hide_panel_button(_t: &Colors, cx: &mut Context<Workspace>) -> impl In
 mod tests {
     use super::*;
     use gpui::Keystroke;
+
+    /// An already-recorded state must never be probed again: `poll_terminal_
+    /// processes` runs on every render, so returning a state here would make a
+    /// finished terminal schedule a re-render on every single frame.
+    #[test]
+    fn finished_terminal_is_not_reprobed() {
+        assert_eq!(next_state_after_probe(TerminalState::Exited(0), Some(1)), None);
+        assert_eq!(next_state_after_probe(TerminalState::Error, Some(1)), None);
+    }
+
+    /// A running terminal with no pid (the PTY failed to spawn) has nothing to
+    /// probe either, so it must not spin either.
+    #[test]
+    fn running_terminal_without_pid_is_not_probed() {
+        assert_eq!(next_state_after_probe(TerminalState::Running, None), None);
+    }
+
+    /// The shell running this test is definitely alive, so probing it must not
+    /// report a state change.
+    #[test]
+    fn live_process_stays_running() {
+        let pid = std::process::id();
+        assert_eq!(
+            next_state_after_probe(TerminalState::Running, Some(pid)),
+            None
+        );
+    }
 
     #[test]
     fn test_capital_letters_with_shift() {
