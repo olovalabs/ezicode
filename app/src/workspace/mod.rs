@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    AppContext, Context, Entity, FocusHandle, ScrollStrategy, SharedString,
+    AppContext, Context, Entity, FocusHandle, ScrollHandle, ScrollStrategy, SharedString,
     UniformListScrollHandle, Window,
 };
 use gpui_component::input::{InputEvent, InputState, RopeExt as _, TabSize};
@@ -105,6 +105,11 @@ pub(crate) struct ExplorerClipboard {
     pub(crate) cut: bool,
 }
 
+/// How often the terminal child processes are probed for exit. Short enough
+/// that a tab flips to "(exit 0)" promptly, long enough that the per-frame
+/// `kill(2)` cost stays negligible no matter how many tabs are open.
+const TERMINAL_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 pub(crate) struct Workspace {
     /// None until the user opens a folder (VS Code-style start state).
     pub(crate) root: Option<PathBuf>,
@@ -149,6 +154,12 @@ pub(crate) struct Workspace {
     pub(crate) terminal_tabs: Vec<Entity<crate::terminal::Terminal>>,
     /// Index of the currently active terminal tab.
     pub(crate) active_terminal: usize,
+    /// Horizontal scroll position of the terminal tab strip, so the active tab
+    /// can be scrolled into view once there are more tabs than fit.
+    pub(crate) terminal_tab_scroll: ScrollHandle,
+    /// When the terminal child processes were last probed for exit. See
+    /// [`Workspace::poll_terminal_processes`].
+    pub(crate) last_terminal_poll: std::time::Instant,
     /// Monotonic counter for labeling new terminals (PowerShell 1, PowerShell 2, ...).
     pub(crate) next_terminal_id: usize,
     /// File system change notification sender: the changed path, so reloads
@@ -435,6 +446,8 @@ impl Workspace {
             diagnostics_by_path: HashMap::new(),
             terminal_tabs: Vec::new(),
             active_terminal: 0,
+            terminal_tab_scroll: ScrollHandle::new(),
+            last_terminal_poll: std::time::Instant::now(),
             next_terminal_id: 1,
             fs_event_tx,
             _watcher: None,
@@ -834,15 +847,49 @@ impl Workspace {
         let term = cx.new(|cx| {
             crate::terminal::Terminal::new(working_dir.as_deref(), label, palette, window, cx)
         });
+        self.watch_terminal_title(&term, cx);
         self.terminal_tabs.push(term);
         self.active_terminal = self.terminal_tabs.len() - 1;
         self.show_terminal = true;
+        self.reveal_active_terminal_tab();
         self.focus_active_terminal(window, cx);
         self.status = format!(
             "Terminal {} created",
             self.active_terminal + 1
         );
         cx.notify();
+    }
+
+    /// Keep a tab's cached title in sync with the `OSC 0 / 2` title its child
+    /// process reports.
+    ///
+    /// The view *pushes* the new title into this entity rather than the tab
+    /// strip reading it back out of the view: reading a `TerminalView` from the
+    /// strip subscribes the strip to that view, and views notify on *every* PTY
+    /// write, so the entire tab strip was re-rendered on every keystroke no
+    /// matter how many terminals were open. Now only the tab whose title really
+    /// changed re-renders.
+    fn watch_terminal_title(
+        &mut self,
+        term: &Entity<crate::terminal::Terminal>,
+        cx: &mut Context<Self>,
+    ) {
+        let weak = term.downgrade();
+        let _ = term.update(cx, |term, cx| {
+            let _ = term.view.update(cx, |view, _cx| {
+                view.set_title_callback(move |_window, cx, title| {
+                    let _ = weak.update(cx, |term, cx| term.set_osc_title(title, cx));
+                });
+            });
+        });
+    }
+
+    /// Scroll the terminal tab strip so the active tab is visible. A no-op (and
+    /// free) while every tab still fits.
+    fn reveal_active_terminal_tab(&mut self) {
+        if !self.terminal_tabs.is_empty() {
+            self.terminal_tab_scroll.scroll_to_item(self.active_terminal);
+        }
     }
 
     pub(crate) fn activate_terminal(
@@ -858,6 +905,7 @@ impl Workspace {
         if let Some(term) = self.terminal_tabs.get(index).cloned() {
             term.read(cx).focus_handle(cx).focus(window);
         }
+        self.reveal_active_terminal_tab();
         self.status = format!("Terminal {} active", index + 1);
         cx.notify();
     }
@@ -912,6 +960,7 @@ impl Workspace {
         } else if index < self.active_terminal {
             self.active_terminal -= 1;
         }
+        self.reveal_active_terminal_tab();
         self.focus_active_terminal(window, cx);
         self.status = format!(
             "Terminal {} closed — {} terminal(s) remain",
@@ -926,6 +975,7 @@ impl Workspace {
             return;
         }
         self.active_terminal = (self.active_terminal + 1) % self.terminal_tabs.len();
+        self.reveal_active_terminal_tab();
         self.focus_active_terminal(window, cx);
         self.status = format!("Terminal {} active", self.active_terminal + 1);
         cx.notify();
@@ -937,6 +987,7 @@ impl Workspace {
         }
         self.active_terminal =
             (self.active_terminal + self.terminal_tabs.len() - 1) % self.terminal_tabs.len();
+        self.reveal_active_terminal_tab();
         self.focus_active_terminal(window, cx);
         self.status = format!("Terminal {} active", self.active_terminal + 1);
         cx.notify();
@@ -958,6 +1009,7 @@ impl Workspace {
     ) {
         if index < self.terminal_tabs.len() {
             self.active_terminal = index;
+            self.reveal_active_terminal_tab();
             self.focus_active_terminal(window, cx);
             self.status = format!("Terminal {} active", index + 1);
             cx.notify();
@@ -978,12 +1030,31 @@ impl Workspace {
         }
     }
 
+    /// Probe each terminal's child process for exit.
+    ///
+    /// Called from `render`, so it is throttled: the probe is a syscall per
+    /// live terminal and nothing on screen needs sub-frame accuracy. Without
+    /// the throttle, ten terminals meant ten `kill(2)` calls on every frame.
     pub(crate) fn poll_terminal_processes(&mut self, cx: &mut Context<Self>) {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_terminal_poll) < TERMINAL_EXIT_POLL_INTERVAL {
+            return;
+        }
+        self.last_terminal_poll = now;
+
+        // Nothing to probe: skip the entity updates entirely so an empty or
+        // fully-exited terminal list costs nothing per frame.
+        if !self
+            .terminal_tabs
+            .iter()
+            .any(|term| term.read(cx).state == crate::terminal::TerminalState::Running)
+        {
+            return;
+        }
+
         let mut any_changed = false;
         for term_entity in &self.terminal_tabs {
-            let changed = term_entity.update(cx, |term, _cx| {
-                term.check_process_exit()
-            });
+            let changed = term_entity.update(cx, |term, _cx| term.check_process_exit());
             if changed {
                 any_changed = true;
             }
