@@ -122,6 +122,8 @@ fn main() -> Result<()> {
                 line_height_multiplier: 1.05,
                 padding: Edges::all(px(8.0)),
                 colors,
+                copy_on_select: true,
+                ..TerminalConfig::default()
             };
 
             let pty_for_resize = pty_master_clone.clone();

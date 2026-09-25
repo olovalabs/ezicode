@@ -1,85 +1,201 @@
-use alacritty_terminal::event::{Event, EventListener};
+//! Terminal event plumbing.
+//!
+//! `alacritty_terminal` talks to the embedder through an [`EventListener`].
+//! A surprising amount of terminal functionality is implemented as a *request*
+//! that the embedder is expected to answer by writing bytes back into the PTY:
+//!
+//! * `Event::PtyWrite` — cursor position reports (`CSI 6 n`), device attributes
+//!   (`CSI c`), DECRQM replies, XTVERSION, kitty keyboard queries, …
+//! * `Event::ColorRequest` — `OSC 4 / 10 / 11 / 12` colour queries.
+//! * `Event::TextAreaSizeRequest` — `CSI 14 t` / `CSI 18 t` size queries.
+//! * `Event::ClipboardLoad` — `OSC 52` clipboard reads.
+//!
+//! If those go unanswered, full screen TUIs (vim, htop, lazygit, fzf, tmux,
+//! neovim, ratatui apps, AI agent CLIs, …) either hang waiting for a reply or
+//! silently fall back to a degraded rendering path. [`GpuiEventProxy`] answers
+//! the synchronous ones inline through a [`TerminalNotifier`] and forwards the
+//! ones that need main-thread/UI access (clipboard, bell, title, …) over a
+//! channel to [`crate::view::TerminalView`].
+
+use crate::colors::ColorPalette;
+use alacritty_terminal::event::{Event, EventListener, WindowSize};
+use alacritty_terminal::term::ClipboardType;
+use alacritty_terminal::vte::ansi::Rgb;
+use parking_lot::Mutex;
+use std::fmt;
+use std::io::Write;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-#[derive(Debug, Clone)]
-pub enum TerminalEvent {
+/// Shared, writable handle to the PTY master.
+pub type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
+/// Formatter used by alacritty to turn a clipboard payload into the escape
+/// sequence the requesting application expects.
+pub type ClipboardFormatter = Arc<dyn Fn(&str) -> String + Sync + Send + 'static>;
+
+/// Everything the event proxy needs in order to answer a terminal query
+/// without touching the UI thread.
+#[derive(Clone)]
+pub struct TerminalNotifier {
+    writer: PtyWriter,
+    window_size: Arc<Mutex<WindowSize>>,
+    palette: Arc<Mutex<ColorPalette>>,
+}
+
+impl TerminalNotifier {
+    pub fn new(
+        writer: PtyWriter,
+        window_size: Arc<Mutex<WindowSize>>,
+        palette: Arc<Mutex<ColorPalette>>,
+    ) -> Self {
+        Self {
+            writer,
+            window_size,
+            palette,
+        }
+    }
+
+    /// Write raw bytes into the PTY, flushing immediately.
+    ///
+    /// Terminal replies are latency sensitive (the application is usually
+    /// blocked reading stdin), so we never buffer them.
+    pub fn write(&self, bytes: &[u8]) {
+        let mut writer = self.writer.lock();
+        let _ = writer.write_all(bytes);
+        let _ = writer.flush();
+    }
+
+    pub fn write_str(&self, text: &str) {
+        self.write(text.as_bytes());
+    }
+
+    pub fn window_size(&self) -> WindowSize {
+        *self.window_size.lock()
+    }
+
+    pub fn color(&self, index: usize) -> Rgb {
+        self.palette.lock().rgb_at(index)
+    }
+}
+
+/// Events that need to be handled on the UI thread.
+#[derive(Clone)]
+pub enum TerminalEvent {
+    /// New content is available; the view should repaint.
     Wakeup,
 
+    /// `BEL` was received.
     Bell,
 
+    /// `OSC 0 / 1 / 2` window/icon title change.
     Title(String),
 
-    ClipboardStore(String),
+    /// `OSC 2` reset — the title should fall back to the default.
+    ResetTitle,
 
-    ClipboardLoad,
+    /// `OSC 52` clipboard write request.
+    ClipboardStore(ClipboardType, String),
 
+    /// `OSC 52` clipboard read request. The payload must be handed to the
+    /// formatter and the result written back into the PTY.
+    ClipboardLoad(ClipboardType, ClipboardFormatter),
+
+    /// `DECSCUSR` / `CSI ? 12 h|l` changed whether the cursor blinks.
+    CursorBlinkingChange,
+
+    /// The grid changed in a way that may require a different mouse cursor.
+    MouseCursorDirty,
+
+    /// The child process exited with the given status code.
+    ChildExit(i32),
+
+    /// The terminal wants to shut down (EOF on the PTY, `Event::Exit`, …).
     Exit,
 }
 
-pub struct GpuiEventProxy {
+impl fmt::Debug for TerminalEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TerminalEvent::Wakeup => write!(f, "Wakeup"),
+            TerminalEvent::Bell => write!(f, "Bell"),
+            TerminalEvent::Title(title) => write!(f, "Title({title})"),
+            TerminalEvent::ResetTitle => write!(f, "ResetTitle"),
+            TerminalEvent::ClipboardStore(ty, text) => write!(f, "ClipboardStore({ty:?}, {text})"),
+            TerminalEvent::ClipboardLoad(ty, _) => write!(f, "ClipboardLoad({ty:?})"),
+            TerminalEvent::CursorBlinkingChange => write!(f, "CursorBlinkingChange"),
+            TerminalEvent::MouseCursorDirty => write!(f, "MouseCursorDirty"),
+            TerminalEvent::ChildExit(code) => write!(f, "ChildExit({code})"),
+            TerminalEvent::Exit => write!(f, "Exit"),
+        }
+    }
+}
 
+/// Slot the [`TerminalView`](crate::view::TerminalView) uses to hand the PTY
+/// writer to the proxy *after* the terminal has been constructed.
+pub type NotifierSlot = Arc<Mutex<Option<TerminalNotifier>>>;
+
+pub struct GpuiEventProxy {
     tx: Sender<TerminalEvent>,
+    notifier: NotifierSlot,
 }
 
 impl GpuiEventProxy {
-
     pub fn new(tx: Sender<TerminalEvent>) -> Self {
-        Self { tx }
+        Self {
+            tx,
+            notifier: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Handle used to install the PTY notifier once the writer exists.
+    pub fn notifier_slot(&self) -> NotifierSlot {
+        Arc::clone(&self.notifier)
     }
 
     fn send(&self, event: TerminalEvent) {
-
         let _ = self.tx.send(event);
+    }
+
+    fn with_notifier<F: FnOnce(&TerminalNotifier)>(&self, f: F) {
+        let guard = self.notifier.lock();
+        if let Some(notifier) = guard.as_ref() {
+            f(notifier);
+        }
     }
 }
 
 impl EventListener for GpuiEventProxy {
-
     fn send_event(&self, event: Event) {
         match event {
-            Event::Wakeup => {
-                self.send(TerminalEvent::Wakeup);
-            }
-            Event::Bell => {
-                self.send(TerminalEvent::Bell);
-            }
-            Event::Title(title) => {
-                self.send(TerminalEvent::Title(title));
-            }
-            Event::ClipboardStore(_clipboard_type, data) => {
+            Event::Wakeup => self.send(TerminalEvent::Wakeup),
+            Event::Bell => self.send(TerminalEvent::Bell),
+            Event::Title(title) => self.send(TerminalEvent::Title(title)),
+            Event::ResetTitle => self.send(TerminalEvent::ResetTitle),
 
-                self.send(TerminalEvent::ClipboardStore(data));
+            Event::ClipboardStore(clipboard_type, data) => {
+                self.send(TerminalEvent::ClipboardStore(clipboard_type, data))
             }
-            Event::ClipboardLoad(_clipboard_type, _format) => {
-
-                self.send(TerminalEvent::ClipboardLoad);
-            }
-            Event::Exit => {
-                self.send(TerminalEvent::Exit);
+            Event::ClipboardLoad(clipboard_type, formatter) => {
+                self.send(TerminalEvent::ClipboardLoad(clipboard_type, formatter))
             }
 
-            Event::MouseCursorDirty => {}
-            Event::PtyWrite(ref _data) => {
+            // Answered inline: the requesting program is blocked on stdin.
+            Event::PtyWrite(text) => self.with_notifier(|notifier| notifier.write_str(&text)),
+            Event::ColorRequest(index, formatter) => self.with_notifier(|notifier| {
+                let rgb = notifier.color(index);
+                notifier.write_str(&formatter(rgb));
+            }),
+            Event::TextAreaSizeRequest(formatter) => self.with_notifier(|notifier| {
+                let size = notifier.window_size();
+                notifier.write_str(&formatter(size));
+            }),
 
-            }
-            Event::ColorRequest(ref _index, ref _format) => {
+            Event::CursorBlinkingChange => self.send(TerminalEvent::CursorBlinkingChange),
+            Event::MouseCursorDirty => self.send(TerminalEvent::MouseCursorDirty),
 
-            }
-            Event::TextAreaSizeRequest(ref _format) => {
-
-            }
-            Event::CursorBlinkingChange => {
-
-            }
-            Event::ResetTitle => {
-
-                self.send(TerminalEvent::Title(String::new()));
-            }
-            Event::ChildExit(_exit_code) => {
-
-                self.send(TerminalEvent::Exit);
-            }
+            Event::ChildExit(exit_code) => self.send(TerminalEvent::ChildExit(exit_code)),
+            Event::Exit => self.send(TerminalEvent::Exit),
         }
     }
 }
@@ -88,6 +204,33 @@ impl EventListener for GpuiEventProxy {
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
+
+    fn notifier(sink: PtyWriter) -> TerminalNotifier {
+        TerminalNotifier::new(
+            sink,
+            Arc::new(Mutex::new(WindowSize {
+                num_lines: 24,
+                num_cols: 80,
+                cell_width: 8,
+                cell_height: 16,
+            })),
+            Arc::new(Mutex::new(ColorPalette::default())),
+        )
+    }
+
+    #[derive(Clone, Default)]
+    struct Recorder(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Recorder {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_event_proxy_creation() {
@@ -99,115 +242,124 @@ mod tests {
     fn test_wakeup_event() {
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
         proxy.send_event(Event::Wakeup);
-
-        let event = rx.recv().unwrap();
-        assert!(matches!(event, TerminalEvent::Wakeup));
+        assert!(matches!(rx.recv().unwrap(), TerminalEvent::Wakeup));
     }
 
     #[test]
     fn test_bell_event() {
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
         proxy.send_event(Event::Bell);
-
-        let event = rx.recv().unwrap();
-        assert!(matches!(event, TerminalEvent::Bell));
+        assert!(matches!(rx.recv().unwrap(), TerminalEvent::Bell));
     }
 
     #[test]
     fn test_title_event() {
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
         proxy.send_event(Event::Title("Test Title".to_string()));
-
-        let event = rx.recv().unwrap();
-        match event {
+        match rx.recv().unwrap() {
             TerminalEvent::Title(title) => assert_eq!(title, "Test Title"),
-            _ => panic!("Expected Title event"),
+            other => panic!("Expected Title event, got {other:?}"),
         }
     }
 
     #[test]
     fn test_clipboard_store_event() {
-        use alacritty_terminal::term::ClipboardType;
-
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
         proxy.send_event(Event::ClipboardStore(
             ClipboardType::Clipboard,
             "clipboard data".to_string(),
         ));
-
-        let event = rx.recv().unwrap();
-        match event {
-            TerminalEvent::ClipboardStore(data) => assert_eq!(data, "clipboard data"),
-            _ => panic!("Expected ClipboardStore event"),
+        match rx.recv().unwrap() {
+            TerminalEvent::ClipboardStore(_, data) => assert_eq!(data, "clipboard data"),
+            other => panic!("Expected ClipboardStore event, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_clipboard_load_event() {
-        use alacritty_terminal::term::ClipboardType;
-        use std::sync::Arc;
-
+    fn test_clipboard_load_event_is_forwarded_with_formatter() {
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
-        let callback = Arc::new(|s: &str| s.to_string());
+        let callback: ClipboardFormatter = Arc::new(|s: &str| format!("<{s}>"));
         proxy.send_event(Event::ClipboardLoad(ClipboardType::Clipboard, callback));
 
-        let event = rx.recv().unwrap();
-        assert!(matches!(event, TerminalEvent::ClipboardLoad));
+        match rx.recv().unwrap() {
+            TerminalEvent::ClipboardLoad(_, formatter) => assert_eq!(formatter("hi"), "<hi>"),
+            other => panic!("Expected ClipboardLoad event, got {other:?}"),
+        }
     }
 
     #[test]
-    fn test_exit_event() {
-        let (tx, rx) = channel();
+    fn test_pty_write_is_answered_inline() {
+        let (tx, _rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
 
-        proxy.send_event(Event::Exit);
+        let recorder = Recorder::default();
+        let sink: PtyWriter = Arc::new(Mutex::new(Box::new(recorder.clone())));
+        *proxy.notifier_slot().lock() = Some(notifier(sink));
 
-        let event = rx.recv().unwrap();
-        assert!(matches!(event, TerminalEvent::Exit));
+        proxy.send_event(Event::PtyWrite("\x1b[1;1R".to_string()));
+        assert_eq!(&*recorder.0.lock(), b"\x1b[1;1R");
+    }
+
+    #[test]
+    fn test_text_area_size_request_is_answered_inline() {
+        let (tx, _rx) = channel();
+        let proxy = GpuiEventProxy::new(tx);
+
+        let recorder = Recorder::default();
+        let sink: PtyWriter = Arc::new(Mutex::new(Box::new(recorder.clone())));
+        *proxy.notifier_slot().lock() = Some(notifier(sink));
+
+        proxy.send_event(Event::TextAreaSizeRequest(Arc::new(|size: WindowSize| {
+            format!("\x1b[4;{};{}t", size.num_lines, size.num_cols)
+        })));
+        assert_eq!(&*recorder.0.lock(), b"\x1b[4;24;80t");
+    }
+
+    #[test]
+    fn test_color_request_is_answered_inline() {
+        let (tx, _rx) = channel();
+        let proxy = GpuiEventProxy::new(tx);
+
+        let recorder = Recorder::default();
+        let sink: PtyWriter = Arc::new(Mutex::new(Box::new(recorder.clone())));
+        *proxy.notifier_slot().lock() = Some(notifier(sink));
+
+        proxy.send_event(Event::ColorRequest(
+            0,
+            Arc::new(|rgb: Rgb| format!("{:02x}{:02x}{:02x}", rgb.r, rgb.g, rgb.b)),
+        ));
+        assert_eq!(recorder.0.lock().len(), 6);
+    }
+
+    #[test]
+    fn test_child_exit_reports_status() {
+        let (tx, rx) = channel();
+        let proxy = GpuiEventProxy::new(tx);
+        proxy.send_event(Event::ChildExit(3));
+        match rx.recv().unwrap() {
+            TerminalEvent::ChildExit(code) => assert_eq!(code, 3),
+            other => panic!("Expected ChildExit, got {other:?}"),
+        }
     }
 
     #[test]
     fn test_reset_title_event() {
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
         proxy.send_event(Event::ResetTitle);
-
-        let event = rx.recv().unwrap();
-        match event {
-            TerminalEvent::Title(title) => assert!(title.is_empty()),
-            _ => panic!("Expected Title event"),
-        }
+        assert!(matches!(rx.recv().unwrap(), TerminalEvent::ResetTitle));
     }
 
     #[test]
-    fn test_ignored_events() {
+    fn test_disconnected_channel_is_not_fatal() {
         let (tx, rx) = channel();
         let proxy = GpuiEventProxy::new(tx);
-
-        proxy.send_event(Event::MouseCursorDirty);
-        proxy.send_event(Event::CursorBlinkingChange);
-
-        assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn test_disconnected_channel() {
-        let (tx, rx) = channel();
-        let proxy = GpuiEventProxy::new(tx);
-
         drop(rx);
-
         proxy.send_event(Event::Wakeup);
     }
 }
