@@ -203,8 +203,33 @@ jobs:
       - id: cargo-dist
         shell: bash
         run: |
-          dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
-          echo "dist ran successfully"
+          # HAND EDIT (see `allow-dirty` in Cargo.toml). This job has no Rust
+          # toolchain or cargo registry cache, so `dist build` shells out to
+          # `cargo metadata` and re-downloads the dependency graph from
+          # scratch. crates.io sits behind CloudFront, which intermittently
+          # answers cargo's request with a 206 instead of a 200, and cargo
+          # treats that as a hard failure:
+          #
+          #   error: failed to download from
+          #     `https://static.crates.io/crates/rayon-core/1.13.0/download`
+          #   Caused by: failed to get successful HTTP response ... got 206
+          #
+          # That is a transport flake, not a build error, and dist offers no
+          # knob for it -- `cache-builds` would not help either, because
+          # bumping the version invalidates the lockfile the cache keys on.
+          # So retry it here.
+          for attempt in 1 2 3 4; do
+            if dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json; then
+              echo "dist ran successfully"
+              break
+            fi
+            if [ "$attempt" -ge 4 ]; then
+              echo "::error::dist build failed after $attempt attempts"
+              exit 1
+            fi
+            echo "::warning::attempt $attempt failed, retrying in 20s"
+            sleep 20
+          done
 
           # Parse out what we just built and upload it to scratch storage
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"

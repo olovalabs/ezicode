@@ -313,7 +313,7 @@ jobs:
           set -euo pipefail
           PKGVER="${{ steps.payload.outputs.arch_pkgver }}"
 
-          rm -rf build-arch && mkdir -p build-arch/icons
+          rm -rf build-arch build-arch-out && mkdir -p build-arch/icons build-arch-out
           cp payload/usr/bin/ezicode build-arch/ezicode
           cp payload/usr/share/applications/ezicode.desktop build-arch/ezicode.desktop
           for size in 16 24 32 48 64 128 256 512; do
@@ -357,7 +357,15 @@ jobs:
           }
           EOF
 
-          docker run --rm -v "$PWD/build-arch:/build" archlinux:latest bash -c '
+          # The finished package is written into the container as `builder`, so
+          # inside the bind mount it is owned by a uid the host runner user
+          # cannot rename out of -- "mv: Permission denied". Copy it to a
+          # second bind mount as root, which the host user does own, so the
+          # final move is just a rename within a directory we own.
+          docker run --rm \
+            -v "$PWD/build-arch:/build" \
+            -v "$PWD/build-arch-out:/out" \
+            archlinux:latest bash -c '
             set -euo pipefail
             pacman -Syu --noconfirm --needed base-devel
             # makepkg refuses to run as root.
@@ -372,9 +380,11 @@ jobs:
             #     -> vulkan-icd-loader  -> libxcb  -> libxkbcommon  -> libxkbcommon-x11
             #   ==> ERROR: Could not resolve all dependencies.
             su builder -c "cd /build && makepkg --noconfirm --nodeps --clean --noprogressbar"
+            cp /build/*.pkg.tar.zst /out/
+            chmod 644 /out/*.pkg.tar.zst
           '
 
-          mv build-arch/*.pkg.tar.zst ./
+          mv build-arch-out/*.pkg.tar.zst ./
           tar --zstd -tf ezicode-*.pkg.tar.zst | sort
 
       # --- AppImage ---------------------------------------------------------
