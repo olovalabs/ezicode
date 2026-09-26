@@ -173,8 +173,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install cargo-wix
-        run: cargo install cargo-wix
+      - name: Install WiX v3 to a local prefix
+        run: cargo install wix --version 3.14.1 --root "$env:TEMP\wix"
         shell: pwsh
 
       - name: Download the Windows zip
@@ -201,16 +201,42 @@ jobs:
           $exe = Get-ChildItem "$extract/ezicode.exe" -Recurse | Select-Object -First 1
           if (-not $exe) { Write-Error "ezicode.exe not found in zip"; exit 1 }
 
-          # cargo wix downloads its own WiX v3 internally, bypassing the
-          # pre-installed WiX v7 on windows-latest runners.
-          Push-Location $extract
-          cargo wix init --force --installer-path "$($exe.FullName)"
-          cargo wix --force
-          Pop-Location
+          # Use the full path to the v3 wix.exe, bypassing the pre-installed v7.
+          $wix = Join-Path $env:TEMP "wix\bin\wix.exe"
+          if (-not (Test-Path $wix)) { Write-Error "wix.exe not found at $wix"; exit 1 }
 
-          $msi = Get-ChildItem "$extract/target/wix/*.msi" | Select-Object -First 1
-          if (-not $msi) { Write-Error "MSI not found"; exit 1 }
-          Copy-Item $msi.FullName "ezicode-x86_64-pc-windows-msvc.msi"
+          # Generate the WiX source file for the installer
+          $wxs = @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+            <Product Id="*" Name="ezicode" Language="1033" Version="0.1.1" Manufacturer="olovalabs" UpgradeCode="73777BB8-7869-4628-A155-E84CACDC8666">
+              <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+              <MajorUpgrade DowngradeErrorMessage="A newer version of ezicode is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+              <Feature Id="ProductFeature" Title="ezicode" Level="1">
+                <ComponentGroupRef Id="ProductComponents" />
+              </Feature>
+            </Product>
+            <Fragment>
+              <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+                <Component Id="ezicode.exe" Guid="79DC5E44-EDC7-499A-8192-B4C834244FAB">
+                  <File Id="ezicode.exe" Source="$($exe.FullName)" KeyPath="yes" />
+                </Component>
+              </ComponentGroup>
+            </Fragment>
+            <Fragment>
+              <Directory Id="TARGETDIR" Name="SourceDir">
+                <Directory Id="ProgramFilesFolder">
+                  <Directory Id="INSTALLFOLDER" Name="ezicode" />
+                </Directory>
+              </Directory>
+            </Fragment>
+          </Wix>
+          "@
+          $wxs | Out-File -FilePath "$extract\ezicode.wxs" -Encoding utf8
+
+          # Build the MSI
+          & $wix build "$extract\ezicode.wxs" -o "ezicode-x86_64-pc-windows-msvc.msi"
           Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi"
         shell: pwsh
 
