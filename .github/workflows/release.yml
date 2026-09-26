@@ -161,6 +161,96 @@ jobs:
             ezicode-aarch64-apple-darwin.tar.gz.sha256
           fail_on_unmatched_files: true
 
+  # MSI installer for Windows, built from the zip that build-windows
+  # already uploaded. Needs ONLY build-windows, so a queued macOS or
+  # Linux runner can never delay it.
+  windows-packages:
+    name: windows MSI installer
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install WiX toolset
+        run: dotnet tool install --global wix
+        shell: pwsh
+
+      - name: Download the Windows zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          New-Item -ItemType Directory -Force -Path "target/distrib" | Out-Null
+          gh release download "$TAG" -p "ezicode-x86_64-pc-windows-msvc.zip" -D "target/distrib/"
+        shell: pwsh
+
+      - name: Extract the zip
+        run: |
+          $zip = Get-ChildItem "target/distrib/ezicode-x86_64-pc-windows-msvc.zip" | Select-Object -First 1
+          $extract = Join-Path $env:TEMP "ezicode-msi"
+          Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+          Expand-Archive -Path $zip.FullName -DestinationPath $extract -Force
+          Write-Output "extract=$extract"
+        shell: pwsh
+
+      - name: Build MSI installer
+        run: |
+          $extract = Join-Path $env:TEMP "ezicode-msi"
+          $exe = Get-ChildItem "$extract/ezicode.exe" -Recurse | Select-Object -First 1
+          if (-not $exe) { Write-Error "ezicode.exe not found in zip"; exit 1 }
+
+          # cargo wix init creates a template wxs, then we customize it.
+          $wixPath = Join-Path $extract "wix"
+          New-Item -ItemType Directory -Force -Path $wixPath | Out-Null
+
+          # Generate the WiX source file for the installer
+          $wxs = @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+            <Product Id="*" Name="ezicode" Language="1033" Version="0.1.1" Manufacturer="olovalabs" UpgradeCode="73777BB8-7869-4628-A155-E84CACDC8666">
+              <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+              <MajorUpgrade DowngradeErrorMessage="A newer version of ezicode is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+              <Feature Id="ProductFeature" Title="ezicode" Level="1">
+                <ComponentGroupRef Id="ProductComponents" />
+              </Feature>
+            </Product>
+            <Fragment>
+              <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+                <Component Id="ezicode.exe" Guid="79DC5E44-EDC7-499A-8192-B4C834244FAB">
+                  <File Id="ezicode.exe" Source="$($exe.FullName)" KeyPath="yes" />
+                </Component>
+              </ComponentGroup>
+            </Fragment>
+            <Fragment>
+              <Directory Id="TARGETDIR" Name="SourceDir">
+                <Directory Id="ProgramFilesFolder">
+                  <Directory Id="INSTALLFOLDER" Name="ezicode" />
+                </Directory>
+              </Directory>
+            </Fragment>
+          </Wix>
+          "@
+          $wxs | Out-File -FilePath "$wixPath/ezicode.wxs" -Encoding utf8
+
+          # Build the MSI
+          wix build "$wixPath/ezicode.wxs" -o "ezicode-x86_64-pc-windows-msvc.msi"
+          Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi"
+        shell: pwsh
+
+      - name: Upload MSI to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $msi = Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi" | Select-Object -First 1
+          $hash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($msi.Name)`n" | Out-File -FilePath "$($msi.Name).sha256" -NoNewline -Encoding ascii
+          gh release upload "$TAG" $msi.FullName "$($msi.Name).sha256" --clobber
+        shell: pwsh
+
   # .deb / .rpm / Arch / AppImage, built from the Linux tarball that
   # build-linux already uploaded. Needs ONLY build-linux, so a queued macOS
   # or Windows runner can never delay Linux packages.
