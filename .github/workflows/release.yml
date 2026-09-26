@@ -174,13 +174,17 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download WiX v3 binaries
+        id: wix
         run: |
           $wixZip = Join-Path $env:TEMP "wix314-binaries.zip"
           $wixDir = Join-Path $env:TEMP "wix314"
           Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile $wixZip
           Remove-Item -Recurse -Force $wixDir -ErrorAction SilentlyContinue
           Expand-Archive -Path $wixZip -DestinationPath $wixDir -Force
-          Write-Output "wixDir=$wixDir"
+          # The zip extracts to a subdirectory, so find wix.exe recursively
+          $wixExe = Get-ChildItem -Path $wixDir -Recurse -Filter "wix.exe" | Select-Object -First 1
+          if (-not $wixExe) { Write-Error "wix.exe not found in $wixDir"; exit 1 }
+          Write-Output "wixExe=$($wixExe.FullName)" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Download the Windows zip
@@ -208,7 +212,7 @@ jobs:
           if (-not $exe) { Write-Error "ezicode.exe not found in zip"; exit 1 }
 
           # Use the full path to the v3 wix.exe, bypassing the pre-installed v7.
-          $wix = Join-Path $env:TEMP "wix314\wix.exe"
+          $wix = "${{ steps.wix.outputs.wixExe }}"
           if (-not (Test-Path $wix)) { Write-Error "wix.exe not found at $wix"; exit 1 }
 
           # Generate the WiX source file for the installer
