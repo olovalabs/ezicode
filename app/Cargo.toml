@@ -17,7 +17,7 @@ name = "ezicode"
 # The release tag has to be exactly `v<this value>` or dist refuses to plan.
 # A prerelease suffix is fine here (the packaging splits it per ecosystem, see
 # .github/workflows/linux-packages.yml) but it is not what we want yet.
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 build = "build.rs"
 description = "Fast, modern code editor powered by GPUI"
