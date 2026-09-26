@@ -173,8 +173,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install WiX v3
-        run: dotnet tool install --global wix --version 3.14.1
+      - name: Download WiX v3 binaries
+        run: |
+          $wixZip = Join-Path $env:TEMP "wix314-binaries.zip"
+          $wixDir = Join-Path $env:TEMP "wix314"
+          Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile $wixZip
+          Remove-Item -Recurse -Force $wixDir -ErrorAction SilentlyContinue
+          Expand-Archive -Path $wixZip -DestinationPath $wixDir -Force
+          Write-Output "wixDir=$wixDir"
         shell: pwsh
 
       - name: Download the Windows zip
@@ -202,7 +208,7 @@ jobs:
           if (-not $exe) { Write-Error "ezicode.exe not found in zip"; exit 1 }
 
           # Use the full path to the v3 wix.exe, bypassing the pre-installed v7.
-          $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe"
+          $wix = Join-Path $env:TEMP "wix314\wix.exe"
           if (-not (Test-Path $wix)) { Write-Error "wix.exe not found at $wix"; exit 1 }
 
           # Generate the WiX source file for the installer
