@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install WiX toolset
-        run: dotnet tool install --global wix
+        run: dotnet tool install --global wix --version 3.14.1
         shell: pwsh
 
       - name: Download the Windows zip
