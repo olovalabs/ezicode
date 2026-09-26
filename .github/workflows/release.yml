@@ -181,10 +181,13 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile $wixZip
           Remove-Item -Recurse -Force $wixDir -ErrorAction SilentlyContinue
           Expand-Archive -Path $wixZip -DestinationPath $wixDir -Force
-          # The zip extracts to a subdirectory, so find wix.exe recursively
-          $wixExe = Get-ChildItem -Path $wixDir -Recurse -Filter "wix.exe" | Select-Object -First 1
-          if (-not $wixExe) { Write-Error "wix.exe not found in $wixDir"; exit 1 }
-          Write-Output "wixExe=$($wixExe.FullName)" >> $env:GITHUB_OUTPUT
+          # WiX v3 has no wix.exe (unified CLI is v4+ only) — it uses
+          # candle.exe (compile) + light.exe (link).
+          $candle = Get-ChildItem -Path $wixDir -Recurse -Filter "candle.exe" | Select-Object -First 1
+          $light = Get-ChildItem -Path $wixDir -Recurse -Filter "light.exe" | Select-Object -First 1
+          if (-not $candle) { Write-Error "candle.exe not found in $wixDir"; Get-ChildItem -Recurse $wixDir | Select-Object -First 30; exit 1 }
+          if (-not $light) { Write-Error "light.exe not found in $wixDir"; exit 1 }
+          Write-Output "wixDir=$($candle.DirectoryName)" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Download the Windows zip
@@ -211,15 +214,20 @@ jobs:
           $exe = Get-ChildItem "$extract/ezicode.exe" -Recurse | Select-Object -First 1
           if (-not $exe) { Write-Error "ezicode.exe not found in zip"; exit 1 }
 
-          # Use the full path to the v3 wix.exe, bypassing the pre-installed v7.
-          $wix = "${{ steps.wix.outputs.wixExe }}"
-          if (-not (Test-Path $wix)) { Write-Error "wix.exe not found at $wix"; exit 1 }
+          # WiX v3: compile with candle.exe, link with light.exe (no wix.exe).
+          $wixDir = "${{ steps.wix.outputs.wixDir }}"
+          $candle = Join-Path $wixDir "candle.exe"
+          $light = Join-Path $wixDir "light.exe"
+          if (-not (Test-Path $candle)) { Write-Error "candle.exe not found at $candle"; exit 1 }
+          if (-not (Test-Path $light)) { Write-Error "light.exe not found at $light"; exit 1 }
+
+          $ver = "${{ github.ref_name }}".TrimStart("v")
 
           # Generate the WiX source file for the installer
           $wxs = @"
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-            <Product Id="*" Name="ezicode" Language="1033" Version="0.1.1" Manufacturer="olovalabs" UpgradeCode="73777BB8-7869-4628-A155-E84CACDC8666">
+            <Product Id="*" Name="ezicode" Language="1033" Version="$ver" Manufacturer="olovalabs" UpgradeCode="73777BB8-7869-4628-A155-E84CACDC8666">
               <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
               <MajorUpgrade DowngradeErrorMessage="A newer version of ezicode is already installed." />
               <MediaTemplate EmbedCab="yes" />
@@ -245,8 +253,9 @@ jobs:
           "@
           $wxs | Out-File -FilePath "$extract\ezicode.wxs" -Encoding utf8
 
-          # Build the MSI
-          & $wix build "$extract\ezicode.wxs" -o "ezicode-x86_64-pc-windows-msvc.msi"
+          # Build the MSI the WiX v3 way: candle (compile) then light (link).
+          & $candle "$extract\ezicode.wxs" -out "$extract\ezicode.wixobj"
+          & $light "$extract\ezicode.wixobj" -out "ezicode-x86_64-pc-windows-msvc.msi"
           Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi"
         shell: pwsh
 
