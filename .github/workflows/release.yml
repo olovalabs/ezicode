@@ -106,7 +106,10 @@ jobs:
           Copy-Item "README.md" "dist/ezicode-$t/" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist/ezicode-$t" -DestinationPath "ezicode-$t.zip" -Force
           ((Get-FileHash "ezicode-$t.zip" -Algorithm SHA256).Hash.ToLower() + "  ezicode-$t.zip`n") | Out-File -FilePath "ezicode-$t.zip.sha256" -NoNewline -Encoding ascii
-          Get-ChildItem "ezicode-$t.zip*"
+          # Standalone exe next to the zip, so users can grab it directly.
+          Copy-Item "target/release/ezicode.exe" "ezicode-$t.exe"
+          ((Get-FileHash "ezicode-$t.exe" -Algorithm SHA256).Hash.ToLower() + "  ezicode-$t.exe`n") | Out-File -FilePath "ezicode-$t.exe.sha256" -NoNewline -Encoding ascii
+          Get-ChildItem "ezicode-$t.*"
 
       - name: Upload to the release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -115,6 +118,8 @@ jobs:
           files: |
             ezicode-x86_64-pc-windows-msvc.zip
             ezicode-x86_64-pc-windows-msvc.zip.sha256
+            ezicode-x86_64-pc-windows-msvc.exe
+            ezicode-x86_64-pc-windows-msvc.exe.sha256
           fail_on_unmatched_files: true
 
   build-macos:

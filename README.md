@@ -166,7 +166,7 @@ long time.
 | Platform | Target | Artifacts |
 | --- | --- | --- |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz`, `.deb`, `.rpm`, Arch `.pkg.tar.zst`, AppImage |
-| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip`, standalone `.exe` |
 | macOS Apple Silicon | `aarch64-apple-darwin` | `.tar.gz` |
 
 Every file ships with a `.sha256` sidecar. GitHub attaches a source
