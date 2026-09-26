@@ -381,8 +381,6 @@ pub struct LspClient {
 
     pending_changes: Arc<Mutex<HashMap<PathBuf, String>>>,
 
-    last_texts: Arc<Mutex<HashMap<PathBuf, String>>>,
-
     synced_texts: Arc<Mutex<HashMap<PathBuf, String>>>,
 
     last_diagnostics: Arc<Mutex<HashMap<PathBuf, Vec<lsp_types::Diagnostic>>>>,
@@ -454,8 +452,6 @@ impl LspClient {
         let versions = Arc::new(Mutex::new(HashMap::new()));
         let pending_changes: Arc<Mutex<HashMap<PathBuf, String>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let last_texts: Arc<Mutex<HashMap<PathBuf, String>>> =
-            Arc::new(Mutex::new(HashMap::new()));
         let synced_texts: Arc<Mutex<HashMap<PathBuf, String>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let last_diagnostics: Arc<Mutex<HashMap<PathBuf, Vec<lsp_types::Diagnostic>>>> =
@@ -477,7 +473,6 @@ impl LspClient {
             is_initialized: is_initialized.clone(),
             pending_opens: pending_opens.clone(),
             pending_changes: pending_changes.clone(),
-            last_texts: last_texts.clone(),
             synced_texts: synced_texts.clone(),
             last_diagnostics: last_diagnostics.clone(),
             server_capabilities: server_capabilities.clone(),
@@ -531,7 +526,6 @@ impl LspClient {
         let out_for_init = out_tx.clone();
         let pending_for_init = pending_opens.clone();
         let versions_for_init = versions.clone();
-        let last_texts_r = last_texts.clone();
         let synced_r = synced_texts.clone();
         let last_diag_r = last_diagnostics.clone();
         let caps_r = server_capabilities.clone();
@@ -610,7 +604,6 @@ impl LspClient {
                                 for (path, lang, text) in pendings {
                                     if let Some(uri) = path_to_uri(&path) {
                                         versions_for_init.lock().unwrap().insert(path.clone(), 1);
-                                        last_texts_r.lock().unwrap().insert(path.clone(), text.clone());
                                         synced_r.lock().unwrap().insert(path, text.clone());
                                         let params = DidOpenTextDocumentParams {
                                             text_document: TextDocumentItem {
@@ -680,7 +673,7 @@ impl LspClient {
     }
 
     pub fn last_text(&self, path: &Path) -> Option<String> {
-        self.last_texts.lock().unwrap().get(path).cloned()
+        self.synced_texts.lock().unwrap().get(path).cloned()
     }
 
     #[allow(deprecated)]
@@ -805,11 +798,6 @@ impl LspClient {
 
         let language_id = self.adapter.language_id(lang).to_string();
 
-        self.last_texts
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), text.to_string());
-
         self.synced_texts
             .lock()
             .unwrap()
@@ -857,10 +845,6 @@ impl LspClient {
             return;
         }
 
-        self.last_texts
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), text.clone());
         self.pending_changes
             .lock()
             .unwrap()
@@ -872,7 +856,6 @@ impl LspClient {
             return;
         };
         self.versions.lock().unwrap().remove(path);
-        self.last_texts.lock().unwrap().remove(path);
         self.synced_texts.lock().unwrap().remove(path);
         self.last_diagnostics.lock().unwrap().remove(path);
 
@@ -920,11 +903,6 @@ impl LspClient {
             return;
         };
         self.pending_changes.lock().unwrap().remove(path);
-
-        self.last_texts
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), text.to_string());
 
         let change = next_change_for(
             &self.synced_texts,

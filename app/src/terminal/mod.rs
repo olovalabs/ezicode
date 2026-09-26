@@ -205,8 +205,8 @@ impl Terminal {
             font_size: px(13.5),
             cols: 80,
             rows: 24,
-            // 100k lines of scrollback, like Zed's default `max_scroll_history_lines`.
-            scrollback: 100_000,
+            // 10k lines of scrollback — 100k was consuming ~96 MB per terminal tab.
+            scrollback: 10_000,
             line_height_multiplier: 1.2,
             padding: Edges::all(px(6.0)),
             colors: palette,

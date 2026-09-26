@@ -347,9 +347,14 @@ impl Workspace {
         // twice inside the foregound executor). Only the *changed path* is
         // forwarded; the UI-side reload is then scoped to the affected
         // directory instead of rescanning the whole tree.
+        let fs_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
         std::thread::spawn(move || {
             let rx = fs_event_rx;
             loop {
+                if fs_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
                 let Ok(first) = rx.recv_blocking() else { break };
                 let mut paths = vec![first];
                 while let Ok(more) = rx.try_recv() {
@@ -666,8 +671,13 @@ impl Workspace {
         self.cached_breadcrumbs = None;
         self.pending_open = None;
         self.picker = None;
+        self.workspace_files_cache = None;
         self.git_commit_input = None;
         self.git_commit_pending = false;
+
+        // Stop the git poll thread by dropping its poke sender — the thread
+        // exits within ~1.5 s when `recv_timeout` reports `Disconnected`.
+        self.git_poke_tx = None;
     }
 
     pub(crate) fn start_git_watcher(&mut self, root: &Path, cx: &mut Context<Self>) {
