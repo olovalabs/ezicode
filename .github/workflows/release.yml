@@ -256,19 +256,19 @@ jobs:
           # Build the MSI the WiX v3 way: candle (compile) then light (link).
           & $candle "$extract\ezicode.wxs" -out "$extract\ezicode.wixobj"
           & $light "$extract\ezicode.wixobj" -out "ezicode-x86_64-pc-windows-msvc.msi"
-          Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi"
+          $msiHash = (Get-FileHash "ezicode-x86_64-pc-windows-msvc.msi" -Algorithm SHA256).Hash.ToLower()
+          "$msiHash  ezicode-x86_64-pc-windows-msvc.msi`n" | Out-File -FilePath "ezicode-x86_64-pc-windows-msvc.msi.sha256" -NoNewline -Encoding ascii
+          Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi*"
         shell: pwsh
 
       - name: Upload MSI to the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          $msi = Get-ChildItem "ezicode-x86_64-pc-windows-msvc.msi" | Select-Object -First 1
-          $hash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash.ToLower()
-          "$hash  $($msi.Name)`n" | Out-File -FilePath "$($msi.Name).sha256" -NoNewline -Encoding ascii
-          gh release upload "$TAG" $msi.FullName "$($msi.Name).sha256" --clobber
-        shell: pwsh
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ezicode-x86_64-pc-windows-msvc.msi
+            ezicode-x86_64-pc-windows-msvc.msi.sha256
+          fail_on_unmatched_files: true
 
   # .deb / .rpm / Arch / AppImage, built from the Linux tarball that
   # build-linux already uploaded. Needs ONLY build-linux, so a queued macOS
