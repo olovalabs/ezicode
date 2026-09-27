@@ -34,15 +34,40 @@ impl Render for Workspace {
             self.poll_terminal_processes(cx);
         }
 
+        // Lazily create the search inputs on first visit so Ctrl+Shift+F can
+        // focus the query box immediately (idempotent, runs once).
+        if self.show_sidebar && self.activity == Activity::Search && self.search_query_input.is_none()
+        {
+            self.ensure_search_inputs(window, cx);
+        }
+
+        // A search-result click on a closed file queues a cursor jump that
+        // can only run once the async open has landed its tab.
+        if let Some((path, line, col)) = self.pending_search_jump.clone() {
+            if self.tabs.iter().any(|t| t.path.as_ref() == Some(&path)) {
+                self.pending_search_jump = None;
+                if self.active_path() == Some(&path) {
+                    self.jump_to_position(line, col, window, cx);
+                }
+            }
+        }
+
         // Guarantee that when no editor, modal, or input has focus, the workspace
         // focus handle is focused so that global keybindings like Ctrl+P, Ctrl+Shift+P,
         // Ctrl+G, etc. are always dispatched, even on the welcome screen or an empty workspace.
+        //
+        // The search view owns real text inputs: while it is the visible panel,
+        // focus is left alone, otherwise every render would yank focus out of
+        // the query/replace boxes and make them untypeable.
+        let search_panel_visible =
+            self.show_sidebar && self.activity == Activity::Search;
         if self.picker.is_none()
             && self.active_editor().is_none()
             && !self.show_terminal
             && self.git_commit_input.is_none()
             && self.inline_creating.is_none()
             && self.inline_renaming.is_none()
+            && !search_panel_visible
         {
             window.focus(&self.focus_handle);
         }
@@ -391,7 +416,9 @@ impl Render for Workspace {
                                         ),
                                         None => ui::welcome::render_no_folder_panel(&t, cx),
                                     },
-                                    Activity::Search => ui::sidebar::search::render_search_panel(&t),
+                                    Activity::Search => ui::sidebar::search::render_search_panel(
+                                        self, window, cx,
+                                    ),
                                     Activity::Git => ui::sidebar::git::render_git_panel(
                                         git_commit_input.as_ref(),
                                         git_repo,

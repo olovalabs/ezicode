@@ -1,8 +1,50 @@
 [package]
-name = "app"
-version = "0.1.0"
+# The directory is `app/` but the package is not called "app": cargo-dist names
+# every release artifact after the *package*, so a package called "app" ships
+# `app-x86_64-unknown-linux-gnu.tar.gz` and an `app-x86_64-pc-windows-msvc.msi`,
+# and titles the GitHub Release "app 0.1.0". The name is also what users type.
+# Renaming the directory instead would churn build.rs, the embedded asset paths
+# in app_icon.rs and the README layout for no benefit -- Cargo keys `-p` off the
+# package name, not the folder.
+name = "ezicode"
+# 0.1.0 rather than 0.0.1: the feature set -- LSP, an integrated terminal,
+# Git, themes, file icons -- is already substantial, and 0.0.x reads as "expect
+# all of this to move". Pre-1.0 is the honest signal that interfaces may still
+# change; a `-alpha.N` suffix is not used because that would mark the GitHub
+# Release a prerelease, and it would then never become `latest`, so
+# `releases/latest/download/ezicode-installer.sh` would keep serving nothing.
+#
+# The release tag has to be exactly `v<this value>` or dist refuses to plan.
+# A prerelease suffix is fine here (the packaging splits it per ecosystem, see
+# .github/workflows/linux-packages.yml) but it is not what we want yet.
+version = "0.1.2"
 edition = "2021"
 build = "build.rs"
+description = "Fast, modern code editor powered by GPUI"
+license = "MIT"
+authors = ["olovalabs"]
+repository = "https://github.com/olovalabs/ezicode"
+homepage = "https://github.com/olovalabs/ezicode"
+readme = "../README.md"
+# Metadata `cargo publish` wants but which is meaningless for a desktop app
+# that is only ever distributed as a built artifact. dist reads `publish` as
+# "do not distribute", so it has to be told otherwise explicitly.
+publish = false
+
+[package.metadata.dist]
+# ...here. Without this, `dist` sees no distable binary and refuses to plan.
+dist = true
+
+[package.metadata.wix]
+upgrade-guid = "73777BB8-7869-4628-A155-E84CACDC8666"
+path-guid = "79DC5E44-EDC7-499A-8192-B4C834244FAB"
+license = false
+eula = false
+
+# One binary, named after the package: `ezicode`.
+[[bin]]
+name = "ezicode"
+path = "src/main.rs"
 
 [features]
 default = []
@@ -41,9 +83,32 @@ tree-sitter = "0.25"
 tree-sitter-typescript = "0.23"
 fuzzy-matcher = "0.3.7"
 ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Linux has no icon resource inside the binary: the desktop entry, the hicolor
+# icon theme and (on X11) `_NET_WM_ICON` are what a panel reads. `image` is
+# restricted to the PNG codec because the embedded logo is already a PNG --
+# pulling in every decoder would cost build time and binary size for nothing.
+# `raw-window-handle` is only used to read the window id out of a GPUI `Window`;
+# `x11rb` opens a second connection to `$DISPLAY` because GPUI's `display_handle`
+# is unimplemented on X11.
+[target.'cfg(target_os = "linux")'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+raw-window-handle = "0.6"
+x11rb = "0.13"
+
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
+
+# `test-support` is what makes TestAppContext able to actually render: without it
+# the test platform has a no-op text system and throws every Scene away, so
+# VisualTestContext::draw cannot return pixels. It is a dev-dependency feature on
+# purpose -- the shipped binary must not pay for leak detection.
+[dev-dependencies]
+gpui = { version = "0.2.2", features = ["test-support"] }
+image = "0.25"

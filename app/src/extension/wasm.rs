@@ -31,9 +31,9 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use wasmtime::component::{Component, Linker};
+use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
-use wasmtime_wasi::{IoView, ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 
 use super::InstalledExtension;
 
@@ -43,13 +43,10 @@ struct Ctx {
     wasi: WasiCtx,
 }
 
-impl IoView for Ctx {
+impl WasiView for Ctx {
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
-}
-
-impl WasiView for Ctx {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
     }

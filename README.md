@@ -123,7 +123,7 @@ git clone https://github.com/olovalabs/ezicode.git
 cd ezicode
 
 # Run in development mode
-cargo run -p app
+cargo run -p ezicode
 
 # Or use the convenience scripts
 # On Linux / macOS:
@@ -137,10 +137,96 @@ run.cmd dev
 
 ```bash
 # Compile optimized release binary with LTO
-cargo build --release -p app
+cargo build --release -p ezicode
 
-# The binary will be generated at target/release/app (or app.exe on Windows)
+# The binary will be generated at target/release/ezicode (or ezicode.exe on Windows)
 ```
+
+---
+
+## 📦 Releases
+
+Releases are built by a hand-written GitHub Actions workflow
+(`.github/workflows/release.yml`) that runs `cargo build --release` on each
+platform and uploads the result straight to the GitHub Release. **Each
+platform uploads independently** — there is no global publish step, so a
+queued runner (usually macOS) can never hold up Linux or Windows.
+
+### Cutting a release
+
+1. Bump `version` in `app/Cargo.toml` and commit.
+2. Tag that commit `v<version>` and push the tag: `git tag v0.1.0 && git push --follow-tags`
+
+Pushing the tag is the build trigger: it creates the release and starts every
+build job. The tag must match the `version` in `app/Cargo.toml` exactly — each
+job checks this first and fails fast otherwise.
+
+```bash
+sed -i 's/^version = ".*"/version = "0.1.0"/' app/Cargo.toml
+git commit -am "chore: release 0.1.0"
+git tag v0.1.0 && git push --follow-tags
+```
+
+Expect roughly 10–20 minutes per platform on a cold cache (the LTO release
+build of GPUI plus the tree-sitter grammars is the bulk of it); repeat builds
+are faster thanks to `rust-cache`. Linux and Windows go live as soon as their
+own job finishes — they never wait for macOS, whose runners can queue for a
+long time.
+
+### What gets built
+
+| Platform | Target | Artifacts |
+| --- | --- | --- |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz`, `.deb`, `.rpm`, Arch `.pkg.tar.zst`, AppImage |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip`, standalone `.exe` |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `.tar.gz` |
+
+Every file ships with a `.sha256` sidecar. GitHub attaches a source
+tarball/zip to each release automatically.
+
+### Installing
+
+Artifact names follow the version. For a prerelease such as `0.1.0-alpha.1`,
+Debian and RPM spell the pre-release with `~` and Arch with a dot, because
+`makepkg` and `rpmbuild` both reject a hyphen in a version field:
+
+```bash
+# Debian / Ubuntu          (ezicode_0.1.0~alpha.1_amd64.deb for a prerelease)
+sudo apt install ./ezicode_0.1.0_amd64.deb
+
+# Fedora / RHEL / openSUSE   (ezicode-0.1.0~alpha.1-1.x86_64.rpm)
+sudo dnf install ./ezicode-0.1.0-1.x86_64.rpm
+
+# Arch                       (ezicode-0.1.0.alpha.1-1-x86_64.pkg.tar.zst)
+sudo pacman -U ./ezicode-0.1.0-1-x86_64.pkg.tar.zst
+
+# Any distro, no package manager
+chmod +x ezicode-0.1.0-x86_64.AppImage && ./ezicode-0.1.0-x86_64.AppImage
+```
+
+### How the packaging is put together
+
+There is one workflow: **`.github/workflows/release.yml`**, hand written and
+safe to edit. It has four jobs: one `cargo build --release` per platform that
+uploads its archive straight to the release, plus a `linux-packages` job
+(which needs only the Linux build) that turns the Linux tarball into `.deb`,
+`.rpm`, Arch `.pkg.tar.zst` and AppImage and uploads those too.
+
+If you add a target, add a job. There is no `.msi` or `curl | sh` / PowerShell
+installer — those were cargo-dist-generated wrappers around the same binaries,
+and the release page serves that purpose directly.
+
+### Runtime dependencies
+
+The binary links `libc`, `libgcc_s`, `libm`, `libxcb`, `libxkbcommon` and
+`libxkbcommon-x11`, and `dlopen`s the Vulkan loader at runtime. The packages
+declare all of those, and you also need a working Vulkan driver — without one
+the window opens and renders nothing.
+
+The Linux binary is built on `ubuntu-22.04`, so its glibc is 2.35: the `.deb`
+only installs on Ubuntu 22.04+ and Debian 12+. To support older distributions,
+set `min-glibc-version` in `Cargo.toml` and build in a matching older container
+via `github-custom-runners`.
 
 ---
 
@@ -279,6 +365,7 @@ ezicode/
 │       ├── fs_tree.rs        # Virtualized file tree model & filesystem ops
 │       ├── git.rs            # Native Git porcelain parser and process runner
 │       ├── lang.rs           # Language detection & LSP server mapping
+│       ├── linux_desktop.rs  # Linux desktop entry, icon theme & _NET_WM_ICON
 │       ├── lsp/              # LSP JSON-RPC client, Node auto-installer & adapters
 │       ├── terminal/         # Integrated GPU terminal panel & process lifecycle
 │       ├── theme/            # Zed JSON theme loader & color token extraction
@@ -298,6 +385,7 @@ ezicode/
 - **Panic Logger**: On unexpected crashes, `ezicode` automatically generates detailed trace logs in your system temporary directory (`ezicode-panic.log`) instead of silently exiting.
 - **Linux Linker Errors (`unable to find library -lxkbcommon-x11`)**: If compilation fails at the linking stage with `cannot find -lxkbcommon-x11`, install the development package providing the shared library symlinks (`sudo apt install -y libxkbcommon-x11-dev`).
 - **Node LSP Debugging**: If language servers fail to download or start, verify that Node.js is accessible on your system PATH (`node -v`). Downloaded language servers are located in `~/.local/share/ezicode/language-servers`.
+- **Taskbar Icon Missing on Linux**: unlike Windows, Linux has no icon resource inside the executable — panels and compositors resolve the logo from a desktop entry and the hicolor icon theme instead. `ezicode` writes both for the current user on every launch (`~/.local/share/applications/ezicode.desktop` and `~/.local/share/icons/hicolor/<size>x<size>/apps/ezicode.png`), and also sets `_NET_WM_ICON` on the window for X11 panels that skip the desktop entry. Run `./run.sh install` to install them without starting the editor, and log out and back in if a panel caches icons aggressively. A distro package must ship `ezicode.desktop` and the hicolor PNGs too — see the template in the repository root.
 
 ---
 
