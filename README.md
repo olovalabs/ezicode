@@ -1,8 +1,6 @@
+
 <div align="center">
-
-<img src="assets/logo/ezicode.png" alt="ezicode Logo" width="140" height="140" />
-
-# ezicode
+<img width="1630" height="220" alt="ezicode" src="https://github.com/user-attachments/assets/2020bb4b-0cd8-484d-98c5-e32721be6053" />
 
 <img width="1448" height="1000" alt="Untitled Design (1)" src="https://github.com/user-attachments/assets/1f9ae29f-5742-4f81-872d-f350cc46c992" />
 
