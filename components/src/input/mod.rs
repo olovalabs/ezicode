@@ -1,3 +1,4 @@
+mod blame;
 mod blink_cursor;
 mod change;
 mod clear_button;
@@ -18,6 +19,7 @@ mod state;
 mod text_wrapper;
 mod selection;
 
+pub use blame::{BlameDetail, BlameLine, InlineBlame};
 pub(crate) use clear_button::*;
 pub use cursor::*;
 pub use indent::TabSize;

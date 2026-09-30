@@ -49,6 +49,15 @@ actions!(
         GitStashPop,
         GitInit,
         GitBranchPicker,
+        /// Toggle the Zed-style per-line git blame in the gutter of the active
+        /// editor ("Toggle Git Blame").
+        ToggleGitBlame,
+        /// Switch the Source Control panel to the commit "History" graph.
+        GitShowHistory,
+        /// Switch the Source Control panel back to the changes list.
+        GitShowChanges,
+        /// Load the next page of commits into the history graph.
+        GitHistoryLoadMore,
         NextTerminal,
         PrevTerminal,
         CloseTerminal,
@@ -216,4 +225,40 @@ pub struct GitOpenFile {
 #[action(no_json)]
 pub struct SwitchTerminalTab {
     pub index: usize,
+}
+
+/// Open the details (message + changed files + diff) of a commit in the
+/// history graph.
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct GitSelectCommit {
+    pub sha: String,
+}
+
+/// Copy a commit's full SHA to the clipboard (history right-click menu).
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct GitCopySha {
+    pub sha: String,
+}
+
+/// Copy a commit's subject line to the clipboard (history right-click menu).
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct GitCopyCommitMessage {
+    pub sha: String,
+}
+
+/// Check out a commit (detached HEAD) from the history right-click menu.
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct GitCheckoutCommit {
+    pub sha: String,
+}
+
+/// Open a commit's full diff in a read-only diff tab (history right-click).
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub struct GitViewCommitDiff {
+    pub sha: String,
 }

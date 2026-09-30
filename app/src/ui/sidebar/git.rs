@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use gpui::{
-    div, prelude::*, px, rgba, svg, AnyElement, Context, ElementId, Entity, FontWeight,
-    IntoElement, SharedString, Window,
+    div, prelude::*, px, rgba, svg, uniform_list, AnyElement, App, Context, ElementId, Entity,
+    FontWeight, IntoElement, SharedString, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants as _},
@@ -14,13 +14,14 @@ use gpui_component::{
 };
 
 use crate::actions::{
-    ExplorerCopyPath, ExplorerRevealInFinder, GitBranchPicker, GitCommitAll, GitCommitAmend,
-    GitDiscardAll, GitDiscardFile, GitFetch, GitForcePush, GitInit, GitOpenDiff, GitOpenFile,
-    GitPull, GitPush, GitRefresh, GitStageAll, GitStageFile, GitStashPop, GitStashPush,
-    GitUnstageAll, GitUnstageFile,
+    ExplorerCopyPath, ExplorerRevealInFinder, GitBranchPicker, GitCheckoutCommit, GitCommitAll,
+    GitCommitAmend, GitCopyCommitMessage, GitCopySha, GitDiscardAll, GitDiscardFile, GitFetch,
+    GitForcePush, GitHistoryLoadMore, GitInit, GitOpenDiff, GitOpenFile, GitPull, GitPush,
+    GitRefresh, GitSelectCommit, GitShowChanges, GitShowHistory, GitStageAll, GitStageFile,
+    GitStashPop, GitStashPush, GitUnstageAll, GitUnstageFile, GitViewCommitDiff,
 };
 use crate::file_icons;
-use crate::git::{ChangeKind, GitChange, RepoStatus};
+use crate::git::{ChangeKind, Commit, GitChange, GraphRow, RefKind, RepoStatus};
 use crate::theme::Colors;
 use crate::ui::common::icon_img;
 use crate::workspace::{GitConfirm, GitSection, Workspace};
@@ -62,6 +63,15 @@ pub(crate) struct GitPanelParams<'a> {
     pub untracked_expanded: bool,
     /// Label of the remote operation in flight, e.g. "Push".
     pub op_running: Option<&'static str>,
+    /// Whether the History graph tab is shown instead of the changes list.
+    pub history_view: bool,
+    /// Loaded commits (newest first) and their precomputed graph rows.
+    pub history: &'a [crate::git::Commit],
+    pub graph: &'a [crate::git::GraphRow],
+    pub history_loading: bool,
+    pub history_complete: bool,
+    pub history_selected: Option<&'a str>,
+    pub history_scroll: &'a gpui::UniformListScrollHandle,
 }
 
 pub(crate) fn render_git_panel(
@@ -92,6 +102,12 @@ pub(crate) fn render_git_panel(
         }
         Some(repo) => {
             col = col.child(branch_row(repo, params.op_running, t, cx));
+            col = col.child(view_switcher(params.history_view, t, cx));
+
+            if params.history_view {
+                col = col.child(render_history(&params, t, cx));
+                return col.into_any_element();
+            }
 
             let mut body = div()
                 .id("git-sidebar-scroll")
@@ -285,6 +301,347 @@ pub(crate) fn render_git_panel(
     }
 
     col.into_any_element()
+}
+
+const HISTORY_ROW_HEIGHT: f32 = 54.0;
+const LANE_WIDTH: f32 = 14.0;
+const MAX_LANES: usize = 6;
+
+/// The "Changes | History" segmented control shown above the panel body,
+/// mirroring VS Code / Zed's Source Control view tabs.
+fn view_switcher(history_view: bool, t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
+    let tab = |id: &'static str, label: &'static str, active: bool| {
+        let mut b = div()
+            .id(id)
+            .flex_1()
+            .h(px(26.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(12.0))
+            .cursor_pointer()
+            .rounded(px(4.0));
+        if active {
+            b = b
+                .bg(rgba(t.element_selected))
+                .text_color(rgba(t.text))
+                .font_weight(FontWeight::MEDIUM);
+        } else {
+            b = b
+                .text_color(rgba(t.text_muted))
+                .hover(|s| s.bg(rgba(t.ghost_hover)));
+        }
+        b.child(SharedString::from(label))
+    };
+
+    div()
+        .w_full()
+        .px(px(12.0))
+        .py(px(6.0))
+        .flex()
+        .flex_row()
+        .gap(px(4.0))
+        .child(
+            tab("git-tab-changes", "Changes", !history_view).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.git_show_changes(cx);
+                },
+            )),
+        )
+        .child(
+            tab("git-tab-history", "History", history_view).on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.git_show_history(cx);
+                },
+            )),
+        )
+}
+
+/// The virtualized commit-graph list.
+fn render_history(params: &GitPanelParams, t: &Colors, cx: &mut Context<Workspace>) -> AnyElement {
+    if params.history.is_empty() {
+        let msg = if params.history_loading {
+            "Loading history…"
+        } else {
+            "No commits yet"
+        };
+        return div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(12.5))
+            .text_color(rgba(t.text_muted))
+            .child(SharedString::from(msg))
+            .into_any_element();
+    }
+
+    let workspace = cx.entity();
+    let colors = *t;
+    let selected = params.history_selected.map(|s| s.to_string());
+    let commit_count = params.history.len();
+    let complete = params.history_complete;
+    let item_count = commit_count + if complete { 0 } else { 1 };
+
+    let list = uniform_list(
+        "git-history-list",
+        item_count,
+        move |range, _window, app: &mut App| {
+            let workspace = workspace.clone();
+            let selected = selected.clone();
+            workspace.update(app, |ws, cx| {
+                range
+                    .map(|idx| {
+                        if idx >= ws.git_history.len() {
+                            return load_more_row(ws.git_history_loading, &colors, cx);
+                        }
+                        let commit = ws.git_history[idx].clone();
+                        let graph = ws.git_history_graph.get(idx).cloned();
+                        let is_selected = selected.as_deref() == Some(commit.sha.as_str());
+                        commit_row(commit, graph, is_selected, &colors, cx)
+                    })
+                    .collect::<Vec<AnyElement>>()
+            })
+        },
+    )
+    .track_scroll(params.history_scroll.clone())
+    .w_full()
+    .flex_1();
+
+    div()
+        .flex_1()
+        .w_full()
+        .min_h(px(0.0))
+        .flex()
+        .flex_col()
+        .child(list)
+        .into_any_element()
+}
+
+/// A single commit in the history graph: lane graphic + message + metadata +
+/// ref badges, with a right-click menu (copy SHA / message, checkout, diff).
+fn commit_row(
+    commit: Commit,
+    graph: Option<GraphRow>,
+    selected: bool,
+    t: &Colors,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    let sha = commit.sha.clone();
+    let sha_menu = commit.sha.clone();
+    let sha_click = commit.sha.clone();
+
+    let meta = format!(
+        "{} • {} • {}",
+        commit.author, commit.relative_time, commit.short_sha
+    );
+
+    let mut badges = div().flex().flex_row().items_center().gap(px(4.0));
+    for r in commit.refs.iter().take(3) {
+        badges = badges.child(ref_badge(r, t));
+    }
+
+    let mut row = div()
+        .id(SharedString::from(format!("commit-{}", commit.short_sha)))
+        .w_full()
+        .h(px(HISTORY_ROW_HEIGHT))
+        .flex()
+        .flex_row()
+        .items_center()
+        .px(px(8.0))
+        .gap(px(6.0))
+        .cursor_pointer();
+
+    if selected {
+        row = row.bg(rgba(t.element_selected));
+    } else {
+        row = row.hover(|s| s.bg(rgba(t.ghost_hover)));
+    }
+
+    row.child(graph_gutter(graph.as_ref(), t))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(13.0))
+                                .text_color(rgba(t.text))
+                                .child(SharedString::from(commit.subject.clone())),
+                        )
+                        .child(badges),
+                )
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_size(px(11.0))
+                        .text_color(rgba(t.text_muted))
+                        .child(SharedString::from(meta)),
+                ),
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.git_select_commit(sha_click.clone(), cx);
+        }))
+        .context_menu(move |menu, _window, _cx| {
+            menu.menu("Copy SHA", Box::new(GitCopySha { sha: sha_menu.clone() }))
+                .menu(
+                    "Copy Message",
+                    Box::new(GitCopyCommitMessage {
+                        sha: sha_menu.clone(),
+                    }),
+                )
+                .separator()
+                .menu(
+                    "View Diff",
+                    Box::new(GitViewCommitDiff {
+                        sha: sha_menu.clone(),
+                    }),
+                )
+                .menu(
+                    "Checkout Commit",
+                    Box::new(GitCheckoutCommit {
+                        sha: sha_menu.clone(),
+                    }),
+                )
+                .separator()
+                .menu("Select Commit", Box::new(GitSelectCommit { sha: sha.clone() }))
+        })
+        .into_any_element()
+}
+
+/// The bottom sentinel row that loads the next page of commits.
+fn load_more_row(loading: bool, t: &Colors, cx: &mut Context<Workspace>) -> AnyElement {
+    let mut row = div()
+        .id("git-history-load-more")
+        .w_full()
+        .h(px(36.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(12.0));
+
+    if loading {
+        return row
+            .text_color(rgba(t.text_muted))
+            .child(SharedString::from("Loading…"))
+            .into_any_element();
+    }
+
+    row = row
+        .text_color(rgba(t.text_accent))
+        .cursor_pointer()
+        .hover(|s| s.bg(rgba(t.ghost_hover)))
+        .child(SharedString::from("Load more commits…"));
+
+    row.on_click(cx.listener(|this, _, _, cx| {
+        this.git_history_load_more(cx);
+    }))
+    .into_any_element()
+}
+
+/// Draw the lane/merge graphic for one commit row.
+fn graph_gutter(graph: Option<&GraphRow>, t: &Colors) -> AnyElement {
+    let palette = lane_palette(t);
+    let Some(row) = graph else {
+        return div().w(px(LANE_WIDTH + 8.0)).flex_none().into_any_element();
+    };
+    let lanes = row.width().min(MAX_LANES).max(1);
+    let width = px(lanes as f32 * LANE_WIDTH + 8.0);
+    let half = px(HISTORY_ROW_HEIGHT / 2.0);
+
+    let mut container = div().relative().w(width).h(px(HISTORY_ROW_HEIGHT)).flex_none();
+
+    for i in 0..lanes {
+        let color = rgba(palette[i % palette.len()]);
+        let x = px(i as f32 * LANE_WIDTH + 6.0);
+        let in_present = row.lanes_in.get(i).map(|l| l.is_some()).unwrap_or(false) || i == row.column;
+        let out_present =
+            row.lanes_out.get(i).map(|l| l.is_some()).unwrap_or(false) || i == row.column;
+        if in_present {
+            container = container.child(
+                div()
+                    .absolute()
+                    .left(x)
+                    .top(px(0.0))
+                    .w(px(2.0))
+                    .h(half)
+                    .bg(color),
+            );
+        }
+        if out_present {
+            container = container.child(
+                div()
+                    .absolute()
+                    .left(x)
+                    .top(half)
+                    .w(px(2.0))
+                    .h(half)
+                    .bg(color),
+            );
+        }
+    }
+
+    let column = row.column.min(lanes.saturating_sub(1));
+    let node_color = rgba(palette[row.color % palette.len()]);
+    container = container.child(
+        div()
+            .absolute()
+            .left(px(column as f32 * LANE_WIDTH + 2.0))
+            .top(px(HISTORY_ROW_HEIGHT / 2.0 - 5.0))
+            .size(px(10.0))
+            .rounded_full()
+            .bg(node_color),
+    );
+
+    container.into_any_element()
+}
+
+/// A branch/tag badge next to a commit, colored by ref kind.
+fn ref_badge(r: &crate::git::CommitRef, t: &Colors) -> impl IntoElement {
+    let (bg, label) = match r.kind {
+        RefKind::Head => (t.text_accent, r.name.clone()),
+        RefKind::LocalBranch => (t.vc_added, r.name.clone()),
+        RefKind::RemoteBranch => (t.icon_accent, r.name.clone()),
+        RefKind::Tag => (t.vc_modified, format!("⌂ {}", r.name)),
+    };
+    div()
+        .px(px(5.0))
+        .py(px(1.0))
+        .rounded(px(3.0))
+        .bg(rgba(bg))
+        .text_size(px(9.5))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(rgba(t.background))
+        .whitespace_nowrap()
+        .child(SharedString::from(label))
+}
+
+/// The lane color palette, cycling through the theme's version-control accents.
+fn lane_palette(t: &Colors) -> [u32; 5] {
+    [
+        t.text_accent,
+        t.vc_added,
+        t.vc_modified,
+        t.icon_accent,
+        t.vc_deleted,
+    ]
 }
 
 fn header(t: &Colors, _window: &mut Window, _cx: &mut Context<Workspace>) -> impl IntoElement {

@@ -47,6 +47,12 @@ impl TextElement {
                     state.update(cx, |state, cx| {
                         state.on_drag_move(event, window, cx);
                     });
+                } else {
+                    // Track hover over inline blame annotations to drive the
+                    // commit-detail popover.
+                    state.update(cx, |state, cx| {
+                        state.update_blame_hover(event.position, cx);
+                    });
                 }
             }
         });
@@ -603,6 +609,62 @@ impl TextElement {
         (first_line, ghost_lines)
     }
 
+    /// Shape the inline git blame annotation for each row that should show one.
+    ///
+    /// In the default mode this is just the cursor's line (Zed's inline blame);
+    /// with the gutter toggle on it is every visible line. The text is muted
+    /// and drawn to the right of the line's content in [`Self::paint`], so it
+    /// never shifts or modifies the actual buffer text.
+    fn layout_blame(
+        state: &InputState,
+        visible_range: &Range<usize>,
+        current_row: Option<usize>,
+        font_size: Pixels,
+        window: &mut Window,
+        cx: &App,
+    ) -> Vec<(usize, SharedString, ShapedLine)> {
+        let blame = &state.blame;
+        let focused = state.focus_handle.is_focused(window);
+        let show_all = blame.shows_all_lines();
+        let show_current = blame.shows_current_line() && focused;
+        if !show_all && !show_current {
+            return vec![];
+        }
+
+        let color = cx.theme().muted_foreground.opacity(0.6);
+        let font = window.text_style().font();
+        let mut out = Vec::new();
+
+        for row in visible_range.start..visible_range.end {
+            let render = show_all || (show_current && current_row == Some(row));
+            if !render {
+                continue;
+            }
+            let Some(line) = blame.line(row) else {
+                continue;
+            };
+            if line.text.is_empty() {
+                continue;
+            }
+            let text = line.text.clone();
+            let sha = line.sha.clone();
+            let run = TextRun {
+                len: text.len(),
+                font: font.clone(),
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let shaped = window
+                .text_system()
+                .shape_line(text, font_size, &[run], None);
+            out.push((row, sha, shaped));
+        }
+
+        out
+    }
+
     fn layout_lines(
         state: &InputState,
         display_text: &Rope,
@@ -751,6 +813,14 @@ pub(super) struct PrepaintState {
 
     ghost_first_line: Option<ShapedLine>,
     ghost_lines_height: Pixels,
+
+    /// Inline git blame annotations to draw, `(row, sha, shaped)`.
+    blame_lines: Vec<(usize, SharedString, ShapedLine)>,
+    /// Asset path of the small git icon drawn before each annotation.
+    blame_icon: SharedString,
+    /// `git.inline_blame.min_column` and the em width used to honour it.
+    blame_min_column: u32,
+    blame_char_width: Pixels,
 }
 
 impl PrepaintState {
@@ -1119,6 +1189,36 @@ impl Element for TextElement {
         let indent_guides_path =
             self.layout_indent_guides(state, &bounds, &last_layout, &text_style, window);
 
+        let blame_lines = Self::layout_blame(
+            state,
+            &last_layout.visible_range,
+            current_row,
+            text_size,
+            window,
+            cx,
+        );
+        let (blame_icon, blame_min_column, blame_char_width) = if blame_lines.is_empty() {
+            (SharedString::default(), 0u32, px(0.))
+        } else {
+            let char_width = window
+                .text_system()
+                .shape_line(
+                    "0".into(),
+                    text_size,
+                    &[TextRun {
+                        len: 1,
+                        font: text_style.font(),
+                        color: text_color,
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                )
+                .width;
+            (state.blame.icon.clone(), state.blame.min_column, char_width)
+        };
+
         PrepaintState {
             bounds,
             last_layout,
@@ -1136,6 +1236,10 @@ impl Element for TextElement {
             ghost_first_line,
             ghost_lines,
             ghost_lines_height,
+            blame_lines,
+            blame_icon,
+            blame_min_column,
+            blame_char_width,
         }
     }
 
@@ -1255,6 +1359,10 @@ impl Element for TextElement {
         let ghost_lines = &prepaint.ghost_lines;
         let has_ghost_lines = !ghost_lines.is_empty();
 
+        // Screen bounds of each painted blame annotation, collected for hover
+        // hit-testing (see `paint_mouse_listeners`).
+        let mut blame_hitboxes: Vec<(usize, SharedString, Bounds<Pixels>)> = Vec::new();
+
         for (ix, line) in prepaint.last_layout.lines.iter().enumerate() {
             let row = visible_range.start + ix;
             let p = point(
@@ -1263,6 +1371,60 @@ impl Element for TextElement {
             );
 
             _ = line.paint(p, line_height, window, cx);
+
+            // Inline git blame: draw the muted annotation (with its small git
+            // icon) to the right of this line's text. It sits after the content
+            // so it never shifts or overlaps the real buffer text.
+            if let Some((_, sha, shaped)) =
+                prepaint.blame_lines.iter().find(|(r, _, _)| *r == row)
+            {
+                let wrapped = line.wrapped_lines.len().max(1);
+                let last_w = line
+                    .wrapped_lines
+                    .last()
+                    .map(|l| l.width)
+                    .unwrap_or(px(0.));
+                let gutter = prepaint.last_layout.line_number_width;
+                let line_end_x = origin.x + gutter + last_w;
+                let min_x =
+                    origin.x + gutter + prepaint.blame_char_width * prepaint.blame_min_column as f32;
+                let gap = if last_w > px(0.) { px(24.0) } else { px(0.0) };
+                let mut blame_x = (line_end_x + gap).max(min_x);
+                let blame_y = p.y + (wrapped as f32 - 1.0) * line_height;
+                let color = cx.theme().muted_foreground.opacity(0.6);
+                let hit_start_x = blame_x;
+
+                if !prepaint.blame_icon.is_empty() {
+                    let icon_size = px(12.0);
+                    let icon_bounds = Bounds::new(
+                        point(blame_x, blame_y + (line_height - icon_size).half()),
+                        size(icon_size, icon_size),
+                    );
+                    let _ = window.paint_svg(
+                        icon_bounds,
+                        prepaint.blame_icon.clone(),
+                        gpui::TransformationMatrix::unit(),
+                        color,
+                        cx,
+                    );
+                    blame_x += icon_size + px(6.0);
+                }
+
+                _ = shaped.paint(point(blame_x, blame_y), line_height, window, cx);
+
+                // Record the annotation's screen bounds (icon + text) so the
+                // mouse listener can show the commit-detail popover on hover.
+                let hit_end_x = blame_x + shaped.width;
+                blame_hitboxes.push((
+                    row,
+                    sha.clone(),
+                    Bounds::new(
+                        point(hit_start_x, blame_y),
+                        size(hit_end_x - hit_start_x, line_height),
+                    ),
+                ));
+            }
+
             offset_y += line.size(line_height).height;
 
             if has_ghost_lines && Some(row) == prepaint.current_row {
@@ -1336,6 +1498,7 @@ impl Element for TextElement {
         }
 
         self.state.update(cx, |state, cx| {
+            state.blame_bounds = blame_hitboxes;
             state.last_layout = Some(prepaint.last_layout.clone());
             state.last_bounds = Some(bounds);
             state.last_cursor = Some(state.cursor());

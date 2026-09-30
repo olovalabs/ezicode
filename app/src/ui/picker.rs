@@ -712,6 +712,24 @@ pub fn command_palette_items() -> Vec<PickerItem> {
             is_recent: false,
             score: 0,
         },
+        PickerItem {
+            id: "git.toggle_blame".into(),
+            title: "Git: Toggle Git Blame".into(),
+            subtitle: Some("Git".into()),
+            icon: Some("ui_icons/git_branch.svg".into()),
+            shortcut: None,
+            is_recent: false,
+            score: 0,
+        },
+        PickerItem {
+            id: "git.history".into(),
+            title: "Git: View History (Commit Graph)".into(),
+            subtitle: Some("Git".into()),
+            icon: Some("ui_icons/git_branch.svg".into()),
+            shortcut: None,
+            is_recent: false,
+            score: 0,
+        },
         // Help
         PickerItem {
             id: "help.about".into(),

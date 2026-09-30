@@ -1,9 +1,11 @@
+mod blame_popover;
 mod code_action_menu;
 mod completion_menu;
 mod context_menu;
 mod diagnostic_popover;
 mod hover_popover;
 
+pub(crate) use blame_popover::*;
 pub(crate) use code_action_menu::*;
 pub(crate) use completion_menu::*;
 pub(crate) use context_menu::*;

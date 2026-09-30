@@ -1,3 +1,5 @@
+mod blame;
+mod history;
 mod render;
 mod search;
 mod terminal_tabs;
@@ -67,6 +69,10 @@ pub(crate) struct DiffTab {
     pub parsed: Option<Arc<crate::ui::diff::ParsedDiff>>,
 
     pub error: Option<String>,
+
+    /// When set, this tab shows `git show <sha>` (a commit's full diff opened
+    /// from the History graph) instead of a working-tree/index diff.
+    pub commit: Option<String>,
 }
 
 /// Collapsible sections of the Source Control panel.
@@ -341,6 +347,38 @@ pub(crate) struct Workspace {
     pub(crate) git_commit_input: Option<Entity<InputState>>,
 
     pub(crate) git_commit_pending: bool,
+
+    // ---- Inline git blame (Feature 2, Zed-style) ----
+    /// Cached blame per absolute file path. Computed off-thread, shifted on
+    /// edits, invalidated on save / branch switch / commit / external change.
+    pub(crate) git_blame_cache: HashMap<PathBuf, git::FileBlame>,
+    /// Bumped whenever a blame request is superseded (file closed/changed), so
+    /// stale background results are dropped instead of applied.
+    pub(crate) git_blame_generation: u64,
+    /// The "Toggle Git Blame" state (per-line blame in the gutter for all
+    /// lines). Applies to every editor, like Zed's editor-wide toggle.
+    pub(crate) git_blame_gutter: bool,
+    /// Lazily-fetched commit details, cached by SHA and shared with background
+    /// tasks (used by the history view and blame hover data).
+    pub(crate) commit_detail_cache: Arc<Mutex<HashMap<String, git::CommitDetails>>>,
+
+    // ---- Source Control "History" graph (Feature 1) ----
+    /// Whether the Source Control panel shows the History graph (vs. changes).
+    pub(crate) git_history_view: bool,
+    /// Loaded commits (newest first), lazily paginated.
+    pub(crate) git_history: Vec<git::Commit>,
+    /// Precomputed lane/merge graph rows, one per commit in `git_history`.
+    pub(crate) git_history_graph: Vec<git::GraphRow>,
+    /// Invalidation counter for history loads (refs/HEAD change → reload).
+    pub(crate) git_history_generation: u64,
+    /// A page load is in flight.
+    pub(crate) git_history_loading: bool,
+    /// The last page returned fewer than a full page → no more commits.
+    pub(crate) git_history_complete: bool,
+    /// The commit whose details are open, if any.
+    pub(crate) git_history_selected: Option<String>,
+    /// Virtualized scroll handle for the history list.
+    pub(crate) git_history_scroll: UniformListScrollHandle,
 
     pub(crate) settings: crate::settings::Settings,
 
@@ -681,6 +719,18 @@ impl Workspace {
             git_confirm: None,
             git_commit_input: None,
             git_commit_pending: false,
+            git_blame_cache: HashMap::new(),
+            git_blame_generation: 0,
+            git_blame_gutter: false,
+            commit_detail_cache: Arc::new(Mutex::new(HashMap::new())),
+            git_history_view: false,
+            git_history: Vec::new(),
+            git_history_graph: Vec::new(),
+            git_history_generation: 0,
+            git_history_loading: false,
+            git_history_complete: false,
+            git_history_selected: None,
+            git_history_scroll: UniformListScrollHandle::new(),
             picker: None,
             picker_confirm_pending: false,
             workspace_files_cache: None,
@@ -1228,6 +1278,13 @@ impl Workspace {
         self.git_path_kinds = Arc::new(kinds);
         self.git = Some(status);
         self.refresh_diff_tabs(cx);
+        // A repo change (commit, branch switch, pull, external edit) invalidates
+        // cached blame; recompute for the active file. Also refresh the History
+        // graph if it is currently shown.
+        self.invalidate_blame(cx);
+        if self.git_history_view {
+            self.reload_git_history(cx);
+        }
         cx.notify();
     }
 
@@ -2068,8 +2125,19 @@ impl Workspace {
                     cx.notify();
                 }
                 this.markdown_buffer_changed(&path_clone, &editor_ent, cx);
+                this.on_editor_blame_change(&path_clone, &editor_ent, cx);
                 let tab_idx = this.active_tab;
                 this.trigger_auto_save_after_delay(tab_idx, cx);
+            }
+            match event {
+                InputEvent::BlameHover { sha, .. } => {
+                    this.on_blame_hover(sha.as_ref(), editor_ent.clone(), cx)
+                }
+                InputEvent::BlameHoverEnd => this.on_blame_hover_end(editor_ent.clone(), cx),
+                InputEvent::BlameOpenCommit { sha } => {
+                    this.git_view_commit_diff(sha.to_string(), cx)
+                }
+                _ => {}
             }
         })
         .detach();
@@ -2107,6 +2175,9 @@ impl Workspace {
         let mut global_state = crate::storage::GlobalState::load();
         global_state.add_recent_file(path.clone());
         self.persist_workspace_state(cx);
+
+        // Kick off inline git blame for the freshly opened buffer (off-thread).
+        self.recompute_active_blame(cx);
 
         // A search-result click on a closed file queued `pending_search_jump`:
         // it is consumed in `render` (which owns a `&mut Window` for cursor
@@ -4544,6 +4615,7 @@ impl Workspace {
             text: None,
             parsed: None,
             error: None,
+            commit: None,
         };
         self.tabs.push(OpenTab {
             path: None,
@@ -4562,7 +4634,7 @@ impl Workspace {
             format!("Diff: {}", display_name(path))
         };
 
-        self.load_diff_tab(root, rel, path.to_path_buf(), staged, cx);
+        self.load_diff_tab(root, rel, path.to_path_buf(), staged, None, cx);
     }
 
     /// (Re)load one diff tab's contents in the background. The tab is found
@@ -4575,13 +4647,35 @@ impl Workspace {
         rel: String,
         tab_path: PathBuf,
         staged: bool,
+        commit: Option<String>,
         cx: &mut Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
             let tab_path_bg = tab_path.clone();
             let rel_bg = rel.clone();
+            let commit_bg = commit.clone();
             let (text, parsed, error) = cx
                 .background_spawn(async move {
+                    // A commit diff (`git show <sha>`) never falls back to the
+                    // working tree — its content is fixed history.
+                    if let Some(sha) = commit_bg {
+                        return match git::commit_diff(&root, &sha) {
+                            Some(raw) if !raw.trim().is_empty() => {
+                                let parsed = Arc::new(crate::ui::diff::parse_diff(&raw));
+                                (Some(raw), Some(parsed), None)
+                            }
+                            Some(_) => (
+                                Some(String::new()),
+                                None,
+                                Some("This commit has no textual changes".to_string()),
+                            ),
+                            None => (
+                                None,
+                                None,
+                                Some("git show failed to run".to_string()),
+                            ),
+                        };
+                    }
                     let raw = git::diff(&root, &rel_bg, staged);
                     match raw {
                         None => (None, None, Some("git diff failed to run".to_string())),
@@ -4638,14 +4732,14 @@ impl Workspace {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             return;
         };
-        let jobs: Vec<(String, PathBuf, bool)> = self
+        let jobs: Vec<(String, PathBuf, bool, Option<String>)> = self
             .tabs
             .iter()
             .filter_map(|t| t.diff.as_ref())
-            .map(|d| (d.rel.clone(), d.path.clone(), d.staged))
+            .map(|d| (d.rel.clone(), d.path.clone(), d.staged, d.commit.clone()))
             .collect();
-        for (rel, path, staged) in jobs {
-            self.load_diff_tab(root.clone(), rel, path, staged, cx);
+        for (rel, path, staged, commit) in jobs {
+            self.load_diff_tab(root.clone(), rel, path, staged, commit, cx);
         }
     }
 
@@ -5576,6 +5670,11 @@ impl Workspace {
             "git.branch.checkout" => self.toggle_branch_picker(window, cx),
             "git.branch.delete" => self.toggle_branch_delete_picker(window, cx),
             "git.init" => self.git_init(cx),
+            "git.toggle_blame" => self.toggle_git_blame(cx),
+            "git.history" => {
+                self.set_activity_explicit(Activity::Git, window, cx);
+                self.git_show_history(cx);
+            }
             "help.about" => self.about(cx),
             "app.quit" => self.quit(cx),
             _ => {}
@@ -5732,8 +5831,19 @@ impl Workspace {
                     cx.notify();
                 }
                 this.markdown_buffer_changed(&path_clone, &editor_ent, cx);
+                this.on_editor_blame_change(&path_clone, &editor_ent, cx);
                 let tab_idx = this.active_tab;
                 this.trigger_auto_save_after_delay(tab_idx, cx);
+            }
+            match event {
+                InputEvent::BlameHover { sha, .. } => {
+                    this.on_blame_hover(sha.as_ref(), editor_ent.clone(), cx)
+                }
+                InputEvent::BlameHoverEnd => this.on_blame_hover_end(editor_ent.clone(), cx),
+                InputEvent::BlameOpenCommit { sha } => {
+                    this.git_view_commit_diff(sha.to_string(), cx)
+                }
+                _ => {}
             }
         })
         .detach();

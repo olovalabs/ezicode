@@ -77,6 +77,63 @@ impl FormatOnSaveMode {
     }
 }
 
+/// Git integration settings, shaped exactly like Zed's `git` block so the
+/// same `settings.json` works in both editors.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GitSettings {
+    #[serde(default)]
+    pub inline_blame: InlineBlameSettings,
+}
+
+impl Default for GitSettings {
+    fn default() -> Self {
+        Self {
+            inline_blame: InlineBlameSettings::default(),
+        }
+    }
+}
+
+/// Zed's `git.inline_blame` object. Ghost-text blame shown at the end of the
+/// current line.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InlineBlameSettings {
+    /// Whether inline blame is shown at all.
+    #[serde(default = "default_blame_enabled")]
+    pub enabled: bool,
+    /// How long the cursor must rest on a line before the annotation appears.
+    /// `0` shows it immediately (Zed's default).
+    #[serde(default)]
+    pub delay_ms: u64,
+    /// Never render the annotation before this column, so short lines don't get
+    /// a hint jammed right against the text.
+    #[serde(default)]
+    pub min_column: u32,
+    /// Append the commit summary after "Author, <relative date>".
+    #[serde(default)]
+    pub show_commit_summary: bool,
+}
+
+fn default_blame_enabled() -> bool {
+    true
+}
+
+impl Default for InlineBlameSettings {
+    fn default() -> Self {
+        // Matches Zed's defaults.
+        Self {
+            enabled: true,
+            delay_ms: 0,
+            min_column: 0,
+            show_commit_summary: false,
+        }
+    }
+}
+
+fn default_git() -> GitSettings {
+    GitSettings::default()
+}
+
 fn default_font_size() -> f32 {
     14.5
 }
@@ -130,6 +187,10 @@ pub struct Settings {
         skip_serializing_if = "Option::is_none"
     )]
     pub terminal_integrated_shell: Option<String>,
+
+    /// Nested `git` block (Zed-compatible), home of `inline_blame`.
+    #[serde(rename = "git", default = "default_git")]
+    pub git: GitSettings,
 }
 
 impl Default for Settings {
@@ -142,6 +203,7 @@ impl Default for Settings {
             editor_tab_size: default_tab_size(),
             editor_format_on_save: default_format_on_save(),
             terminal_integrated_shell: None,
+            git: default_git(),
         }
     }
 }
@@ -248,5 +310,55 @@ impl Settings {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, json.as_bytes())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_blame_defaults_match_zed() {
+        let d = InlineBlameSettings::default();
+        assert!(d.enabled);
+        assert_eq!(d.delay_ms, 0);
+        assert_eq!(d.min_column, 0);
+        assert!(!d.show_commit_summary);
+    }
+
+    #[test]
+    fn parses_zed_shaped_git_block() {
+        let json = r#"{
+            "editor.fontSize": 14.5,
+            "git": {
+                "inline_blame": {
+                    "enabled": true,
+                    "delay_ms": 300,
+                    "min_column": 40,
+                    "show_commit_summary": true
+                }
+            }
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(s.git.inline_blame.enabled);
+        assert_eq!(s.git.inline_blame.delay_ms, 300);
+        assert_eq!(s.git.inline_blame.min_column, 40);
+        assert!(s.git.inline_blame.show_commit_summary);
+    }
+
+    #[test]
+    fn git_block_absent_uses_defaults() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert!(s.git.inline_blame.enabled);
+        assert_eq!(s.git.inline_blame.delay_ms, 0);
+    }
+
+    #[test]
+    fn partial_inline_blame_fills_missing_fields() {
+        let json = r#"{ "git": { "inline_blame": { "enabled": false } } }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(!s.git.inline_blame.enabled);
+        // Unspecified fields fall back to defaults.
+        assert_eq!(s.git.inline_blame.min_column, 0);
     }
 }

@@ -23,11 +23,13 @@ use crate::input::movement::MoveDirection;
 use crate::input::{
     HoverDefinition, Lsp, Position,
     element::RIGHT_MARGIN,
-    popovers::{ContextMenu, DiagnosticPopover, HoverPopover, MouseContextMenu},
+    popovers::{blame_popover, ContextMenu, DiagnosticPopover, HoverPopover, MouseContextMenu},
     search::{self, SearchPanel},
     text_wrapper::LineLayout,
 };
-use crate::input::{InlineCompletion, RopeExt as _, Selection};
+use crate::input::{
+    BlameDetail, BlameLine, InlineBlame, InlineCompletion, RopeExt as _, Selection,
+};
 use crate::{Root, history::History};
 use crate::{highlighter::DiagnosticSet, input::text_wrapper::LineItem};
 
@@ -91,6 +93,14 @@ pub enum InputEvent {
     PressEnter { secondary: bool },
     Focus,
     Blur,
+    /// The mouse moved onto the inline git-blame annotation for `row`. `sha` is
+    /// the annotation's abbreviated commit (empty for uncommitted lines). The
+    /// app fetches the commit detail and pushes it back via `set_blame_detail`.
+    BlameHover { row: usize, sha: SharedString },
+    /// The mouse left the inline git-blame annotation.
+    BlameHoverEnd,
+    /// The "Open commit" button in the blame popover was clicked.
+    BlameOpenCommit { sha: SharedString },
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -320,6 +330,11 @@ pub struct InputState {
 
     pub(super) _context_menu_task: Task<Result<()>>,
     pub(super) inline_completion: InlineCompletion,
+    /// Per-line git blame annotations (Zed-style inline blame + gutter toggle).
+    pub(super) blame: InlineBlame,
+    /// Painted screen bounds of each visible blame annotation, `(row, sha,
+    /// bounds)`, refreshed every paint and used to hit-test hover.
+    pub(super) blame_bounds: Vec<(usize, SharedString, Bounds<Pixels>)>,
 }
 
 impl EventEmitter<InputEvent> for InputState {}
@@ -399,6 +414,142 @@ impl InputState {
             _context_menu_task: Task::ready(Ok(())),
             _pending_update: false,
             inline_completion: InlineCompletion::default(),
+            blame: InlineBlame::default(),
+            blame_bounds: Vec::new(),
+        }
+    }
+
+    /// Replace the inline git blame annotations for this buffer. `enabled` and
+    /// `min_column` come straight from `git.inline_blame`; `icon` is the asset
+    /// path of the small git glyph drawn before the annotation (empty for
+    /// none). The gutter-toggle (`show_all`) state is preserved across updates.
+    pub fn set_inline_blame(
+        &mut self,
+        lines: Vec<Option<BlameLine>>,
+        enabled: bool,
+        min_column: u32,
+        icon: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.blame.lines = lines;
+        self.blame.enabled = enabled;
+        self.blame.min_column = min_column;
+        self.blame.icon = icon.into();
+        cx.notify();
+    }
+
+    /// Drop all blame annotations (e.g. when the file leaves a repo).
+    pub fn clear_inline_blame(&mut self, cx: &mut Context<Self>) {
+        let show_all = self.blame.show_all;
+        self.blame = InlineBlame::default();
+        self.blame.show_all = show_all;
+        cx.notify();
+    }
+
+    /// Shift the per-row blame index to absorb an edit that replaced `removed`
+    /// rows starting at `start_row` with `added` rows, so annotations stay
+    /// aligned between debounced re-blames (mirrors Zed).
+    pub fn shift_inline_blame(&mut self, start_row: usize, removed: usize, added: usize) {
+        let len = self.blame.lines.len();
+        if len == 0 {
+            return;
+        }
+        let start = start_row.min(len);
+        let end = (start_row + removed).min(len);
+        let tail = self.blame.lines.split_off(end);
+        self.blame.lines.truncate(start);
+        self.blame
+            .lines
+            .extend(std::iter::repeat(None).take(added));
+        self.blame.lines.extend(tail);
+    }
+
+    /// Toggle the "show blame on every line" gutter view (Zed's Toggle Git
+    /// Blame command).
+    pub fn toggle_blame_gutter(&mut self, cx: &mut Context<Self>) {
+        self.blame.show_all = !self.blame.show_all;
+        cx.notify();
+    }
+
+    /// Set the "show blame on every line" gutter view explicitly.
+    pub fn set_blame_gutter(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.blame.show_all != on {
+            self.blame.show_all = on;
+            cx.notify();
+        }
+    }
+
+    /// Whether the gutter-blame (all lines) view is currently on.
+    pub fn is_blame_gutter_visible(&self) -> bool {
+        self.blame.show_all
+    }
+
+    /// The abbreviated SHA blamed for `row`, if any (used to fetch commit
+    /// details lazily on hover).
+    pub fn blame_sha_at(&self, row: usize) -> Option<SharedString> {
+        self.blame
+            .line(row)
+            .map(|l| l.sha.clone())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Push the lazily-fetched commit detail for the hovered blame annotation
+    /// into the popover. Passing `None` (or when the hover has since ended)
+    /// hides it. Called by the app after it resolves the commit.
+    pub fn set_blame_detail(&mut self, detail: Option<BlameDetail>, cx: &mut Context<Self>) {
+        // Ignore stale detail that arrives after the mouse already left, or for
+        // a different commit than the one now hovered.
+        if let Some(d) = &detail {
+            let matches = self
+                .blame
+                .hovered_row
+                .and_then(|row| self.blame.line(row))
+                .map(|l| l.sha == d.short_sha || d.sha.starts_with(l.sha.as_ref()))
+                .unwrap_or(false);
+            if !matches {
+                return;
+            }
+        }
+        self.blame.detail = detail;
+        cx.notify();
+    }
+
+    /// Byte-offset range of `row` (used to anchor the blame popover to the line).
+    pub(super) fn blame_row_offset_range(&self, row: usize) -> Option<Range<usize>> {
+        if row >= self.text.lines_len() {
+            return None;
+        }
+        Some(self.text.line_start_offset(row)..self.text.line_end_offset(row))
+    }
+
+    /// Update the blame hover state for a mouse position, emitting
+    /// [`InputEvent::BlameHover`] / [`InputEvent::BlameHoverEnd`] only when the
+    /// hovered annotation changes (so the app fetches a commit at most once).
+    pub(super) fn update_blame_hover(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let hit = self
+            .blame_bounds
+            .iter()
+            .find(|(_, _, bounds)| bounds.contains(&position))
+            .map(|(row, sha, _)| (*row, sha.clone()));
+
+        match hit {
+            Some((row, sha)) => {
+                if self.blame.hovered_row != Some(row) {
+                    self.blame.hovered_row = Some(row);
+                    // New annotation: drop any stale detail until the app refills.
+                    self.blame.detail = None;
+                    cx.emit(InputEvent::BlameHover { row, sha });
+                    cx.notify();
+                }
+            }
+            None => {
+                if self.blame.hovered_row.is_some() {
+                    self.blame.hovered_row = None;
+                    self.blame.detail = None;
+                    cx.emit(InputEvent::BlameHoverEnd);
+                    cx.notify();
+                }
+            }
         }
     }
 
@@ -2043,5 +2194,14 @@ impl Render for InputState {
             .children(self.diagnostic_popover.clone())
             .children(self.context_menu.as_ref().map(|menu| menu.render()))
             .children(self.hover_popover.clone())
+            .children(
+                self.blame
+                    .hovered_row
+                    .zip(self.blame.detail.clone())
+                    .and_then(|(row, detail)| {
+                        let range = self.blame_row_offset_range(row)?;
+                        Some(blame_popover(cx.entity(), range, detail))
+                    }),
+            )
     }
 }

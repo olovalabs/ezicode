@@ -1,3 +1,5 @@
+use std::io::Write as _;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -742,6 +744,633 @@ fn run_git(root: &Path, args: &[&str]) -> Option<(String, bool)> {
     ))
 }
 
+/// Like [`run_git`] but pipes `input` into git's stdin. Used by
+/// `git blame --contents -` so a dirty (unsaved) buffer can still be blamed,
+/// exactly as Zed feeds buffer contents to blame. Returns `(stdout, success)`.
+fn run_git_stdin(root: &Path, args: &[&str], input: &[u8]) -> Option<(String, bool)> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(root)
+        .arg("-c")
+        .arg("core.quotepath=false");
+    cmd.args(args);
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::null());
+    let mut child = cmd.spawn().ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // Ignore write errors: git may exit early (e.g. path not tracked) and
+        // close the pipe, which would otherwise surface as a broken-pipe error.
+        let _ = stdin.write_all(input);
+    }
+    let out = child.wait_with_output().ok()?;
+    Some((
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.status.success(),
+    ))
+}
+
+// ============================================================================
+// Blame (Feature 2: Zed-style inline git blame)
+//
+// Mirrors Zed's `crates/git/src/blame.rs`: we drive `git blame --incremental`
+// (optionally with `--contents -` for dirty buffers) and parse its streamed
+// records into [`BlameEntry`] runs. The per-buffer cache, debounce, offset
+// shifting and lazy commit-detail fetch live in `crate::git_blame`, keeping
+// this module a pure, UI-free service layer.
+// ============================================================================
+
+/// One contiguous run of lines attributed to a single commit, as produced by
+/// `git blame --incremental`. Named and shaped after Zed's `BlameEntry`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlameEntry {
+    /// Full 40-char commit SHA (all-zero for not-yet-committed lines).
+    pub sha: String,
+    /// 0-based, half-open range of *final* (working-copy) line numbers.
+    pub range: Range<u32>,
+    /// 1-based line number this run had in the original commit.
+    pub original_line_number: u32,
+    pub author: Option<String>,
+    pub author_mail: Option<String>,
+    pub author_time: Option<i64>,
+    pub author_tz: Option<String>,
+    pub committer_time: Option<i64>,
+    pub summary: Option<String>,
+    /// `<sha> <filename>` of the previous revision, when git reports one.
+    pub previous: Option<String>,
+    pub filename: String,
+    /// True when this commit is a history boundary (has no parent to blame).
+    pub boundary: bool,
+}
+
+impl BlameEntry {
+    /// A line git could not attribute to any commit yet — local, uncommitted
+    /// changes. Zed renders these as "You • Uncommitted changes".
+    pub fn is_uncommitted(&self) -> bool {
+        self.sha.is_empty() || self.sha.bytes().all(|b| b == b'0')
+    }
+
+    /// The abbreviated SHA shown in the UI (git's default is 7–8 chars).
+    pub fn short_sha(&self) -> String {
+        self.sha.chars().take(8).collect()
+    }
+
+    /// Author display name, or "You" for uncommitted lines (matching Zed).
+    pub fn author_display(&self) -> &str {
+        if self.is_uncommitted() {
+            return "You";
+        }
+        self.author.as_deref().unwrap_or("Unknown")
+    }
+}
+
+/// The blame for one file: the commit runs plus a per-row index into them,
+/// so a render pass can look up a line in O(1). Owns the offset-shifting used
+/// to keep annotations aligned between re-blames (see [`FileBlame::shift`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileBlame {
+    pub entries: Vec<BlameEntry>,
+    /// Index into `entries` for each final line; `None` for lines with no
+    /// blame yet (freshly typed lines between debounced re-blames).
+    pub rows: Vec<Option<usize>>,
+}
+
+impl FileBlame {
+    /// Build the per-row index from a set of entries (their `range`s are the
+    /// authoritative source of truth).
+    pub fn from_entries(entries: Vec<BlameEntry>) -> Self {
+        let max_row = entries.iter().map(|e| e.range.end).max().unwrap_or(0) as usize;
+        let mut rows = vec![None; max_row];
+        for (ix, entry) in entries.iter().enumerate() {
+            for row in entry.range.start..entry.range.end {
+                if let Some(slot) = rows.get_mut(row as usize) {
+                    *slot = Some(ix);
+                }
+            }
+        }
+        Self { entries, rows }
+    }
+
+    /// The blame entry attributed to `row` (0-based), if any.
+    pub fn line(&self, row: usize) -> Option<&BlameEntry> {
+        let ix = (*self.rows.get(row)?)?;
+        self.entries.get(ix)
+    }
+
+    /// Shift the per-row index to absorb an edit that replaced `removed` rows
+    /// starting at `start_row` with `added` rows. The newly inserted rows get
+    /// `None` (no annotation until the next re-blame), while rows below the
+    /// edit keep pointing at their original commit — exactly how Zed keeps
+    /// blame aligned between debounced re-blames.
+    pub fn shift(&mut self, start_row: usize, removed: usize, added: usize) {
+        let len = self.rows.len();
+        let start = start_row.min(len);
+        let end = (start_row + removed).min(len);
+        let tail = self.rows.split_off(end);
+        self.rows.truncate(start);
+        self.rows.extend(std::iter::repeat(None).take(added));
+        self.rows.extend(tail);
+    }
+}
+
+const GIT_BLAME_NO_COMMIT_ERROR: &str = "no such ref: HEAD";
+
+/// Blame a single file. `contents` (when `Some`) is fed to git via
+/// `--contents -`, so an unsaved buffer is blamed exactly as it currently
+/// reads on screen (this is what Zed does); pass `None` to blame the file on
+/// disk. Returns `None` on any git failure so callers stay silent for
+/// untracked / binary / out-of-repo paths.
+pub fn blame_file(root: &Path, rel: &str, contents: Option<&str>) -> Option<FileBlame> {
+    let (raw, ok) = match contents {
+        Some(text) => run_git_stdin(
+            root,
+            &["blame", "--incremental", "--contents", "-", "--", rel],
+            text.as_bytes(),
+        )?,
+        None => run_git(root, &["blame", "--incremental", "--", rel])?,
+    };
+    if !ok {
+        // A fresh repo with no HEAD yet, or an untracked path: no blame, but
+        // not an error the user needs to see.
+        if raw.contains(GIT_BLAME_NO_COMMIT_ERROR) {
+            return Some(FileBlame::default());
+        }
+        return None;
+    }
+    Some(FileBlame::from_entries(parse_blame_incremental(&raw)))
+}
+
+/// Parse the output of `git blame --incremental` into commit runs.
+///
+/// Each run starts with `<sha> <orig-line> <final-line> <num-lines>` and ends
+/// with a `filename …` record. Signature fields (author/summary/…) are only
+/// emitted the first time a SHA appears, so we copy them forward from the
+/// first entry that carried them, just like Zed's `GitBlameParser`.
+pub fn parse_blame_incremental(raw: &str) -> Vec<BlameEntry> {
+    let mut entries: Vec<BlameEntry> = Vec::new();
+    // First index in `entries` that carried full signature info for a SHA.
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut current: Option<BlameEntry> = None;
+
+    for line in raw.lines() {
+        let line = line.trim_end_matches(['\r', '\n']);
+        match current.as_mut() {
+            None => {
+                if let Some(mut entry) = parse_blame_header(line) {
+                    if let Some(&slot) = seen.get(&entry.sha) {
+                        if let Some(prev) = entries.get(slot) {
+                            entry.author.clone_from(&prev.author);
+                            entry.author_mail.clone_from(&prev.author_mail);
+                            entry.author_time = prev.author_time;
+                            entry.author_tz.clone_from(&prev.author_tz);
+                            entry.committer_time = prev.committer_time;
+                            entry.summary.clone_from(&prev.summary);
+                            entry.boundary = prev.boundary;
+                        }
+                    }
+                    current = Some(entry);
+                }
+            }
+            Some(entry) => {
+                if line == "boundary" {
+                    entry.boundary = true;
+                    continue;
+                }
+                let Some((key, value)) = line.split_once(' ') else {
+                    continue;
+                };
+                match key {
+                    "author" => entry.author = Some(value.to_string()),
+                    "author-mail" => entry.author_mail = Some(value.to_string()),
+                    "author-time" => entry.author_time = value.parse().ok(),
+                    "author-tz" => entry.author_tz = Some(value.to_string()),
+                    "committer-time" => entry.committer_time = value.parse().ok(),
+                    "summary" => entry.summary = Some(value.to_string()),
+                    "previous" => entry.previous = Some(value.to_string()),
+                    "filename" => {
+                        entry.filename = value.to_string();
+                        let done = current.take().expect("current entry present");
+                        seen.entry(done.sha.clone()).or_insert(entries.len());
+                        entries.push(done);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    entries
+}
+
+/// Parse a blame header line: `<40-hex-sha> <orig-line> <final-line> <count>`.
+/// Returns `None` for anything that is not a header (defensive parsing).
+fn parse_blame_header(line: &str) -> Option<BlameEntry> {
+    let mut parts = line.split_whitespace();
+    let sha = parts.next()?;
+    if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let original_line_number: u32 = parts.next()?.parse().ok()?;
+    let final_line_number: u32 = parts.next()?.parse().ok()?;
+    let count: u32 = parts.next()?.parse().ok()?;
+    let start = final_line_number.saturating_sub(1);
+    Some(BlameEntry {
+        sha: sha.to_string(),
+        range: start..start + count,
+        original_line_number,
+        author: None,
+        author_mail: None,
+        author_time: None,
+        author_tz: None,
+        committer_time: None,
+        summary: None,
+        previous: None,
+        filename: String::new(),
+        boundary: false,
+    })
+}
+
+/// Whether `rel` is tracked in the index. Blame is skipped for untracked
+/// paths (git blame would fail on them anyway).
+pub fn is_path_tracked(root: &Path, rel: &str) -> bool {
+    run_git(root, &["ls-files", "--error-unmatch", "--", rel])
+        .map(|(_, ok)| ok)
+        .unwrap_or(false)
+}
+
+// ============================================================================
+// History graph (Feature 1: Source Control "History" view)
+//
+// Mirrors Zed's `crates/git_ui` commit list: paginated `git log`, decoded ref
+// badges, and a lane/merge graph computed from each commit's parents.
+// ============================================================================
+
+/// The kind of ref decorating a commit, driving its badge color.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefKind {
+    Head,
+    LocalBranch,
+    RemoteBranch,
+    Tag,
+}
+
+/// A branch/tag badge shown next to a commit in the history graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitRef {
+    pub name: String,
+    pub kind: RefKind,
+}
+
+/// One row of `git log`, with parents (for the graph) and ref badges.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Commit {
+    pub sha: String,
+    pub short_sha: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub author_email: String,
+    /// Unix timestamp of the author date.
+    pub author_time: i64,
+    /// Pre-formatted relative age (git's `%ar`, e.g. "3 days ago").
+    pub relative_time: String,
+    pub subject: String,
+    pub refs: Vec<CommitRef>,
+}
+
+/// Field and record separators used by our `git log` format string. Both are
+/// control characters that cannot appear in commit metadata, so parsing is
+/// unambiguous even for messages containing newlines or tabs.
+const LOG_FIELD_SEP: char = '\x1f';
+const LOG_RECORD_SEP: char = '\x1e';
+
+/// Page through `git log`. `skip`/`limit` map to `--skip`/`--max-count`, so a
+/// virtualized list can lazily load a repo of any size (Zed paginates the
+/// same way). When `all` is true, `--all` includes every branch.
+pub fn commit_log(root: &Path, skip: usize, limit: usize, all: bool) -> Vec<Commit> {
+    let format = format!(
+        "--pretty=format:%H{f}%P{f}%an{f}%ae{f}%at{f}%ar{f}%s{f}%D{r}",
+        f = LOG_FIELD_SEP,
+        r = LOG_RECORD_SEP,
+    );
+    let skip_arg = format!("--skip={skip}");
+    let max_arg = format!("--max-count={limit}");
+    let mut args: Vec<&str> = vec!["log", &format, &skip_arg, &max_arg];
+    if all {
+        args.push("--all");
+    }
+    args.push("--date-order");
+    match run_git(root, &args) {
+        Some((out, true)) => parse_log(&out),
+        _ => Vec::new(),
+    }
+}
+
+/// Parse the record-separated `git log` output produced by [`commit_log`].
+pub fn parse_log(raw: &str) -> Vec<Commit> {
+    raw.split(LOG_RECORD_SEP)
+        .map(|record| record.trim_start_matches(['\n', '\r']))
+        .filter(|record| !record.is_empty())
+        .filter_map(|record| {
+            let mut fields = record.split(LOG_FIELD_SEP);
+            let sha = fields.next()?.trim();
+            if sha.is_empty() {
+                return None;
+            }
+            let parents_raw = fields.next().unwrap_or("");
+            let author = fields.next().unwrap_or("").to_string();
+            let author_email = fields.next().unwrap_or("").to_string();
+            let author_time = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
+            let relative_time = fields.next().unwrap_or("").to_string();
+            let subject = fields.next().unwrap_or("").to_string();
+            let decoration = fields.next().unwrap_or("");
+            let parents = parents_raw
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            Some(Commit {
+                sha: sha.to_string(),
+                short_sha: sha.chars().take(8).collect(),
+                parents,
+                author,
+                author_email,
+                author_time,
+                relative_time,
+                subject,
+                refs: parse_refs(decoration),
+            })
+        })
+        .collect()
+}
+
+/// Parse the `%D` ref decoration, e.g.
+/// `HEAD -> main, origin/main, tag: v1.0, origin/HEAD`.
+fn parse_refs(decoration: &str) -> Vec<CommitRef> {
+    let mut refs = Vec::new();
+    for raw in decoration.split(',') {
+        let name = raw.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(tag) = name.strip_prefix("tag: ") {
+            refs.push(CommitRef {
+                name: tag.trim().to_string(),
+                kind: RefKind::Tag,
+            });
+            continue;
+        }
+        if let Some((_head, branch)) = name.split_once(" -> ") {
+            // `HEAD -> main`: record HEAD and the branch it points at.
+            refs.push(CommitRef {
+                name: branch.trim().to_string(),
+                kind: RefKind::Head,
+            });
+            continue;
+        }
+        if name == "HEAD" {
+            refs.push(CommitRef {
+                name: "HEAD".to_string(),
+                kind: RefKind::Head,
+            });
+            continue;
+        }
+        // Remote-tracking refs are `origin/…`; local branches have no slash.
+        let kind = if name.contains('/') {
+            RefKind::RemoteBranch
+        } else {
+            RefKind::LocalBranch
+        };
+        refs.push(CommitRef {
+            name: name.to_string(),
+            kind,
+        });
+    }
+    refs
+}
+
+/// A single row of the rendered commit graph: which lane the commit's node
+/// sits in, and the lanes passing through above (incoming) and below
+/// (outgoing) it, so the UI can draw vertical connectors and merge diagonals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphRow {
+    /// Lane (column) index of this commit's node.
+    pub column: usize,
+    /// A stable color bucket for the node, derived from its lane.
+    pub color: usize,
+    /// SHA each lane is waiting for, just above this row.
+    pub lanes_in: Vec<Option<String>>,
+    /// SHA each lane is waiting for, just below this row.
+    pub lanes_out: Vec<Option<String>>,
+}
+
+impl GraphRow {
+    /// Number of lanes to reserve horizontal space for on this row.
+    pub fn width(&self) -> usize {
+        self.lanes_in.len().max(self.lanes_out.len()).max(1)
+    }
+}
+
+/// Assign lanes/colors to an ordered (newest-first) commit list, producing one
+/// [`GraphRow`] per commit. A classic single-pass lane allocator: each lane
+/// remembers the SHA it is next expecting; a commit takes the first lane
+/// waiting for it (or a fresh one), then hands its first parent back to that
+/// lane and opens new lanes for any additional (merge) parents.
+pub fn compute_graph(commits: &[Commit]) -> Vec<GraphRow> {
+    // `lanes[i] == Some(sha)` means lane i is waiting to place commit `sha`.
+    let mut lanes: Vec<Option<String>> = Vec::new();
+    let mut rows = Vec::with_capacity(commits.len());
+
+    for commit in commits {
+        let lanes_in = lanes.clone();
+
+        // The lane already waiting for this commit, if any.
+        let column = match lanes.iter().position(|l| l.as_deref() == Some(&commit.sha)) {
+            Some(ix) => ix,
+            None => {
+                // No lane expected us (a branch tip): use the first free lane.
+                match lanes.iter().position(Option::is_none) {
+                    Some(ix) => {
+                        lanes[ix] = Some(commit.sha.clone());
+                        ix
+                    }
+                    None => {
+                        lanes.push(Some(commit.sha.clone()));
+                        lanes.len() - 1
+                    }
+                }
+            }
+        };
+
+        // Any *other* lanes also waiting for this same commit collapse into
+        // `column` (two branches merging back to a shared ancestor).
+        for lane in lanes.iter_mut() {
+            if lane.as_deref() == Some(&commit.sha) {
+                *lane = None;
+            }
+        }
+
+        // The commit's first parent continues in this commit's lane.
+        let mut parents = commit.parents.iter();
+        lanes[column] = parents.next().cloned();
+
+        // Extra parents (merge commits) each need a lane. Reuse a lane already
+        // waiting for that parent, else the first free lane, else a new one.
+        for parent in parents {
+            if lanes.iter().any(|l| l.as_deref() == Some(parent.as_str())) {
+                continue;
+            }
+            match lanes.iter().position(Option::is_none) {
+                Some(ix) => lanes[ix] = Some(parent.clone()),
+                None => lanes.push(Some(parent.clone())),
+            }
+        }
+
+        // Trim trailing empty lanes so the graph stays as narrow as possible.
+        while matches!(lanes.last(), Some(None)) {
+            lanes.pop();
+        }
+
+        rows.push(GraphRow {
+            column,
+            color: column,
+            lanes_in,
+            lanes_out: lanes.clone(),
+        });
+    }
+
+    rows
+}
+
+/// A file touched by a commit, with its change letter (from `--name-status`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub kind: ChangeKind,
+}
+
+/// Full details for one commit, loaded lazily when a commit is opened/hovered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitDetails {
+    pub sha: String,
+    pub short_sha: String,
+    pub author: String,
+    pub author_email: String,
+    pub author_time: i64,
+    /// Pre-formatted absolute date (git's `%ad`).
+    pub date: String,
+    pub subject: String,
+    pub body: String,
+    pub files: Vec<CommitFile>,
+}
+
+/// Load the message, author, date and touched files for one commit. Runs on a
+/// background thread; results are cached by SHA in `crate::git_blame`.
+pub fn commit_details(root: &Path, sha: &str) -> Option<CommitDetails> {
+    let format = format!(
+        "--pretty=format:%H{f}%an{f}%ae{f}%at{f}%ad{f}%s{f}%b{r}",
+        f = LOG_FIELD_SEP,
+        r = LOG_RECORD_SEP,
+    );
+    let (raw, ok) = run_git(
+        root,
+        &[
+            "show",
+            "--no-color",
+            "--name-status",
+            "--date=format:%Y-%m-%d %H:%M",
+            &format,
+            sha,
+        ],
+    )?;
+    if !ok {
+        return None;
+    }
+    parse_commit_details(&raw)
+}
+
+/// Parse the output of the `git show --name-status` invocation in
+/// [`commit_details`]: a header record, the record separator, then one
+/// name-status line per changed file.
+pub fn parse_commit_details(raw: &str) -> Option<CommitDetails> {
+    let (header, rest) = raw.split_once(LOG_RECORD_SEP)?;
+    let mut fields = header.split(LOG_FIELD_SEP);
+    let sha = fields.next()?.trim().to_string();
+    let author = fields.next().unwrap_or("").to_string();
+    let author_email = fields.next().unwrap_or("").to_string();
+    let author_time = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
+    let date = fields.next().unwrap_or("").to_string();
+    let subject = fields.next().unwrap_or("").to_string();
+    let body = fields.next().unwrap_or("").trim().to_string();
+
+    let files = rest
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter_map(parse_name_status)
+        .collect();
+
+    Some(CommitDetails {
+        short_sha: sha.chars().take(8).collect(),
+        sha,
+        author,
+        author_email,
+        author_time,
+        date,
+        subject,
+        body,
+        files,
+    })
+}
+
+/// Parse one `git ... --name-status` line, e.g. `M\tsrc/a.rs` or
+/// `R100\told.rs\tnew.rs`.
+fn parse_name_status(line: &str) -> Option<CommitFile> {
+    let mut fields = line.split('\t');
+    let status = fields.next()?;
+    let letter = status.chars().next()?;
+    let kind = match letter {
+        'M' => ChangeKind::Modified,
+        'A' => ChangeKind::Added,
+        'D' => ChangeKind::Deleted,
+        'R' => ChangeKind::Renamed,
+        'C' => ChangeKind::Copied,
+        'T' => ChangeKind::TypeChanged,
+        _ => return None,
+    };
+    if matches!(kind, ChangeKind::Renamed | ChangeKind::Copied) {
+        let old_path = fields.next()?.to_string();
+        let path = fields.next()?.to_string();
+        Some(CommitFile {
+            path,
+            old_path: Some(old_path),
+            kind,
+        })
+    } else {
+        let path = fields.next()?.to_string();
+        Some(CommitFile {
+            path,
+            old_path: None,
+            kind,
+        })
+    }
+}
+
+/// Unified diff for one commit (`git show <sha>`), reusing the existing diff
+/// parser for the commit-details view.
+pub fn commit_diff(root: &Path, sha: &str) -> Option<String> {
+    run_git(
+        root,
+        &[
+            "show",
+            "--no-ext-diff",
+            "--no-color",
+            "--unified=3",
+            "--format=",
+            sha,
+        ],
+    )
+    .map(|(out, _)| out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1004,5 +1633,444 @@ index 7898192..c1827f0 100644
         assert_eq!(lines[6].kind, DiffLineKind::Hunk);
         assert_eq!(lines[7].kind, DiffLineKind::Add);
         assert_eq!(lines[7].new_no, Some(33));
+    }
+
+    // -- Blame -------------------------------------------------------------
+
+    const SHA_A: &str = "6ad46b5257ba16d12c5ca9f0d4900320959df7f4";
+    const SHA_B: &str = "486c2409237a2c627230589e567024a96751d475";
+
+    #[test]
+    fn parses_incremental_blame_entry() {
+        let raw = format!(
+            "{SHA_A} 2 2 1\n\
+             author Joe Schmoe\n\
+             author-mail <joe@example.com>\n\
+             author-time 1709741400\n\
+             author-tz +0100\n\
+             committer Joe Schmoe\n\
+             committer-time 1709741400\n\
+             summary Joe's cool commit\n\
+             previous {SHA_B} index.js\n\
+             filename index.js\n"
+        );
+        let entries = parse_blame_incremental(&raw);
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e.sha, SHA_A);
+        // final line 2, 1 line -> row range 1..2 (0-based)
+        assert_eq!(e.range, 1..2);
+        assert_eq!(e.original_line_number, 2);
+        assert_eq!(e.author.as_deref(), Some("Joe Schmoe"));
+        assert_eq!(e.author_time, Some(1709741400));
+        assert_eq!(e.summary.as_deref(), Some("Joe's cool commit"));
+        assert_eq!(e.filename, "index.js");
+        assert!(!e.is_uncommitted());
+        assert_eq!(e.short_sha(), "6ad46b52");
+    }
+
+    #[test]
+    fn copies_signature_forward_for_repeated_sha() {
+        // Second entry for the same SHA omits author/summary; the parser must
+        // carry them forward, exactly like Zed's GitBlameParser.
+        let raw = format!(
+            "{SHA_A} 1 1 1\n\
+             author Ada\n\
+             author-time 100\n\
+             summary first\n\
+             filename a.rs\n\
+             {SHA_A} 3 4 2\n\
+             previous {SHA_B} a.rs\n\
+             filename a.rs\n"
+        );
+        let entries = parse_blame_incremental(&raw);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].sha, SHA_A);
+        assert_eq!(entries[1].range, 3..5);
+        assert_eq!(entries[1].author.as_deref(), Some("Ada"));
+        assert_eq!(entries[1].summary.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn marks_uncommitted_lines() {
+        let zero = "0".repeat(40);
+        let raw = format!(
+            "{zero} 1 1 1\n\
+             author Not Committed Yet\n\
+             author-time 0\n\
+             summary Version of ... not committed\n\
+             filename a.rs\n"
+        );
+        let entries = parse_blame_incremental(&raw);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_uncommitted());
+        assert_eq!(entries[0].author_display(), "You");
+    }
+
+    #[test]
+    fn skips_non_header_garbage() {
+        // A line that is not a valid header must not start an entry.
+        let raw = "not a header\nrandom line\n";
+        assert!(parse_blame_incremental(raw).is_empty());
+    }
+
+    #[test]
+    fn builds_per_row_index_from_entries() {
+        let raw = format!(
+            "{SHA_A} 1 1 2\nauthor A\nauthor-time 1\nsummary s\nfilename a.rs\n\
+             {SHA_B} 1 3 1\nauthor B\nauthor-time 2\nsummary t\nfilename a.rs\n"
+        );
+        let blame = FileBlame::from_entries(parse_blame_incremental(&raw));
+        assert_eq!(blame.rows.len(), 3);
+        assert_eq!(blame.line(0).unwrap().sha, SHA_A);
+        assert_eq!(blame.line(1).unwrap().sha, SHA_A);
+        assert_eq!(blame.line(2).unwrap().sha, SHA_B);
+        assert!(blame.line(3).is_none());
+    }
+
+    #[test]
+    fn shifts_rows_on_insert() {
+        // rows: [A, A, B] — insert 2 new lines at row 1 (typed, no blame yet).
+        let mut blame = FileBlame {
+            entries: vec![],
+            rows: vec![Some(0), Some(0), Some(1)],
+        };
+        blame.shift(1, 0, 2);
+        assert_eq!(
+            blame.rows,
+            vec![Some(0), None, None, Some(0), Some(1)],
+            "inserted rows are blank, rows below keep their commit"
+        );
+    }
+
+    #[test]
+    fn shifts_rows_on_delete() {
+        let mut blame = FileBlame {
+            entries: vec![],
+            rows: vec![Some(0), Some(1), Some(2), Some(3)],
+        };
+        // Delete 2 rows starting at row 1.
+        blame.shift(1, 2, 0);
+        assert_eq!(blame.rows, vec![Some(0), Some(3)]);
+    }
+
+    #[test]
+    fn shifts_rows_on_replace() {
+        let mut blame = FileBlame {
+            entries: vec![],
+            rows: vec![Some(0), Some(1), Some(2)],
+        };
+        // Replace row 1 (1 removed, 1 added).
+        blame.shift(1, 1, 1);
+        assert_eq!(blame.rows, vec![Some(0), None, Some(2)]);
+    }
+
+    // -- History log + graph ----------------------------------------------
+
+    #[test]
+    fn parses_log_records() {
+        let raw = format!(
+            "{a}\x1f{b} {c}\x1fAda\x1fada@x.io\x1f1700000000\x1f2 days ago\x1fInit commit\x1fHEAD -> main, tag: v1.0, origin/main\x1e\n\
+             {b}\x1f\x1fLin\x1flin@x.io\x1f1600000000\x1f3 days ago\x1fRoot\x1f\x1e",
+            a = "a".repeat(40),
+            b = "b".repeat(40),
+            c = "c".repeat(40),
+        );
+        let commits = parse_log(&raw);
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].sha, "a".repeat(40));
+        assert_eq!(commits[0].short_sha, "aaaaaaaa");
+        assert_eq!(commits[0].parents, vec!["b".repeat(40), "c".repeat(40)]);
+        assert_eq!(commits[0].author, "Ada");
+        assert_eq!(commits[0].author_time, 1700000000);
+        assert_eq!(commits[0].relative_time, "2 days ago");
+        assert_eq!(commits[0].subject, "Init commit");
+        assert_eq!(commits[0].refs.len(), 3);
+        assert_eq!(commits[0].refs[0].kind, RefKind::Head);
+        assert_eq!(commits[0].refs[0].name, "main");
+        assert_eq!(commits[0].refs[1].kind, RefKind::Tag);
+        assert_eq!(commits[0].refs[1].name, "v1.0");
+        assert_eq!(commits[0].refs[2].kind, RefKind::RemoteBranch);
+        // Root commit: no parents, no refs.
+        assert!(commits[1].parents.is_empty());
+        assert!(commits[1].refs.is_empty());
+    }
+
+    fn commit(sha: &str, parents: &[&str]) -> Commit {
+        Commit {
+            sha: sha.to_string(),
+            short_sha: sha.chars().take(8).collect(),
+            parents: parents.iter().map(|p| p.to_string()).collect(),
+            author: String::new(),
+            author_email: String::new(),
+            author_time: 0,
+            relative_time: String::new(),
+            subject: String::new(),
+            refs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn linear_history_is_single_lane() {
+        let commits = vec![
+            commit("c", &["b"]),
+            commit("b", &["a"]),
+            commit("a", &[]),
+        ];
+        let rows = compute_graph(&commits);
+        assert_eq!(rows.len(), 3);
+        for row in &rows {
+            assert_eq!(row.column, 0, "linear history stays in lane 0");
+        }
+        // The tip's outgoing lane waits for its parent.
+        assert_eq!(rows[0].lanes_out, vec![Some("b".to_string())]);
+        // The root has no outgoing lanes.
+        assert!(rows[2].lanes_out.is_empty());
+    }
+
+    #[test]
+    fn merge_commit_opens_a_second_lane() {
+        // m merges b (feature) into a (main); both descend from r.
+        let commits = vec![
+            commit("m", &["a", "b"]),
+            commit("a", &["r"]),
+            commit("b", &["r"]),
+            commit("r", &[]),
+        ];
+        let rows = compute_graph(&commits);
+        assert_eq!(rows[0].column, 0);
+        // After the merge, two lanes are active (waiting for a and b).
+        assert_eq!(rows[0].lanes_out.len(), 2);
+        assert_eq!(rows[0].lanes_out[0], Some("a".to_string()));
+        assert_eq!(rows[0].lanes_out[1], Some("b".to_string()));
+        // b sits in lane 1.
+        assert_eq!(rows[2].column, 1);
+        // Once both branches reach r, the graph collapses back to one lane.
+        assert_eq!(rows[3].column, 0);
+        assert!(rows[3].lanes_out.is_empty());
+    }
+
+    #[test]
+    fn parses_commit_details_with_files() {
+        let raw = format!(
+            "{a}\x1fAda\x1fada@x.io\x1f1700000000\x1f2024-03-01 10:00\x1fFix bug\x1fLonger body\x1e\n\
+             M\tsrc/a.rs\n\
+             A\tsrc/b.rs\n\
+             R100\told.rs\tnew.rs\n",
+            a = "a".repeat(40),
+        );
+        let details = parse_commit_details(&raw).unwrap();
+        assert_eq!(details.short_sha, "aaaaaaaa");
+        assert_eq!(details.author, "Ada");
+        assert_eq!(details.date, "2024-03-01 10:00");
+        assert_eq!(details.subject, "Fix bug");
+        assert_eq!(details.body, "Longer body");
+        assert_eq!(details.files.len(), 3);
+        assert_eq!(details.files[0].kind, ChangeKind::Modified);
+        assert_eq!(details.files[0].path, "src/a.rs");
+        assert_eq!(details.files[2].kind, ChangeKind::Renamed);
+        assert_eq!(details.files[2].old_path.as_deref(), Some("old.rs"));
+        assert_eq!(details.files[2].path, "new.rs");
+    }
+}
+
+/// Integration tests that drive a real, throwaway git repository through the
+/// history + blame service. Skipped automatically when the `git` binary is not
+/// available (e.g. a minimal CI image) so the suite still passes.
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Guard that removes the temp repo on drop, even if an assertion panics.
+    struct TempRepo {
+        path: PathBuf,
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn git_available() -> bool {
+        Command::new("git")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Run a git command in `dir`, with a hermetic identity and no global/system
+    /// config bleeding in, and assert it succeeded.
+    fn run(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "Ada Lovelace")
+            .env("GIT_AUTHOR_EMAIL", "ada@example.com")
+            .env("GIT_COMMITTER_NAME", "Ada Lovelace")
+            .env("GIT_COMMITTER_EMAIL", "ada@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_DATE", "2025-01-01T00:00:00")
+            .env("GIT_COMMITTER_DATE", "2025-01-01T00:00:00")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn write(dir: &Path, rel: &str, contents: &str) {
+        std::fs::write(dir.join(rel), contents).expect("write file");
+    }
+
+    /// Build a repo with a merge, a tag and several commits so the graph, refs
+    /// and pagination all have something to chew on.
+    fn make_repo() -> TempRepo {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("ezicode-git-it-{}-{nanos}-{n}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        let repo = TempRepo { path };
+        let dir = &repo.path;
+
+        run(dir, &["-c", "init.defaultBranch=main", "init", "-q"]);
+        // Ensure we are on `main` even on git versions predating -b/defaultBranch.
+        run(dir, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+        write(dir, "a.txt", "line one\nline two\nline three\n");
+        run(dir, &["add", "a.txt"]);
+        run(dir, &["commit", "-q", "-m", "first commit"]);
+
+        write(dir, "a.txt", "line one\nline two changed\nline three\n");
+        run(dir, &["commit", "-qam", "second commit"]);
+
+        // Diverge onto a feature branch touching a *different* file so the merge
+        // stays clean.
+        run(dir, &["checkout", "-q", "-b", "feature"]);
+        write(dir, "b.txt", "feature file\n");
+        run(dir, &["add", "b.txt"]);
+        run(dir, &["commit", "-q", "-m", "feature commit"]);
+
+        run(dir, &["checkout", "-q", "main"]);
+        write(dir, "c.txt", "main file\n");
+        run(dir, &["add", "c.txt"]);
+        run(dir, &["commit", "-q", "-m", "third commit"]);
+
+        run(dir, &["merge", "--no-ff", "-q", "-m", "merge feature", "feature"]);
+        run(dir, &["tag", "v1.0"]);
+
+        repo
+    }
+
+    #[test]
+    fn history_log_graph_blame_and_details() {
+        if !git_available() {
+            eprintln!("skipping: git binary not available");
+            return;
+        }
+        let repo = make_repo();
+        let root = repo.path.clone();
+
+        // --- commit_log: newest first, well-formed fields ---
+        let commits = commit_log(&root, 0, 100, false);
+        assert!(
+            commits.len() >= 5,
+            "expected >=5 commits, got {}",
+            commits.len()
+        );
+        // Newest commit is the merge.
+        assert_eq!(commits[0].subject, "merge feature");
+        assert_eq!(commits[0].parents.len(), 2, "merge has two parents");
+        for c in &commits {
+            assert_eq!(c.short_sha.len(), 8, "short sha is 8 chars");
+            assert!(c.sha.starts_with(c.short_sha.as_str()));
+            assert_eq!(c.author, "Ada Lovelace");
+            assert!(!c.relative_time.is_empty());
+        }
+
+        // HEAD/branch/tag refs are decoded onto the tip commits.
+        assert!(
+            commits.iter().any(|c| !c.refs.is_empty()),
+            "at least one commit carries a ref badge"
+        );
+        assert!(
+            commits
+                .iter()
+                .any(|c| c.refs.iter().any(|r| r.kind == RefKind::Tag)),
+            "the v1.0 tag is decoded"
+        );
+
+        // --- pagination: page size and skip both honoured ---
+        let page = commit_log(&root, 0, 2, false);
+        assert_eq!(page.len(), 2);
+        let next = commit_log(&root, 2, 2, false);
+        assert_eq!(next.len(), 2);
+        assert_ne!(page[0].sha, next[0].sha, "skip advances the window");
+        assert_eq!(page[0].sha, commits[0].sha);
+        assert_eq!(next[0].sha, commits[2].sha);
+
+        // --- compute_graph: one row per commit, merge widens the lanes ---
+        let graph = compute_graph(&commits);
+        assert_eq!(graph.len(), commits.len());
+        assert!(
+            graph.iter().any(|row| row.width() >= 2),
+            "the merge produces at least two lanes"
+        );
+
+        // --- commit_details: message + touched files ---
+        let details = commit_details(&root, &commits[0].sha).expect("merge details");
+        assert_eq!(details.subject, "merge feature");
+        assert_eq!(details.author, "Ada Lovelace");
+        // The second (non-merge) commit changed a.txt.
+        let second = commits
+            .iter()
+            .find(|c| c.subject == "second commit")
+            .expect("second commit present");
+        let second_details = commit_details(&root, &second.sha).expect("second details");
+        assert!(
+            second_details.files.iter().any(|f| f.path == "a.txt"),
+            "second commit touched a.txt"
+        );
+
+        // --- commit_diff: a real unified diff ---
+        let diff = commit_diff(&root, &second.sha).expect("commit diff");
+        assert!(diff.contains("diff --git"), "diff has a git header");
+        assert!(diff.contains("a.txt"), "diff mentions the changed file");
+
+        // --- blame: one entry per line, attributed to the author ---
+        let blame = blame_file(&root, "a.txt", None).expect("blame a.txt");
+        assert_eq!(blame.rows.len(), 3, "a.txt has three lines");
+        for slot in &blame.rows {
+            let entry = slot.and_then(|ix| blame.entries.get(ix)).expect("row blamed");
+            assert_eq!(entry.author_display(), "Ada Lovelace");
+            assert!(!entry.is_uncommitted());
+        }
+    }
+
+    #[test]
+    fn blame_shift_tracks_edits() {
+        if !git_available() {
+            return;
+        }
+        let repo = make_repo();
+        let mut blame = blame_file(&repo.path, "a.txt", None).expect("blame");
+        let original = blame.rows.len();
+        // Insert two lines at row 1: the rows below shift down and the inserted
+        // rows have no blame yet.
+        blame.shift(1, 0, 2);
+        assert_eq!(blame.rows.len(), original + 2);
+        assert!(blame.rows[1].is_none());
+        assert!(blame.rows[2].is_none());
+        assert!(blame.rows[0].is_some());
     }
 }
