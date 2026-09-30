@@ -1,8 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    div, prelude::FluentBuilder as _, px, App, ClipboardItem, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window,
+    div, prelude::FluentBuilder as _, px, App, ClipboardItem, Div, Entity,
+    InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
+    Window,
 };
 
 use crate::{
@@ -27,7 +28,7 @@ pub(crate) fn blame_popover(
 }
 
 /// The inner card. Kept separate so [`blame_popover`] only wires anchoring.
-fn blame_card(detail: &BlameDetail, editor: Entity<InputState>, cx: &mut App) -> impl IntoElement {
+fn blame_card(detail: &BlameDetail, editor: Entity<InputState>, cx: &mut App) -> Div {
     // Precompute theme colors: the `.hover`/`.when` builder closures below do not
     // receive `cx`, so nothing inside them may call `cx.theme()`.
     let theme = cx.theme();
@@ -78,7 +79,7 @@ fn blame_card(detail: &BlameDetail, editor: Entity<InputState>, cx: &mut App) ->
         .flex_row()
         .items_center()
         .gap_2()
-        .pt_1()
+        .pt(px(4.0))
         .child(
             div()
                 .flex_1()
@@ -92,7 +93,7 @@ fn blame_card(detail: &BlameDetail, editor: Entity<InputState>, cx: &mut App) ->
                     .id("blame-copy-sha")
                     .px_2()
                     .py_0p5()
-                    .rounded_md()
+                    .rounded(px(4.0))
                     .border_1()
                     .border_color(border)
                     .text_color(fg)
@@ -107,7 +108,7 @@ fn blame_card(detail: &BlameDetail, editor: Entity<InputState>, cx: &mut App) ->
                     .id("blame-open-commit")
                     .px_2()
                     .py_0p5()
-                    .rounded_md()
+                    .rounded(px(4.0))
                     .bg(accent)
                     .text_color(accent_fg)
                     .hover(|s| s.bg(accent.opacity(0.85)))
