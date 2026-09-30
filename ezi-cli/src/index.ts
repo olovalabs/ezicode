@@ -13,12 +13,15 @@
  *   EZI_CACHE     cache dir override
  *   EZI_NO_UPDATE_CHECK  set to 1 to skip GitHub lookup, use fallback immediately
  *   EZI_GITHUB_TOKEN     optional token to raise api.github.com rate limits
+ *   NO_COLOR      disable colors in the terminal UI
  *
  * Design: zero npm dependencies (node builtins only) so the published
  * package stays ~5KB. Platform binaries come from GitHub Releases:
  *   linux x64   -> ezicode-x86_64-unknown-linux-gnu.tar.gz
  *   mac arm64   -> ezicode-aarch64-apple-darwin.tar.gz
  *   win x64     -> ezicode-x86_64-pc-windows-msvc.exe (standalone, no unzip)
+ *
+ * All UI output goes to stderr, so stdout (e.g. `ezi --where`) stays clean.
  */
 
 import * as fs from "node:fs";
@@ -31,6 +34,97 @@ const LAUNCHER_VERSION = "2.0.1"; // npm package version
 const FALLBACK_EDITOR_VERSION = "0.1.3"; // used when offline / API fails; keep near app/Cargo.toml
 const REPO = process.env.EZI_REPO || "olovalabs/ezicode";
 
+// ---------- tiny terminal UI (no deps) ----------
+const isTTY = !!process.stderr.isTTY && !process.env.CI;
+const useColor = isTTY && !process.env.NO_COLOR;
+const paint = (code: number) => (s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
+const bold = paint(1),
+  dim = paint(2),
+  green = paint(32),
+  cyan = paint(36);
+
+// Always restore the cursor, even on Ctrl+C or crashes.
+process.on("exit", () => {
+  if (isTTY) process.stderr.write("\x1b[?25h");
+});
+process.on("SIGINT", () => process.exit(130));
+
+function fmtBytes(n: number): string {
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+function fmtTime(s: number): string {
+  if (!isFinite(s)) return "--";
+  return s >= 60
+    ? `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s`
+    : `${Math.round(s)}s`;
+}
+
+function spinner(text: string) {
+  if (!isTTY) {
+    console.error(`ezi: ${text}`);
+    return { stop(_final?: string) {} };
+  }
+  const frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+  let i = 0;
+  process.stderr.write("\x1b[?25l");
+  const timer = setInterval(() => {
+    process.stderr.write(`\r\x1b[2K${cyan(frames[i++ % frames.length])} ${text}`);
+  }, 80);
+  return {
+    stop(final?: string) {
+      clearInterval(timer);
+      process.stderr.write("\r\x1b[2K\x1b[?25h");
+      if (final) console.error(final);
+    },
+  };
+}
+
+function progressBar(label: string) {
+  const start = Date.now();
+  let lastDraw = 0;
+  if (!isTTY) console.error(`ezi: ${label}`);
+  else process.stderr.write("\x1b[?25l");
+
+  return {
+    update(done: number, total: number) {
+      if (!isTTY) return;
+      const now = Date.now();
+      if (now - lastDraw < 60 && done !== total) return; // throttle redraws
+      lastDraw = now;
+      const speed = done / Math.max((now - start) / 1000, 0.001);
+      let line: string;
+      if (total > 0) {
+        const pct = Math.min(done / total, 1);
+        const width = 26;
+        const filled = Math.round(pct * width);
+        const bar = "█".repeat(filled) + dim("░".repeat(width - filled));
+        const eta = fmtTime((total - done) / speed);
+        line =
+          `${cyan(bar)} ${bold(String(Math.round(pct * 100)).padStart(3) + "%")}  ` +
+          `${fmtBytes(done)}/${fmtBytes(total)}  ${dim(fmtBytes(speed) + "/s")}  ${dim("eta " + eta)}`;
+      } else {
+        line = `${cyan("downloading")} ${fmtBytes(done)}  ${dim(fmtBytes(speed) + "/s")}`;
+      }
+      process.stderr.write(`\r\x1b[2K${label}  ${line}`);
+    },
+    done(msg: string) {
+      if (isTTY) process.stderr.write(`\r\x1b[2K\x1b[?25h`);
+      console.error(msg);
+    },
+    fail() {
+      if (isTTY) process.stderr.write(`\r\x1b[2K\x1b[?25h`);
+    },
+  };
+}
+
+// ---------- platform / cache ----------
 type Target =
   | { kind: "targz"; asset: string; binRel: string }
   | { kind: "exe"; asset: string };
@@ -81,6 +175,7 @@ function normalizeTag(raw: string): string {
   return t.startsWith("v") ? t : `v${t}`;
 }
 
+// ---------- release lookup ----------
 function fetchLatestTag(verbose: boolean): Promise<string | null> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = {
@@ -179,7 +274,11 @@ async function resolveTag(verbose: boolean): Promise<string> {
   }
 
   // Always check: cheap API call (~200ms). Same version -> cached binary, no download.
+  // Spinner only on a real terminal and not in verbose mode (logs would fight it).
+  const sp = isTTY && !verbose ? spinner("checking for latest release") : null;
   const latest = await fetchLatestTag(verbose);
+  sp?.stop();
+
   if (latest) {
     const prev = readLastSeenTag(false);
     if (prev !== latest && verbose) console.log(`ezi: new release ${latest} (was ${prev || "none"})`);
@@ -194,7 +293,12 @@ async function resolveTag(verbose: boolean): Promise<string> {
   return `v${FALLBACK_EDITOR_VERSION}`;
 }
 
-function download(url: string, dest: string, redirects = 5): Promise<void> {
+// ---------- download / extract ----------
+type Progress = (done: number, total: number) => void;
+
+// Writes to `<dest>.part` and renames on success, so an interrupted download
+// never leaves a corrupt file that existsSync() would later mistake for good.
+function download(url: string, dest: string, onProgress?: Progress, redirects = 5): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers: { "User-Agent": "ezi-launcher" } }, (res) => {
       const status = res.statusCode || 0;
@@ -204,7 +308,7 @@ function download(url: string, dest: string, redirects = 5): Promise<void> {
           return;
         }
         res.resume();
-        download(res.headers.location, dest, redirects - 1).then(resolve, reject);
+        download(res.headers.location, dest, onProgress, redirects - 1).then(resolve, reject);
         return;
       }
       if (status !== 200) {
@@ -212,16 +316,48 @@ function download(url: string, dest: string, redirects = 5): Promise<void> {
         reject(new Error(`ezi: download failed (${status}) for ${url}`));
         return;
       }
-      const out = fs.createWriteStream(dest);
-      res.pipe(out);
-      out.on("finish", () => out.close(() => resolve()));
-      out.on("error", (err) => {
-        fs.rmSync(dest, { force: true });
-        reject(err);
+
+      const total = Number(res.headers["content-length"] || 0);
+      let done = 0;
+      const part = dest + ".part";
+      const out = fs.createWriteStream(part);
+
+      res.on("data", (chunk: Buffer) => {
+        done += chunk.length;
+        onProgress?.(done, total);
       });
+      res.pipe(out);
+
+      out.on("finish", () =>
+        out.close(() => {
+          try {
+            fs.renameSync(part, dest);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        })
+      );
+      const fail = (err: Error) => {
+        fs.rmSync(part, { force: true });
+        reject(err);
+      };
+      out.on("error", fail);
+      res.on("error", fail);
     });
     req.on("error", reject);
   });
+}
+
+async function downloadWithUi(url: string, dest: string, what: string): Promise<void> {
+  const bar = progressBar(`${bold("ezi")} ${what}`);
+  try {
+    await download(url, dest, bar.update);
+    bar.done(`${green("✔")} downloaded ${what}`);
+  } catch (e) {
+    bar.fail();
+    throw e;
+  }
 }
 
 function extractTargz(archive: string, destDir: string): Promise<void> {
@@ -237,7 +373,7 @@ function extractTargz(archive: string, destDir: string): Promise<void> {
   });
 }
 
-async function ensureBinary(tag: string, verbose: boolean): Promise<string> {
+async function ensureBinary(tag: string): Promise<string> {
   const target = resolveTarget();
   const dir = cacheDirFor(tag);
   fs.mkdirSync(dir, { recursive: true });
@@ -246,10 +382,7 @@ async function ensureBinary(tag: string, verbose: boolean): Promise<string> {
     const bin = path.join(dir, "ezicode.exe");
     if (fs.existsSync(bin)) return bin;
     const url = `https://github.com/${REPO}/releases/download/${tag}/${target.asset}`;
-    const tmp = bin + ".download";
-    if (verbose) console.log(`ezi: downloading ${url}`);
-    await download(url, tmp);
-    fs.renameSync(tmp, bin);
+    await downloadWithUi(url, bin, `ezicode ${tag}`);
     return bin;
   }
 
@@ -261,16 +394,23 @@ async function ensureBinary(tag: string, verbose: boolean): Promise<string> {
   const url = `https://github.com/${REPO}/releases/download/${tag}/${target.asset}`;
   const archive = path.join(dir, target.asset);
   if (!fs.existsSync(archive)) {
-    if (verbose) console.log(`ezi: downloading ${url}`);
-    await download(url, archive);
+    await downloadWithUi(url, archive, `ezicode ${tag}`);
   }
-  if (verbose) console.log(`ezi: extracting ${target.asset}`);
-  await extractTargz(archive, dir);
+
+  const sp = spinner(`extracting ${target.asset}`);
+  try {
+    await extractTargz(archive, dir);
+    sp.stop(`${green("✔")} extracted`);
+  } catch (e) {
+    sp.stop();
+    throw e;
+  }
   if (!fs.existsSync(bin)) throw new Error(`ezi: binary not found after extract: ${bin}`);
   fs.chmodSync(bin, 0o755);
   return bin;
 }
 
+// ---------- CLI ----------
 function printHelp(fallbackTag: string): void {
   console.log(`ezi ${LAUNCHER_VERSION} — launcher for ezicode (https://github.com/${REPO})
 
@@ -286,6 +426,7 @@ Env:
   EZI_REPO      owner/repo (default ${REPO})
   EZI_CACHE     cache dir override
   EZI_NO_UPDATE_CHECK=1  skip GitHub lookup, use cache/fallback
+  NO_COLOR=1    disable colors
 `);
 }
 
@@ -311,7 +452,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const bin = await ensureBinary(tag, verbose);
+  const bin = await ensureBinary(tag);
 
   if (passthrough.includes("--where")) {
     console.log(bin);
@@ -327,6 +468,7 @@ async function main(): Promise<void> {
   });
   child.unref();
   if (verbose) console.log(`ezi: launched ${bin}`);
+  else if (isTTY) console.error(`${green("✔")} ${bold("ezicode")} ${dim(tag)} launched`);
 }
 
 main().catch((err: unknown) => {
