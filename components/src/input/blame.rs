@@ -6,11 +6,14 @@ use gpui::SharedString;
 #[derive(Clone, Debug, Default)]
 pub struct BlameLine {
     /// The ghost text, e.g. `"Ada Lovelace, 3 days ago"` — optionally with the
-    /// commit summary appended (`" • Fixed the thing"`), matching Zed.
+    /// commit summary appended (`" - Fixed the thing"`), matching Zed.
     pub text: SharedString,
     /// Abbreviated commit SHA (empty for not-yet-committed lines). Used as the
     /// hover/tooltip key.
     pub sha: SharedString,
+    /// Remote avatar URL for the line's author (Zed's inline gutter
+    /// avatar). Empty when the repo has no avatar-supporting remote.
+    pub avatar_url: SharedString,
 }
 
 /// Full commit detail for the blame hover popover. Like [`BlameLine`], this is
@@ -25,6 +28,10 @@ pub struct BlameDetail {
     pub short_sha: SharedString,
     pub author: SharedString,
     pub author_email: SharedString,
+    /// Remote avatar URL for the author (Zed's blame popover). Empty
+    /// when the repo has no avatar-supporting remote or the author
+    /// has no resolvable avatar.
+    pub avatar_url: SharedString,
     /// Pre-formatted absolute commit date, e.g. `"Mon, 3 Feb 2025 14:02"`.
     pub date: SharedString,
     /// Full commit message (subject + body).
@@ -45,6 +52,9 @@ pub struct InlineBlame {
     /// `git.inline_blame.min_column` — never start the annotation before this
     /// column, so short lines don't get the hint jammed against the text.
     pub min_column: u32,
+    /// `git.inline_blame.padding` — columns between the end of the
+    /// line and the annotation.
+    pub padding: u32,
     /// When true (the "Toggle Git Blame" command), show the annotation on every
     /// visible line, not only the cursor's line.
     pub show_all: bool,

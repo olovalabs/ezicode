@@ -5,7 +5,7 @@
 //! off the UI thread, caches the results, recomputes the graph, and wires the
 //! commit context-menu actions (copy SHA / message, checkout, view diff).
 
-use gpui::Context;
+use gpui::{AppContext as _, Context};
 
 use crate::git;
 
@@ -95,7 +95,7 @@ impl Workspace {
         let Some(root) = self.git.as_ref().map(|g| g.root.clone()) else {
             return;
         };
-        let short: String = sha.chars().take(8).collect();
+        let short: String = sha.chars().take(7).collect();
         // Synthetic, unique path so the existing diff-tab lookup keeps working
         // and the tab title reads like the short SHA.
         let tab_path = root.join(&short);
@@ -138,7 +138,7 @@ impl Workspace {
     /// Copy a commit's full SHA to the clipboard.
     pub(crate) fn git_copy_sha(&mut self, sha: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(sha.to_string()));
-        self.status = format!("Copied SHA {}", &sha.chars().take(8).collect::<String>());
+        self.status = format!("Copied SHA {}", &sha.chars().take(7).collect::<String>());
         cx.notify();
     }
 

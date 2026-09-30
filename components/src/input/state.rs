@@ -8,8 +8,10 @@ use gpui::{
 };
 use ropey::{Rope, RopeSlice};
 use serde::Deserialize;
+use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
+use std::time::Duration;
 use sum_tree::Bias;
 use unicode_segmentation::*;
 
@@ -335,6 +337,22 @@ pub struct InputState {
     /// Painted screen bounds of each visible blame annotation, `(row, sha,
     /// bounds)`, refreshed every paint and used to hit-test hover.
     pub(super) blame_bounds: Vec<(usize, SharedString, Bounds<Pixels>)>,
+    /// Bounds of the currently-open blame popover, written by the popover
+    /// element during layout. Hover handling reads it to keep the popover open
+    /// while the mouse is over it, so its buttons and scrolling work — the
+    /// same reason Zed tracks `inline_blame_popover.popover_bounds`.
+    pub(super) blame_popover_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Pending "hide the blame popover" timer: leaving the annotation starts
+    /// it, re-entering cancels it (Zed's hiding grace, so crossing the gap
+    /// between the annotation and the popover does not dismiss it).
+    pub(super) blame_hide_task: Option<Task<()>>,
+    /// Pending "show the blame popover" timer: hovering an annotation starts
+    /// it, leaving cancels it (Zed's `hover_popover_delay`, so a passing mouse
+    /// does not flash the popover).
+    pub(super) blame_show_task: Option<Task<()>>,
+    /// Mouse position that opened the current blame popover, used to place it
+    /// under the cursor (Zed anchors the popover at the hover position).
+    pub(super) blame_hover_anchor: Option<Point<Pixels>>,
 }
 
 impl EventEmitter<InputEvent> for InputState {}
@@ -416,6 +434,10 @@ impl InputState {
             inline_completion: InlineCompletion::default(),
             blame: InlineBlame::default(),
             blame_bounds: Vec::new(),
+            blame_popover_bounds: Rc::new(Cell::new(None)),
+            blame_hide_task: None,
+            blame_show_task: None,
+            blame_hover_anchor: None,
         }
     }
 
@@ -428,12 +450,14 @@ impl InputState {
         lines: Vec<Option<BlameLine>>,
         enabled: bool,
         min_column: u32,
+        padding: u32,
         icon: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) {
         self.blame.lines = lines;
         self.blame.enabled = enabled;
         self.blame.min_column = min_column;
+        self.blame.padding = padding;
         self.blame.icon = icon.into();
         cx.notify();
     }
@@ -525,6 +549,12 @@ impl InputState {
     /// Update the blame hover state for a mouse position, emitting
     /// [`InputEvent::BlameHover`] / [`InputEvent::BlameHoverEnd`] only when the
     /// hovered annotation changes (so the app fetches a commit at most once).
+    ///
+    /// Mirrors Zed's inline-blame hover: a first show waits
+    /// `hover_popover_delay` (300ms) so a passing mouse does not flash the
+    /// popover; the popover is itself a hover target, so moving onto it keeps
+    /// it (and its buttons) open; and leaving both uses a short grace period
+    /// before hiding.
     pub(super) fn update_blame_hover(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let hit = self
             .blame_bounds
@@ -532,24 +562,67 @@ impl InputState {
             .find(|(_, _, bounds)| bounds.contains(&position))
             .map(|(row, sha, _)| (*row, sha.clone()));
 
-        match hit {
-            Some((row, sha)) => {
-                if self.blame.hovered_row != Some(row) {
-                    self.blame.hovered_row = Some(row);
-                    // New annotation: drop any stale detail until the app refills.
-                    self.blame.detail = None;
+        let over_popover = self
+            .blame_popover_bounds
+            .get()
+            .is_some_and(|bounds| bounds.contains(&position));
+
+        if let Some((row, sha)) = hit {
+            // Back on an annotation: cancel any pending hide.
+            self.blame_hide_task = None;
+            if self.blame.hovered_row != Some(row) {
+                let was_open = self.blame.hovered_row.is_some() && self.blame.detail.is_some();
+                self.blame.hovered_row = Some(row);
+                self.blame.detail = None;
+                self.blame_hover_anchor = Some(position);
+                // Drop any pending show for the previous annotation.
+                self.blame_show_task = None;
+                if was_open {
+                    // Another popover is already up: swap its content at once
+                    // rather than hiding and waiting again.
                     cx.emit(InputEvent::BlameHover { row, sha });
                     cx.notify();
+                } else {
+                    self.blame_show_task = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(300))
+                            .await;
+                        if let Some(this) = this.upgrade() {
+                            this.update(cx, |this, cx| {
+                                this.blame_show_task = None;
+                                // Only show if the mouse is still on this line.
+                                if this.blame.hovered_row == Some(row) {
+                                    cx.emit(InputEvent::BlameHover { row, sha });
+                                    cx.notify();
+                                }
+                            })
+                            .ok();
+                        }
+                    }));
                 }
             }
-            None => {
-                if self.blame.hovered_row.is_some() {
-                    self.blame.hovered_row = None;
-                    self.blame.detail = None;
-                    cx.emit(InputEvent::BlameHoverEnd);
-                    cx.notify();
+        } else if over_popover {
+            // Moving onto the popover keeps it (and its buttons) open.
+            self.blame_hide_task = None;
+        } else if self.blame.hovered_row.is_some() && self.blame_hide_task.is_none() {
+            self.blame_hide_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        this.blame_hide_task = None;
+                        this.blame_show_task = None;
+                        let was_open = this.blame.detail.take().is_some();
+                        this.blame.hovered_row = None;
+                        if was_open {
+                            cx.emit(InputEvent::BlameHoverEnd);
+                        }
+                        cx.notify();
+                    })
+                    .ok();
                 }
-            }
+            }));
         }
     }
 
@@ -2184,6 +2257,28 @@ impl Render for InputState {
             self._pending_update = false;
         }
 
+        // The popover writes its laid-out bounds into this sink so hover
+        // handling can keep it open while the mouse is over it.
+        let blame_popover = self
+            .blame
+            .hovered_row
+            .zip(self.blame.detail.clone())
+            .and_then(|(row, detail)| {
+                let range = self.blame_row_offset_range(row)?;
+                Some(blame_popover(
+                    cx.entity(),
+                    range,
+                    detail,
+                    self.blame_popover_bounds.clone(),
+                    self.blame_hover_anchor,
+                ))
+            });
+        if blame_popover.is_none() {
+            // No popover this frame: forget any stale bounds so they cannot
+            // keep a dismissed popover "hovered".
+            self.blame_popover_bounds.set(None);
+        }
+
         div()
             .id("input-state")
             .flex_1()
@@ -2194,14 +2289,6 @@ impl Render for InputState {
             .children(self.diagnostic_popover.clone())
             .children(self.context_menu.as_ref().map(|menu| menu.render()))
             .children(self.hover_popover.clone())
-            .children(
-                self.blame
-                    .hovered_row
-                    .zip(self.blame.detail.clone())
-                    .and_then(|(row, detail)| {
-                        let range = self.blame_row_offset_range(row)?;
-                        Some(blame_popover(cx.entity(), range, detail))
-                    }),
-            )
+            .children(blame_popover)
     }
 }

@@ -804,23 +804,18 @@ pub struct BlameEntry {
 }
 
 impl BlameEntry {
-    /// A line git could not attribute to any commit yet — local, uncommitted
-    /// changes. Zed renders these as "You • Uncommitted changes".
+    /// A line git could not attribute to any commit yet — local,
+    /// uncommitted changes. Zed renders no annotation at all for
+    /// these (its parser drops zero-SHA entries), so the UI skips
+    /// them rather than labelling them.
     pub fn is_uncommitted(&self) -> bool {
         self.sha.is_empty() || self.sha.bytes().all(|b| b == b'0')
     }
 
-    /// The abbreviated SHA shown in the UI (git's default is 7–8 chars).
+    /// The abbreviated SHA shown in the UI (git's default is 7–8 chars;
+    /// Zed uses 7).
     pub fn short_sha(&self) -> String {
-        self.sha.chars().take(8).collect()
-    }
-
-    /// Author display name, or "You" for uncommitted lines (matching Zed).
-    pub fn author_display(&self) -> &str {
-        if self.is_uncommitted() {
-            return "You";
-        }
-        self.author.as_deref().unwrap_or("Unknown")
+        self.sha.chars().take(7).collect()
     }
 }
 
@@ -852,6 +847,7 @@ impl FileBlame {
     }
 
     /// The blame entry attributed to `row` (0-based), if any.
+    #[cfg(test)]
     pub fn line(&self, row: usize) -> Option<&BlameEntry> {
         let ix = (*self.rows.get(row)?)?;
         self.entries.get(ix)
@@ -998,14 +994,6 @@ fn parse_blame_header(line: &str) -> Option<BlameEntry> {
     })
 }
 
-/// Whether `rel` is tracked in the index. Blame is skipped for untracked
-/// paths (git blame would fail on them anyway).
-pub fn is_path_tracked(root: &Path, rel: &str) -> bool {
-    run_git(root, &["ls-files", "--error-unmatch", "--", rel])
-        .map(|(_, ok)| ok)
-        .unwrap_or(false)
-}
-
 // ============================================================================
 // History graph (Feature 1: Source Control "History" view)
 //
@@ -1097,7 +1085,7 @@ pub fn parse_log(raw: &str) -> Vec<Commit> {
                 .collect::<Vec<_>>();
             Some(Commit {
                 sha: sha.to_string(),
-                short_sha: sha.chars().take(8).collect(),
+                short_sha: sha.chars().take(7).collect(),
                 parents,
                 author,
                 author_email,
@@ -1264,18 +1252,24 @@ pub struct CommitDetails {
     pub author: String,
     pub author_email: String,
     pub author_time: i64,
+    /// Committer timestamp (unix seconds). Zed's blame popover dates
+    /// the commit with the committer time, not the author time.
+    pub committer_time: i64,
     /// Pre-formatted absolute date (git's `%ad`).
     pub date: String,
     pub subject: String,
     pub body: String,
     pub files: Vec<CommitFile>,
+    /// Remote avatar URL for the author (Zed's blame popover),
+    /// built from the repo's GitHub remote and the author email.
+    pub avatar_url: Option<String>,
 }
 
 /// Load the message, author, date and touched files for one commit. Runs on a
 /// background thread; results are cached by SHA in `crate::git_blame`.
 pub fn commit_details(root: &Path, sha: &str) -> Option<CommitDetails> {
     let format = format!(
-        "--pretty=format:%H{f}%an{f}%ae{f}%at{f}%ad{f}%s{f}%b{r}",
+        "--pretty=format:%H{f}%an{f}%ae{f}%at{f}%ct{f}%ad{f}%s{f}%b{r}",
         f = LOG_FIELD_SEP,
         r = LOG_RECORD_SEP,
     );
@@ -1293,7 +1287,86 @@ pub fn commit_details(root: &Path, sha: &str) -> Option<CommitDetails> {
     if !ok {
         return None;
     }
-    parse_commit_details(&raw)
+    let mut details = parse_commit_details(&raw)?;
+    // Zed's blame popover shows the commit author's hosting-provider
+    // avatar. The fast path is GitHub's avatar CDN, keyed on the
+    // author email, so it needs no API call.
+    details.avatar_url =
+        remote_url(root).and_then(|remote| avatar_url(&remote, &details.author_email));
+    Some(details)
+}
+
+/// The URL of the repo's `origin` remote (falling back to its first
+/// remote), cached per repo root for the process lifetime. Runs `git
+/// remote get-url` on the calling thread, so callers should prefer a
+/// background thread; the cache makes repeat calls free.
+pub fn remote_url(root: &Path) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+    static CACHE: LazyLock<Mutex<HashMap<PathBuf, Option<String>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let Ok(mut cache) = CACHE.lock() else {
+        return None;
+    };
+    if let Some(url) = cache.get(root) {
+        return url.clone();
+    }
+    let url = run_git(root, &["remote", "get-url", "origin"])
+        .filter(|(_, ok)| *ok)
+        .map(|(out, _)| out.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            // No `origin`: use the first remote, if any.
+            let (out, ok) = run_git(root, &["remote"])?;
+            if !ok {
+                return None;
+            }
+            let name = out.lines().next()?.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let (url, ok) = run_git(root, &["remote", "get-url", name])?;
+            if !ok {
+                return None;
+            }
+            let url = url.trim().to_string();
+            (!url.is_empty()).then_some(url)
+        });
+    cache.insert(root.to_path_buf(), url.clone());
+    url
+}
+
+/// Build the commit author's avatar URL for a hosting-provider remote,
+/// exactly as Zed's GitHub provider does: GitHub's avatar CDN resolves
+/// an avatar from the author's email with no API round-trip. Returns
+/// `None` for non-GitHub remotes, missing emails and GitHub's
+/// `[bot]@users.noreply.github.com` addresses (Zed skips those too).
+pub fn avatar_url(remote_url: &str, author_email: &str) -> Option<String> {
+    // Handle every remote spelling: `https://github.com/o/r`,
+    // `ssh://git@github.com/o/r` and the scp-like `git@github.com:o/r`.
+    let authority = remote_url.split("://").nth(1).unwrap_or(remote_url);
+    let host = authority
+        .rsplit('@')
+        .next()
+        .unwrap_or(authority)
+        .split(|c| c == '/' || c == ':')
+        .next()
+        .unwrap_or("");
+    if host != "github.com" {
+        return None;
+    }
+    let email = author_email
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim();
+    if email.is_empty() || email.ends_with("[bot]@users.noreply.github.com") {
+        return None;
+    }
+    Some(format!(
+        "https://avatars.githubusercontent.com/u/e?email={}&s=128",
+        url::form_urlencoded::byte_serialize(email.as_bytes()).collect::<String>()
+    ))
 }
 
 /// Parse the output of the `git show --name-status` invocation in
@@ -1306,6 +1379,7 @@ pub fn parse_commit_details(raw: &str) -> Option<CommitDetails> {
     let author = fields.next().unwrap_or("").to_string();
     let author_email = fields.next().unwrap_or("").to_string();
     let author_time = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
+    let committer_time = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
     let date = fields.next().unwrap_or("").to_string();
     let subject = fields.next().unwrap_or("").to_string();
     let body = fields.next().unwrap_or("").trim().to_string();
@@ -1318,15 +1392,17 @@ pub fn parse_commit_details(raw: &str) -> Option<CommitDetails> {
         .collect();
 
     Some(CommitDetails {
-        short_sha: sha.chars().take(8).collect(),
+        short_sha: sha.chars().take(7).collect(),
         sha,
         author,
         author_email,
         author_time,
+        committer_time,
         date,
         subject,
         body,
         files,
+        avatar_url: None,
     })
 }
 
@@ -1386,6 +1462,27 @@ mod tests {
 
     fn root() -> &'static Path {
         Path::new("/repo")
+    }
+
+    #[test]
+    fn builds_github_avatar_urls() {
+        let expected = "https://avatars.githubusercontent.com/u/e?email=joe%40example.com&s=128";
+
+        // https, ssh:// and scp-like remotes all resolve to the same avatar.
+        for remote in [
+            "https://github.com/zed-industries/zed.git",
+            "ssh://git@github.com/zed-industries/zed.git",
+            "git@github.com:zed-industries/zed.git",
+        ] {
+            assert_eq!(avatar_url(remote, "joe@example.com").as_deref(), Some(expected));
+        }
+
+        // Non-GitHub remotes have no avatar (Zed falls back to initials).
+        assert!(avatar_url("https://gitlab.com/a/b.git", "joe@example.com").is_none());
+
+        // GitHub's noreply bot addresses and empty emails are skipped.
+        assert!(avatar_url("https://github.com/a/b.git", "dependabot[bot]@users.noreply.github.com").is_none());
+        assert!(avatar_url("https://github.com/a/b.git", "").is_none());
     }
 
     #[test]
@@ -1675,7 +1772,7 @@ index 7898192..c1827f0 100644
         assert_eq!(e.summary.as_deref(), Some("Joe's cool commit"));
         assert_eq!(e.filename, "index.js");
         assert!(!e.is_uncommitted());
-        assert_eq!(e.short_sha(), "6ad46b52");
+        assert_eq!(e.short_sha(), "6ad46b5");
     }
 
     #[test]
@@ -1713,7 +1810,7 @@ index 7898192..c1827f0 100644
         let entries = parse_blame_incremental(&raw);
         assert_eq!(entries.len(), 1);
         assert!(entries[0].is_uncommitted());
-        assert_eq!(entries[0].author_display(), "You");
+        assert_eq!(entries[0].author.as_deref(), Some("Not Committed Yet"));
     }
 
     #[test]
@@ -1788,7 +1885,7 @@ index 7898192..c1827f0 100644
         let commits = parse_log(&raw);
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].sha, "a".repeat(40));
-        assert_eq!(commits[0].short_sha, "aaaaaaaa");
+        assert_eq!(commits[0].short_sha, "aaaaaaa");
         assert_eq!(commits[0].parents, vec!["b".repeat(40), "c".repeat(40)]);
         assert_eq!(commits[0].author, "Ada");
         assert_eq!(commits[0].author_time, 1700000000);
@@ -1808,7 +1905,7 @@ index 7898192..c1827f0 100644
     fn commit(sha: &str, parents: &[&str]) -> Commit {
         Commit {
             sha: sha.to_string(),
-            short_sha: sha.chars().take(8).collect(),
+            short_sha: sha.chars().take(7).collect(),
             parents: parents.iter().map(|p| p.to_string()).collect(),
             author: String::new(),
             author_email: String::new(),
@@ -1862,15 +1959,17 @@ index 7898192..c1827f0 100644
     #[test]
     fn parses_commit_details_with_files() {
         let raw = format!(
-            "{a}\x1fAda\x1fada@x.io\x1f1700000000\x1f2024-03-01 10:00\x1fFix bug\x1fLonger body\x1e\n\
+            "{a}\x1fAda\x1fada@x.io\x1f1700000000\x1f1700000123\x1f2024-03-01 10:00\x1fFix bug\x1fLonger body\x1e\n\
              M\tsrc/a.rs\n\
              A\tsrc/b.rs\n\
              R100\told.rs\tnew.rs\n",
             a = "a".repeat(40),
         );
         let details = parse_commit_details(&raw).unwrap();
-        assert_eq!(details.short_sha, "aaaaaaaa");
+        assert_eq!(details.short_sha, "aaaaaaa");
         assert_eq!(details.author, "Ada");
+        assert_eq!(details.author_time, 1700000000);
+        assert_eq!(details.committer_time, 1700000123);
         assert_eq!(details.date, "2024-03-01 10:00");
         assert_eq!(details.subject, "Fix bug");
         assert_eq!(details.body, "Longer body");
@@ -2001,7 +2100,7 @@ mod integration_tests {
         assert_eq!(commits[0].subject, "merge feature");
         assert_eq!(commits[0].parents.len(), 2, "merge has two parents");
         for c in &commits {
-            assert_eq!(c.short_sha.len(), 8, "short sha is 8 chars");
+            assert_eq!(c.short_sha.len(), 7, "short sha is 7 chars");
             assert!(c.sha.starts_with(c.short_sha.as_str()));
             assert_eq!(c.author, "Ada Lovelace");
             assert!(!c.relative_time.is_empty());
@@ -2061,7 +2160,7 @@ mod integration_tests {
         assert_eq!(blame.rows.len(), 3, "a.txt has three lines");
         for slot in &blame.rows {
             let entry = slot.and_then(|ix| blame.entries.get(ix)).expect("row blamed");
-            assert_eq!(entry.author_display(), "Ada Lovelace");
+            assert_eq!(entry.author.as_deref().unwrap_or_default(), "Ada Lovelace");
             assert!(!entry.is_uncommitted());
         }
     }

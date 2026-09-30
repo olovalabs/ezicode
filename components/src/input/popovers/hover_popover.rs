@@ -1,9 +1,10 @@
+use std::cell::Cell;
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
     deferred, div, point, prelude::FluentBuilder as _, px, AnyElement, App, AppContext as _,
     AvailableSpace, Bounds, Element, ElementId, Entity, InteractiveElement, IntoElement,
-    MouseDownEvent, ParentElement as _, Pixels, Render, StatefulInteractiveElement as _,
+    MouseDownEvent, ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window,
 };
 
@@ -74,6 +75,13 @@ pub(crate) struct Popover {
     editor: Entity<InputState>,
     range: Range<usize>,
     width_limit: Range<Pixels>,
+    /// Optional sink the popover writes its laid-out screen bounds into each
+    /// frame, so callers can treat the popover itself as a hover target.
+    bounds_sink: Option<Rc<Cell<Option<Bounds<Pixels>>>>>,
+    /// Optional anchor (the mouse position that opened the popover). When set,
+    /// the popover is horizontally centred on it — like Zed, so moving the
+    /// mouse towards the popover lands on it.
+    anchor: Option<Point<Pixels>>,
     content_builder: Box<dyn Fn(&mut Window, &mut App) -> AnyElement>,
 }
 
@@ -100,8 +108,24 @@ impl Popover {
             range,
             style: StyleRefinement::default(),
             width_limit: px(200.)..px(500.),
+            bounds_sink: None,
+            anchor: None,
             content_builder: Box::new(move |window, cx| (f)(window, cx).into_any_element()),
         }
+    }
+
+    /// Anchor the popover horizontally at `point` (the hover position).
+    pub fn anchor(mut self, point: Point<Pixels>) -> Self {
+        self.anchor = Some(point);
+        self
+    }
+
+    /// Report the popover's screen bounds into `sink` every frame, so the
+    /// caller can keep it open while the mouse is over it (Zed's interactive
+    /// blame popover).
+    pub fn track_bounds(mut self, sink: Rc<Cell<Option<Bounds<Pixels>>>>) -> Self {
+        self.bounds_sink = Some(sink);
+        self
     }
 
     /// Get the bounds of the range in the editor, if it is visible.
@@ -169,6 +193,9 @@ impl Element for Popover {
         let trigger_bounds = match self.trigger_bounds(cx) {
             Some(bounds) => bounds,
             None => {
+                if let Some(sink) = &self.bounds_sink {
+                    sink.set(None);
+                }
                 return (
                     div().into_any_element().request_layout(window, cx),
                     PopoverLayoutState {
@@ -210,17 +237,31 @@ impl Element for Popover {
         let popover_size = popover.layout_as_root(AvailableSpace::min_size(), window, cx);
         const SNAP_TO_EDGE: Pixels = px(8.);
         let top_space = trigger_bounds.top() - SNAP_TO_EDGE;
-        let right_space = window.bounds().size.width - trigger_bounds.left() - SNAP_TO_EDGE;
+        // Prefer the caller's anchor (Zed anchors the blame popover at the
+        // hover position, so the mouse can travel straight into it); otherwise
+        // fall back to the start of the hovered range.
+        let anchor_x = self.anchor.map_or(trigger_bounds.left(), |p| p.x);
 
-        let mut pos = point(
-            trigger_bounds.left(),
-            trigger_bounds.top() - popover_size.height,
-        );
+        let mut pos = point(anchor_x, trigger_bounds.top() - popover_size.height);
         if popover_size.height > top_space {
             pos.y = trigger_bounds.bottom();
         }
-        if popover_size.width > right_space {
-            pos.x = trigger_bounds.right() - popover_size.width;
+        // Keep the popover inside the window horizontally.
+        let right_limit = window.bounds().size.width - SNAP_TO_EDGE;
+        if pos.x + popover_size.width > right_limit {
+            pos.x = right_limit - popover_size.width;
+        }
+        if pos.x < SNAP_TO_EDGE {
+            pos.x = SNAP_TO_EDGE;
+        }
+
+        let bounds = Bounds {
+            origin: pos,
+            size: popover_size,
+        };
+        if let Some(sink) = &self.bounds_sink {
+            // Only an actually-visible popover is a hover target.
+            sink.set(is_open.then_some(bounds));
         }
 
         let mut empty = div().into_any_element();
@@ -228,10 +269,7 @@ impl Element for Popover {
         (
             layout_id,
             PopoverLayoutState {
-                bounds: Bounds {
-                    origin: pos,
-                    size: popover_size,
-                },
+                bounds,
                 element: Some(popover),
                 state: open_state,
             },

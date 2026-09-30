@@ -109,6 +109,9 @@ pub struct InlineBlameSettings {
     /// a hint jammed right against the text.
     #[serde(default)]
     pub min_column: u32,
+    /// Columns between the end of the line and the annotation.
+    #[serde(default = "default_blame_padding")]
+    pub padding: u32,
     /// Append the commit summary after "Author, <relative date>".
     #[serde(default)]
     pub show_commit_summary: bool,
@@ -118,6 +121,10 @@ fn default_blame_enabled() -> bool {
     true
 }
 
+fn default_blame_padding() -> u32 {
+    7
+}
+
 impl Default for InlineBlameSettings {
     fn default() -> Self {
         // Matches Zed's defaults.
@@ -125,6 +132,7 @@ impl Default for InlineBlameSettings {
             enabled: true,
             delay_ms: 0,
             min_column: 0,
+            padding: 7,
             show_commit_summary: false,
         }
     }
@@ -323,6 +331,7 @@ mod tests {
         assert!(d.enabled);
         assert_eq!(d.delay_ms, 0);
         assert_eq!(d.min_column, 0);
+        assert_eq!(d.padding, 7);
         assert!(!d.show_commit_summary);
     }
 
@@ -335,6 +344,7 @@ mod tests {
                     "enabled": true,
                     "delay_ms": 300,
                     "min_column": 40,
+                    "padding": 12,
                     "show_commit_summary": true
                 }
             }
@@ -343,6 +353,7 @@ mod tests {
         assert!(s.git.inline_blame.enabled);
         assert_eq!(s.git.inline_blame.delay_ms, 300);
         assert_eq!(s.git.inline_blame.min_column, 40);
+        assert_eq!(s.git.inline_blame.padding, 12);
         assert!(s.git.inline_blame.show_commit_summary);
     }
 

@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui::{Context, Entity};
-use gpui_component::input::{BlameDetail, BlameLine, InputState};
+use gpui::{AppContext as _, Context, Entity};
+use gpui_component::input::{BlameDetail, BlameLine, InputState, RopeExt as _};
 
 use crate::git;
 
@@ -79,7 +79,7 @@ impl Workspace {
             let ed = editor.read(cx);
             (
                 ed.cursor_position().line as usize,
-                ed.text().len_lines(),
+                ed.text().lines_len(),
             )
         };
         if let Some(blame) = self.git_blame_cache.get_mut(path) {
@@ -98,7 +98,9 @@ impl Workspace {
                 });
             }
         }
-        self.schedule_blame(path.to_path_buf(), editor.clone(), 250, cx);
+        // Zed waits `REGENERATE_ON_EDIT_DEBOUNCE_INTERVAL` (2s) before
+        // re-running blame after an edit.
+        self.schedule_blame(path.to_path_buf(), editor.clone(), 2000, cx);
     }
 
     /// Invalidate every cached blame (branch switch / commit / pull / external
@@ -239,54 +241,63 @@ impl Workspace {
         };
         let inline = self.settings.git.inline_blame;
         let now = unix_now();
-        let lines = blame_annotations(blame, inline.show_commit_summary, now);
+        let root = self.git.as_ref().map(|g| g.root.as_path());
+        let lines = blame_annotations(blame, root, inline.show_commit_summary, now);
         let enabled = inline.enabled;
         let min_column = inline.min_column;
+        let padding = inline.padding;
         let gutter = self.git_blame_gutter;
         editor.update(cx, |state, cx| {
-            state.set_inline_blame(lines, enabled, min_column, BLAME_ICON, cx);
+            state.set_inline_blame(lines, enabled, min_column, padding, BLAME_ICON, cx);
             state.set_blame_gutter(gutter, cx);
         });
     }
 }
 
-/// Build one annotation per row from a [`git::FileBlame`], formatted like Zed's
-/// inline blame: `"Author, 3 days ago"` (+ optional `" • summary"`), and
-/// `"You, uncommitted changes"` for local edits.
+/// Build one annotation per row from a [`git::FileBlame`], formatted like
+/// Zed's inline blame: `"Author, 3 days ago"` (+ optional `" - summary"`).
+/// Uncommitted lines (zero SHA) produce no annotation at all — Zed's
+/// blame parser drops zero-SHA entries, so lines git cannot attribute to
+/// a commit yet stay clean while you edit.
 fn blame_annotations(
     blame: &git::FileBlame,
+    root: Option<&Path>,
     show_summary: bool,
     now: i64,
 ) -> Vec<Option<BlameLine>> {
+    // Resolve the repo's remote once per call; `remote_url` caches it per
+    // root, so this is a single `git remote get-url` (at most) per render.
+    let remote = root.and_then(git::remote_url);
     blame
         .rows
         .iter()
         .map(|slot| {
             let entry = slot.and_then(|ix| blame.entries.get(ix))?;
-            let author = entry.author_display();
-            let text = if entry.is_uncommitted() {
-                format!("{author}, uncommitted changes")
-            } else {
-                let when = relative_time(entry.author_time.unwrap_or(0), now);
-                let mut text = format!("{author}, {when}");
-                if show_summary {
-                    if let Some(summary) = &entry.summary {
-                        if !summary.is_empty() {
-                            text.push_str(" • ");
-                            text.push_str(summary);
-                        }
+            if entry.is_uncommitted() {
+                return None;
+            }
+            let author = entry.author.as_deref().unwrap_or_default();
+            let when = relative_time(entry.author_time.unwrap_or(0), now);
+            let mut text = format!("{author}, {when}");
+            if show_summary {
+                if let Some(summary) = &entry.summary {
+                    if !summary.is_empty() {
+                        text.push_str(" - ");
+                        text.push_str(summary);
                     }
                 }
-                text
-            };
-            let sha = if entry.is_uncommitted() {
-                String::new()
-            } else {
-                entry.short_sha()
-            };
+            }
+            // Zed's `git.blame.show_avatar`: the author's hosting-provider
+            // avatar, resolved from their email via the GitHub CDN.
+            let avatar_url = entry
+                .author_mail
+                .as_deref()
+                .and_then(|mail| remote.as_deref().and_then(|r| git::avatar_url(r, mail)))
+                .unwrap_or_default();
             Some(BlameLine {
                 text: text.into(),
-                sha: sha.into(),
+                sha: entry.short_sha().into(),
+                avatar_url: avatar_url.into(),
             })
         })
         .collect()
@@ -310,7 +321,11 @@ fn to_blame_detail(d: &git::CommitDetails) -> BlameDetail {
         short_sha: d.short_sha.clone().into(),
         author: author_display.into(),
         author_email: d.author_email.clone().into(),
-        date: d.date.clone().into(),
+        // Zed's blame popover shows the author's hosting-provider avatar.
+        avatar_url: d.avatar_url.clone().unwrap_or_default().into(),
+        // Zed dates the popover with the committer time, not the
+        // author time, in a medium absolute format.
+        date: absolute_timestamp(d.committer_time).into(),
         message: message.into(),
     }
 }
@@ -323,43 +338,211 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// A compact "N units ago" string, matching git's relative dates closely enough
-/// for the inline annotation.
+/// Relative timestamp for blame annotations, worded exactly like
+/// Zed's `time_format::format_relative_time` / `format_relative_date`:
+/// "Just now", "N minutes ago", "N hours ago", then calendar buckets
+/// ("Today", "Yesterday", "N days ago", "N weeks ago", "N months ago",
+/// "1 year, 2 months ago", "Z years ago"), evaluated in the user's
+/// local timezone.
 pub(crate) fn relative_time(then: i64, now: i64) -> String {
     let secs = (now - then).max(0);
-    if secs < 45 {
-        return "just now".to_string();
+    let minutes = secs / 60;
+    match minutes {
+        0 => "Just now".to_string(),
+        1 => "1 minute ago".to_string(),
+        2..=59 => format!("{minutes} minutes ago"),
+        _ => {
+            let hours = secs / 3600;
+            match hours {
+                1 => "1 hour ago".to_string(),
+                2..=23 => format!("{hours} hours ago"),
+                _ => relative_date(then, now),
+            }
+        }
     }
-    let mins = secs / 60;
-    if mins < 60 {
-        return format!("{} minute{} ago", mins.max(1), plural(mins.max(1)));
-    }
-    let hours = mins / 60;
-    if hours < 24 {
-        return format!("{hours} hour{} ago", plural(hours));
-    }
-    let days = hours / 24;
-    if days < 7 {
-        return format!("{days} day{} ago", plural(days));
-    }
-    let weeks = days / 7;
-    if weeks < 5 {
-        return format!("{weeks} week{} ago", plural(weeks));
-    }
-    let months = days / 30;
-    if months < 12 {
-        return format!("{} month{} ago", months.max(1), plural(months.max(1)));
-    }
-    let years = days / 365;
-    format!("{} year{} ago", years.max(1), plural(years.max(1)))
 }
 
-fn plural(n: i64) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
+fn relative_date(then: i64, now: i64) -> String {
+    let (ty, tm, td) = local_date(then);
+    let (ny, nm, nd) = local_date(now);
+    let days = days_from_civil(ny, nm, nd) - days_from_civil(ty, tm, td);
+    match days {
+        0 => "Today".to_string(),
+        1 => "Yesterday".to_string(),
+        2..=6 => format!("{days} days ago"),
+        _ => {
+            let weeks = days / 7;
+            match weeks {
+                1 => "1 week ago".to_string(),
+                2..=4 => format!("{weeks} weeks ago"),
+                _ => {
+                    let months = month_difference(ty, tm, ny, nm);
+                    match months {
+                        0..=1 => "1 month ago".to_string(),
+                        2..=11 => format!("{months} months ago"),
+                        12..=59 => format_compound_year_month(months),
+                        m => format!("{} years ago", (m + 6) / 12),
+                    }
+                }
+            }
+        }
     }
+}
+
+/// Zed's `calculate_month_difference`: a calendar-aware month gap, so
+/// 31 Jan → 1 Mar counts as one month, not one month and one day.
+fn month_difference(then_y: i32, then_m: u32, now_y: i32, now_m: u32) -> usize {
+    let month_diff = if now_m >= then_m {
+        now_m - then_m
+    } else {
+        12 - then_m + now_m
+    };
+    let year_diff = (now_y - then_y) as usize;
+    if year_diff == 0 {
+        (now_m - then_m) as usize
+    } else if month_diff == 0 {
+        year_diff * 12
+    } else if then_m > now_m {
+        (year_diff - 1) * 12 + month_diff as usize
+    } else {
+        year_diff * 12 + month_diff as usize
+    }
+}
+
+fn format_compound_year_month(months: usize) -> String {
+    let years = months / 12;
+    let months = months % 12;
+    let year_unit = if years == 1 { "year" } else { "years" };
+    if months == 0 {
+        format!("{years} {year_unit} ago")
+    } else {
+        let month_unit = if months == 1 { "month" } else { "months" };
+        format!("{years} {year_unit}, {months} {month_unit} ago")
+    }
+}
+
+/// Days since the Unix epoch for a calendar date (Howard Hinnant's
+/// algorithm), so relative dates count calendar days rather than
+/// 24-hour periods.
+fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era as i64 * 146097 + doe as i64 - 719468
+}
+
+/// Local calendar date (year, month, day) of a unix timestamp.
+/// Zed formats blame dates in the user's zone, so "Today" and
+/// "Yesterday" follow the platform timezone, not UTC.
+#[cfg(unix)]
+fn local_date(unix: i64) -> (i32, u32, u32) {
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let secs = unix as libc::time_t;
+    let local = unsafe { libc::localtime_r(&secs, &mut tm) };
+    if local.is_null() {
+        return (1970, 1, 1);
+    }
+    (tm.tm_year + 1900, (tm.tm_mon + 1) as u32, tm.tm_mday as u32)
+}
+
+#[cfg(not(unix))]
+fn local_date(unix: i64) -> (i32, u32, u32) {
+    // No localtime on this platform: fall back to UTC.
+    civil_from_days(unix.div_euclid(86_400))
+}
+
+#[cfg(not(unix))]
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i32 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Zed's `TimestampFormat::MediumAbsolute` for the blame popover
+/// date, rendered in the user's zone and 12/24-hour locale
+/// convention: "Today at 3:30 PM", "Yesterday at 11:00 AM", or
+/// "02/24/2024 3:00 PM".
+fn absolute_timestamp(unix: i64) -> String {
+    let time = format_time(unix);
+    let (ty, tm, td) = local_date(unix);
+    let (ny, nm, nd) = local_date(unix_now());
+    let days = days_from_civil(ny, nm, nd) - days_from_civil(ty, tm, td);
+    match days {
+        0 => format!("Today at {time}"),
+        1 => format!("Yesterday at {time}"),
+        _ => format!("{} {time}", format_date(unix)),
+    }
+}
+
+fn format_time(unix: i64) -> String {
+    let (hour, minute) = local_hm(unix);
+    if is_12_hour_locale() {
+        let meridiem = if hour < 12 { "AM" } else { "PM" };
+        let hour = match hour % 12 {
+            0 => 12,
+            h => h,
+        };
+        format!("{hour}:{minute:02} {meridiem}")
+    } else {
+        format!("{hour:02}:{minute:02}")
+    }
+}
+
+fn format_date(unix: i64) -> String {
+    let (year, month, day) = local_date(unix);
+    if is_12_hour_locale() {
+        format!("{month:02}/{day:02}/{year}")
+    } else {
+        format!("{day:02}/{month:02}/{year}")
+    }
+}
+
+/// Local (hour, minute) of a unix timestamp, in the user's zone.
+#[cfg(unix)]
+fn local_hm(unix: i64) -> (u32, u32) {
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let secs = unix as libc::time_t;
+    let local = unsafe { libc::localtime_r(&secs, &mut tm) };
+    if local.is_null() {
+        return (0, 0);
+    }
+    (tm.tm_hour as u32, tm.tm_min as u32)
+}
+
+#[cfg(not(unix))]
+fn local_hm(unix: i64) -> (u32, u32) {
+    let secs = unix.max(0);
+    let rem = secs.rem_euclid(86_400);
+    ((rem / 3600) as u32, ((rem % 3600) / 60) as u32)
+}
+
+/// Zed's `is_12_hour_time_by_locale`: the locales that prefer
+/// "3:30 PM" over "15:30".
+fn is_12_hour_locale() -> bool {
+    let locale = std::env::var("LC_TIME")
+        .or_else(|_| std::env::var("LC_ALL"))
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_else(|_| String::from("en_US"));
+    let locale = locale
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .replace('_', "-");
+    matches!(
+        locale.as_str(),
+        "es-MX" | "es-CO" | "es-SV" | "es-NI" | "es-HN" | "en-US" | "en-CA" | "en-AU"
+            | "en-NZ" | "ar-SA" | "ar-EG" | "ar-JO" | "en-IN" | "hi-IN" | "en-PK" | "ur-PK"
+            | "en-PH" | "fil-PH" | "bn-BD" | "ccp-BD" | "en-IE" | "ga-IE" | "en-MY" | "ms-MY"
+    )
 }
 
 #[cfg(test)]
@@ -388,13 +571,13 @@ mod tests {
     fn formats_committed_line() {
         let now = 1_000_000;
         let blame = FileBlame {
-            entries: vec![entry(&"a".repeat(40), "Ada Lovelace", now - 3 * 86400, "Fix bug")],
+            entries: vec![entry(&"a".repeat(40), "Ada Lovelace", now - 3600, "Fix bug")],
             rows: vec![Some(0)],
         };
-        let lines = blame_annotations(&blame, false, now);
+        let lines = blame_annotations(&blame, None, false, now);
         let line = lines[0].as_ref().unwrap();
-        assert_eq!(line.text.as_ref(), "Ada Lovelace, 3 days ago");
-        assert_eq!(line.sha.as_ref(), "aaaaaaaa");
+        assert_eq!(line.text.as_ref(), "Ada Lovelace, 1 hour ago");
+        assert_eq!(line.sha.as_ref(), "aaaaaaa");
     }
 
     #[test]
@@ -404,12 +587,17 @@ mod tests {
             entries: vec![entry(&"a".repeat(40), "Ada", now - 3600, "Fix bug")],
             rows: vec![Some(0)],
         };
-        let lines = blame_annotations(&blame, true, now);
-        assert_eq!(lines[0].as_ref().unwrap().text.as_ref(), "Ada, 1 hour ago • Fix bug");
+        let lines = blame_annotations(&blame, None, true, now);
+        assert_eq!(
+            lines[0].as_ref().unwrap().text.as_ref(),
+            "Ada, 1 hour ago - Fix bug"
+        );
     }
 
     #[test]
     fn formats_uncommitted_like_zed() {
+        // Zed's parser drops zero-SHA entries, so lines git cannot
+        // attribute to a commit yet carry no annotation at all.
         let now = 1_000_000;
         let mut e = entry(&"0".repeat(40), "Not Committed Yet", 0, "");
         e.summary = None;
@@ -417,10 +605,8 @@ mod tests {
             entries: vec![e],
             rows: vec![Some(0)],
         };
-        let lines = blame_annotations(&blame, false, now);
-        let line = lines[0].as_ref().unwrap();
-        assert_eq!(line.text.as_ref(), "You, uncommitted changes");
-        assert_eq!(line.sha.as_ref(), "");
+        let lines = blame_annotations(&blame, None, false, now);
+        assert!(lines[0].is_none());
     }
 
     #[test]
@@ -429,17 +615,39 @@ mod tests {
             entries: vec![entry(&"a".repeat(40), "Ada", 0, "s")],
             rows: vec![Some(0), None],
         };
-        let lines = blame_annotations(&blame, false, 1000);
+        let lines = blame_annotations(&blame, None, false, 1000);
         assert!(lines[0].is_some());
         assert!(lines[1].is_none());
     }
 
     #[test]
     fn relative_time_buckets() {
+        // Time buckets are timezone-independent; the calendar
+        // buckets below are covered by the pure helpers.
         let now = 10_000_000;
-        assert_eq!(relative_time(now, now), "just now");
+        assert_eq!(relative_time(now, now), "Just now");
+        assert_eq!(relative_time(now - 45, now), "Just now");
+        assert_eq!(relative_time(now - 61, now), "1 minute ago");
+        assert_eq!(relative_time(now - 2 * 60, now), "2 minutes ago");
+        assert_eq!(relative_time(now - 3599, now), "59 minutes ago");
         assert_eq!(relative_time(now - 3600, now), "1 hour ago");
-        assert_eq!(relative_time(now - 2 * 86400, now), "2 days ago");
-        assert_eq!(relative_time(now - 14 * 86400, now), "2 weeks ago");
+        assert_eq!(relative_time(now - 2 * 3600, now), "2 hours ago");
+        assert_eq!(relative_time(now - 23 * 3600, now), "23 hours ago");
+    }
+
+    #[test]
+    fn relative_date_calendar_helpers() {
+        // days_from_civil: 1970-01-01 is epoch day 0.
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2024, 1, 1), 19723);
+        assert_eq!(days_from_civil(2024, 3, 1), 19783);
+        // month_difference is calendar-aware.
+        assert_eq!(month_difference(2024, 1, 2024, 3), 2);
+        assert_eq!(month_difference(2023, 12, 2024, 11), 11);
+        assert_eq!(month_difference(2023, 11, 2024, 11), 12);
+        // Compound year+month wording.
+        assert_eq!(format_compound_year_month(12), "1 year ago");
+        assert_eq!(format_compound_year_month(13), "1 year, 1 month ago");
+        assert_eq!(format_compound_year_month(59), "4 years, 11 months ago");
     }
 }

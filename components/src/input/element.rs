@@ -622,22 +622,33 @@ impl TextElement {
         font_size: Pixels,
         window: &mut Window,
         cx: &App,
-    ) -> Vec<(usize, SharedString, ShapedLine)> {
+    ) -> Vec<(usize, SharedString, SharedString, ShapedLine)> {
         let blame = &state.blame;
         let focused = state.focus_handle.is_focused(window);
+        // Zed keeps rendering the cursor line's annotation while its
+        // blame popover is open, even if the editor lost focus.
         let show_all = blame.shows_all_lines();
-        let show_current = blame.shows_current_line() && focused;
+        let show_current =
+            blame.shows_current_line() && (focused || blame.detail.is_some());
         if !show_all && !show_current {
             return vec![];
         }
 
-        let color = cx.theme().muted_foreground.opacity(0.6);
+        let color = cx.theme().muted_foreground;
         let font = window.text_style().font();
         let mut out = Vec::new();
 
         for row in visible_range.start..visible_range.end {
             let render = show_all || (show_current && current_row == Some(row));
             if !render {
+                continue;
+            }
+            // Zed never annotates the cursor's line while it is empty:
+            // a freshly opened line has nothing to blame yet.
+            if !show_all
+                && current_row == Some(row)
+                && state.text().line_len(row) == 0
+            {
                 continue;
             }
             let Some(line) = blame.line(row) else {
@@ -648,6 +659,7 @@ impl TextElement {
             }
             let text = line.text.clone();
             let sha = line.sha.clone();
+            let avatar_url = line.avatar_url.clone();
             let run = TextRun {
                 len: text.len(),
                 font: font.clone(),
@@ -659,7 +671,7 @@ impl TextElement {
             let shaped = window
                 .text_system()
                 .shape_line(text, font_size, &[run], None);
-            out.push((row, sha, shaped));
+            out.push((row, sha, avatar_url, shaped));
         }
 
         out
@@ -814,13 +826,16 @@ pub(super) struct PrepaintState {
     ghost_first_line: Option<ShapedLine>,
     ghost_lines_height: Pixels,
 
-    /// Inline git blame annotations to draw, `(row, sha, shaped)`.
-    blame_lines: Vec<(usize, SharedString, ShapedLine)>,
+    /// Inline git blame annotations to draw, `(row, sha, avatar_url, shaped)`.
+    blame_lines: Vec<(usize, SharedString, SharedString, ShapedLine)>,
     /// Asset path of the small git icon drawn before each annotation.
     blame_icon: SharedString,
     /// `git.inline_blame.min_column` and the em width used to honour it.
     blame_min_column: u32,
     blame_char_width: Pixels,
+    /// `git.inline_blame.padding` × char width: the gap between the
+    /// end of a line and its annotation.
+    blame_padding: Pixels,
 }
 
 impl PrepaintState {
@@ -1197,27 +1212,34 @@ impl Element for TextElement {
             window,
             cx,
         );
-        let (blame_icon, blame_min_column, blame_char_width) = if blame_lines.is_empty() {
-            (SharedString::default(), 0u32, px(0.))
-        } else {
-            let char_width = window
-                .text_system()
-                .shape_line(
-                    "0".into(),
-                    text_size,
-                    &[TextRun {
-                        len: 1,
-                        font: text_style.font(),
-                        color: text_color,
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    }],
-                    None,
+        let (blame_icon, blame_min_column, blame_padding, blame_char_width) =
+            if blame_lines.is_empty() {
+                (SharedString::default(), 0u32, px(0.), px(0.))
+            } else {
+                let char_width = window
+                    .text_system()
+                    .shape_line(
+                        "0".into(),
+                        text_size,
+                        &[TextRun {
+                            len: 1,
+                            font: text_style.font(),
+                            color: text_color,
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        }],
+                        None,
+                    )
+                    .width;
+                let padding = char_width * state.blame.padding as f32;
+                (
+                    state.blame.icon.clone(),
+                    state.blame.min_column,
+                    padding,
+                    char_width,
                 )
-                .width;
-            (state.blame.icon.clone(), state.blame.min_column, char_width)
-        };
+            };
 
         PrepaintState {
             bounds,
@@ -1240,6 +1262,7 @@ impl Element for TextElement {
             blame_icon,
             blame_min_column,
             blame_char_width,
+            blame_padding,
         }
     }
 
@@ -1375,8 +1398,8 @@ impl Element for TextElement {
             // Inline git blame: draw the muted annotation (with its small git
             // icon) to the right of this line's text. It sits after the content
             // so it never shifts or overlaps the real buffer text.
-            if let Some((_, sha, shaped)) =
-                prepaint.blame_lines.iter().find(|(r, _, _)| *r == row)
+            if let Some((_, sha, avatar_url, shaped)) =
+                prepaint.blame_lines.iter().find(|(r, _, _, _)| *r == row)
             {
                 let wrapped = line.wrapped_lines.len().max(1);
                 let last_w = line
@@ -1388,13 +1411,42 @@ impl Element for TextElement {
                 let line_end_x = origin.x + gutter + last_w;
                 let min_x =
                     origin.x + gutter + prepaint.blame_char_width * prepaint.blame_min_column as f32;
-                let gap = if last_w > px(0.) { px(24.0) } else { px(0.0) };
-                let mut blame_x = (line_end_x + gap).max(min_x);
+                // Zed puts `git.inline_blame.padding` columns between
+                // the end of the line and the annotation.
+                let mut blame_x = (line_end_x + prepaint.blame_padding).max(min_x);
                 let blame_y = p.y + (wrapped as f32 - 1.0) * line_height;
-                let color = cx.theme().muted_foreground.opacity(0.6);
+                let color = cx.theme().muted_foreground;
                 let hit_start_x = blame_x;
 
-                if !prepaint.blame_icon.is_empty() {
+                // Zed's `git.blame.show_avatar`: when the repo's remote is
+                // GitHub and the author email resolves, the gutter shows a
+                // small round avatar in place of the git glyph. `use_asset`
+                // fetches through the (real) HTTP client on first use and
+                // returns `None` until the image is ready, redrawing then.
+                let mut painted_avatar = false;
+                if !avatar_url.is_empty() {
+                    let resource = gpui::Resource::Uri(avatar_url.clone().into());
+                    if let Some(Ok(data)) =
+                        window.use_asset::<gpui::ImgResourceLoader>(&resource, cx)
+                    {
+                        let avatar_size = px(14.0);
+                        let avatar_bounds = Bounds::new(
+                            point(blame_x, blame_y + (line_height - avatar_size).half()),
+                            size(avatar_size, avatar_size),
+                        );
+                        _ = window.paint_image(
+                            avatar_bounds,
+                            Corners::all(avatar_size.half()),
+                            data,
+                            0,
+                            false,
+                        );
+                        blame_x += avatar_size + px(6.0);
+                        painted_avatar = true;
+                    }
+                }
+
+                if !painted_avatar && !prepaint.blame_icon.is_empty() {
                     let icon_size = px(12.0);
                     let icon_bounds = Bounds::new(
                         point(blame_x, blame_y + (line_height - icon_size).half()),

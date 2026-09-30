@@ -3,6 +3,7 @@ mod assets;
 mod file_icons;
 mod fs_tree;
 mod git;
+mod http_client;
 mod lang;
 #[cfg(target_os = "linux")]
 mod linux_desktop;
@@ -86,7 +87,11 @@ fn main() {
         return;
     }
 
+    // GPUI starts with a no-op HTTP client, which would make every
+    // remote asset (Zed-style blame avatars) silently fail to load.
+    // Install a real reqwest-backed client before any window opens.
     Application::new()
+        .with_http_client(Arc::new(http_client::ReqwestClient::new()))
         .with_assets(CombinedAssets)
         .run(|cx: &mut App| {
             gpui_component::init(cx);

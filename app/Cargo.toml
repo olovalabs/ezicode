@@ -72,6 +72,19 @@ ignore = "0.4"
 grep-searcher = "0.1"
 grep-regex = "0.1"
 grep-matcher = "0.1"
+# Remote HTTP for gpui's `img()` element (Zed-style blame avatars):
+# gpui ships only a no-op client, so the app installs a real one at
+# startup, mirroring Zed's `reqwest_client` crate. `http_client` is
+# the trait crate (published as gpui_http_client); `zed-reqwest` is
+# Zed's reqwest fork already in the tree via gpui.
+http_client = { version = "0.2.2", package = "gpui_http_client" }
+reqwest = { version = "0.12.15-zed", package = "zed-reqwest", default-features = false, features = [
+    "rustls-tls-native-roots",
+    "stream",
+] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+bytes = "1"
+futures = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
