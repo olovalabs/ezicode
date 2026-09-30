@@ -269,7 +269,9 @@ pub fn render_tab_bar(
                     .cursor_pointer()
                     .border_b_1()
                     .border_color(rgba(t.border_variant))
-                    .when(markdown_preview_open, |button| button.bg(rgba(t.element_active)))
+                    .when(markdown_preview_open, |button| {
+                        button.bg(rgba(t.element_active))
+                    })
                     .hover(|button| button.bg(rgba(t.element_hover)))
                     .on_click(cx.listener(|workspace, _, _, cx| {
                         workspace.toggle_markdown_preview(cx);

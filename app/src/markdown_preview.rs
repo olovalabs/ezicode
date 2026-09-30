@@ -65,6 +65,7 @@ impl MarkdownDocument {
     /// Finds the rendered root block nearest to a zero-based source line.
     /// This source map is the same primitive Zed uses for editor/preview sync;
     /// Easy Code keeps it in the pure model so a richer scroll hook can use it.
+    #[allow(dead_code)] // retained for editor/preview scroll synchronization
     pub fn block_for_source_line(&self, line: usize) -> Option<usize> {
         self.blocks
             .iter()
@@ -203,11 +204,14 @@ pub fn parse(source: &str) -> MarkdownDocument {
                 }
                 if matches!(
                     end,
-                    TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image
-                ) {
-                    if style_stack.len() > 1 {
-                        style_stack.pop();
-                    }
+                    TagEnd::Strong
+                        | TagEnd::Emphasis
+                        | TagEnd::Strikethrough
+                        | TagEnd::Link
+                        | TagEnd::Image
+                ) && style_stack.len() > 1
+                {
+                    style_stack.pop();
                 }
             }
             Event::Text(text) => push_run(
@@ -384,12 +388,30 @@ mod tests {
     fn enables_gfm_blocks_and_inline_styles() {
         let source = "# Title\n\n- [x] **done** and ~~old~~\n\n| A | B |\n| - | - |\n| `x` | y |\n";
         let document = parse(source);
-        assert!(document.blocks.iter().any(|b| b.kind == BlockKind::Heading(1)));
-        assert!(document.blocks.iter().any(|b| b.kind == BlockKind::ListItem { checked: Some(true) }));
+        assert!(document
+            .blocks
+            .iter()
+            .any(|b| b.kind == BlockKind::Heading(1)));
+        assert!(document.blocks.iter().any(|b| b.kind
+            == BlockKind::ListItem {
+                checked: Some(true)
+            }));
         assert!(document.blocks.iter().any(|b| b.kind == BlockKind::Table));
-        assert!(document.blocks.iter().flat_map(|b| &b.runs).any(|r| r.style.strong && r.text == "done"));
-        assert!(document.blocks.iter().flat_map(|b| &b.runs).any(|r| r.style.strikethrough && r.text == "old"));
-        assert!(document.blocks.iter().flat_map(|b| &b.runs).any(|r| r.style.code && r.text == "x"));
+        assert!(document
+            .blocks
+            .iter()
+            .flat_map(|b| &b.runs)
+            .any(|r| r.style.strong && r.text == "done"));
+        assert!(document
+            .blocks
+            .iter()
+            .flat_map(|b| &b.runs)
+            .any(|r| r.style.strikethrough && r.text == "old"));
+        assert!(document
+            .blocks
+            .iter()
+            .flat_map(|b| &b.runs)
+            .any(|r| r.style.code && r.text == "x"));
     }
 
     #[test]
@@ -410,10 +432,24 @@ mod tests {
     fn captures_code_links_images_and_footnotes() {
         let source = "[link](https://example.com) ![alt](image.png)\n\n```rust\nfn main() {}\n```\n\nref[^a]\n\n[^a]: note";
         let document = parse(source);
-        assert!(document.blocks.iter().any(|b| b.kind == BlockKind::CodeBlock(Some("rust".into()))));
-        assert!(document.blocks.iter().flat_map(|b| &b.runs).any(|r| r.style.link.as_deref() == Some("https://example.com")));
-        assert!(document.blocks.iter().flat_map(|b| &b.runs).any(|r| r.style.image.as_deref() == Some("image.png")));
-        assert!(document.blocks.iter().any(|b| matches!(b.kind, BlockKind::FootnoteDefinition(_))));
+        assert!(document
+            .blocks
+            .iter()
+            .any(|b| b.kind == BlockKind::CodeBlock(Some("rust".into()))));
+        assert!(document
+            .blocks
+            .iter()
+            .flat_map(|b| &b.runs)
+            .any(|r| r.style.link.as_deref() == Some("https://example.com")));
+        assert!(document
+            .blocks
+            .iter()
+            .flat_map(|b| &b.runs)
+            .any(|r| r.style.image.as_deref() == Some("image.png")));
+        assert!(document
+            .blocks
+            .iter()
+            .any(|b| matches!(b.kind, BlockKind::FootnoteDefinition(_))));
     }
 
     #[test]
