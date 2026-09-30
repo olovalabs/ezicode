@@ -360,7 +360,10 @@ pub(crate) fn render_panel(
                 .overflow_hidden()
                 .child(
                     TextView::markdown(
-                        "live-markdown-preview",
+                        SharedString::from(format!(
+                            "live-markdown-preview:{}",
+                            preview.path.display()
+                        )),
                         SharedString::from(preview.source.to_string()),
                         window,
                         cx,

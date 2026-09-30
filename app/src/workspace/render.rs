@@ -94,6 +94,13 @@ impl Render for Workspace {
             window.focus(&self.focus_handle);
         }
 
+        // The preview pane is a live companion to the active Markdown editor.
+        // Tab switches only change `active_tab`, so keep the preview state in
+        // sync from the render path before we snapshot the tab/preview data
+        // below. This is intentionally idempotent and only reparses when the
+        // active Markdown path changes.
+        self.sync_markdown_preview_with_active_tab(cx);
+
         let th = self.theme();
         let t = th.colors;
         let welcome = self.welcome_visible();
@@ -261,7 +268,11 @@ impl Render for Workspace {
                 .as_ref()
                 .is_some_and(|preview| &preview.path == path)
         });
-        let markdown_preview = self.markdown_preview.clone();
+        let markdown_preview = self
+            .markdown_preview
+            .as_ref()
+            .filter(|preview| active_markdown_path.is_some_and(|path| &preview.path == path))
+            .cloned();
 
         let cursor_pos = self.active_editor().map(|ed| {
             let pos = ed.read(cx).cursor_position();
