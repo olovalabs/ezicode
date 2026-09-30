@@ -12,7 +12,9 @@ the GPUI SVG element supplies the active theme's icon color. Clicking the
 button calls `Workspace::toggle_markdown_preview`. The same button, or the
 close button in the preview header, removes the right-hand split.
 
-The source and preview share the editor area equally. The preview uses
+The source and preview share the editor area equally. Once opened, the preview
+follows the active Markdown tab and is hidden while a non-Markdown tab is active,
+so the pane never shows stale content from a different file. The preview uses
 `gpui_component::text::TextView`, which produces GPUI elements for headings,
 paragraphs, emphasis, links, images, lists and task lists, quotes, rules,
 tables, and highlighted fenced code. `TextViewStyle` receives the current

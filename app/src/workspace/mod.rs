@@ -790,15 +790,9 @@ impl Workspace {
     }
 
     pub(crate) fn toggle_markdown_preview(&mut self, cx: &mut Context<Self>) {
-        let Some(tab) = self.tabs.get(self.active_tab) else {
+        let Some((path, source)) = self.active_markdown_buffer(cx) else {
             return;
         };
-        let (Some(path), Some(editor)) = (tab.path.clone(), tab.editor.clone()) else {
-            return;
-        };
-        if !crate::markdown_preview::is_markdown_path(&path) {
-            return;
-        }
         if self
             .markdown_preview
             .as_ref()
@@ -808,7 +802,23 @@ impl Workspace {
             return;
         }
 
+        self.open_markdown_preview(path, source, cx);
+        self.status = "Markdown preview opened".into();
+        cx.notify();
+    }
+
+    fn active_markdown_buffer(&self, cx: &mut Context<Self>) -> Option<(PathBuf, Arc<str>)> {
+        let tab = self.tabs.get(self.active_tab)?;
+        let path = tab.path.clone()?;
+        if !crate::markdown_preview::is_markdown_path(&path) {
+            return None;
+        }
+        let editor = tab.editor.clone()?;
         let source: Arc<str> = editor.read(cx).value().to_string().into();
+        Some((path, source))
+    }
+
+    fn open_markdown_preview(&mut self, path: PathBuf, source: Arc<str>, cx: &mut Context<Self>) {
         // Give the user an immediate pane, then replace its model through the
         // same debounced background path used for edits.
         self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState {
@@ -818,8 +828,26 @@ impl Workspace {
             generation: 0,
         });
         self.schedule_markdown_preview_update(path, source, cx);
-        self.status = "Markdown preview opened".into();
-        cx.notify();
+    }
+
+    pub(crate) fn sync_markdown_preview_with_active_tab(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = self.markdown_preview.as_ref() else {
+            return;
+        };
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            return;
+        };
+        let Some(path) = tab.path.clone() else {
+            return;
+        };
+        if !crate::markdown_preview::is_markdown_path(&path) || preview.path == path {
+            return;
+        }
+        let Some(editor) = tab.editor.clone() else {
+            return;
+        };
+        let source: Arc<str> = editor.read(cx).value().to_string().into();
+        self.open_markdown_preview(path, source, cx);
     }
 
     pub(crate) fn close_markdown_preview(&mut self, cx: &mut Context<Self>) {
