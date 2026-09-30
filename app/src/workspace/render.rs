@@ -258,7 +258,6 @@ impl Render for Workspace {
         let git_commit_input = self.git_commit_input.clone();
         let git_history_view = self.git_history_view;
         let git_history = self.git_history.as_slice();
-        let git_history_graph = self.git_history_graph.as_slice();
         let git_history_loading = self.git_history_loading;
         let git_history_complete = self.git_history_complete;
         let git_history_selected = self.git_history_selected.as_deref();
@@ -695,7 +694,6 @@ impl Render for Workspace {
                                             op_running: git_op_running,
                                             history_view: git_history_view,
                                             history: git_history,
-                                            graph: git_history_graph,
                                             history_loading: git_history_loading,
                                             history_complete: git_history_complete,
                                             history_selected: git_history_selected,

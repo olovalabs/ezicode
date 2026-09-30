@@ -16,8 +16,8 @@ use gpui_component::{
 use crate::actions::{
     ExplorerCopyPath, ExplorerRevealInFinder, GitBranchPicker, GitCheckoutCommit, GitCommitAll,
     GitCommitAmend, GitCopyCommitMessage, GitCopySha, GitDiscardAll, GitDiscardFile, GitFetch,
-    GitForcePush, GitHistoryLoadMore, GitInit, GitOpenDiff, GitOpenFile, GitPull, GitPush,
-    GitRefresh, GitSelectCommit, GitShowChanges, GitShowHistory, GitStageAll, GitStageFile,
+    GitForcePush, GitInit, GitOpenDiff, GitOpenFile, GitPull, GitPush,
+    GitRefresh, GitSelectCommit, GitStageAll, GitStageFile,
     GitStashPop, GitStashPush, GitUnstageAll, GitUnstageFile, GitViewCommitDiff,
 };
 use crate::file_icons;
@@ -65,9 +65,8 @@ pub(crate) struct GitPanelParams<'a> {
     pub op_running: Option<&'static str>,
     /// Whether the History graph tab is shown instead of the changes list.
     pub history_view: bool,
-    /// Loaded commits (newest first) and their precomputed graph rows.
+    /// Loaded commits (newest first).
     pub history: &'a [crate::git::Commit],
-    pub graph: &'a [crate::git::GraphRow],
     pub history_loading: bool,
     pub history_complete: bool,
     pub history_selected: Option<&'a str>,
