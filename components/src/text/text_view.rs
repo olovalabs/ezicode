@@ -600,7 +600,10 @@ impl Element for TextView {
                 highlight_theme,
                 rx,
                 tx_result,
-                Duration::from_millis(200),
+                // Workspace's live preview already generation-debounces its
+                // pulldown parse. Keep native-node materialization short so it
+                // does not add another visible 200 ms delay to that pipeline.
+                Duration::from_millis(10),
                 code_block_actions,
             ))
             .detach();

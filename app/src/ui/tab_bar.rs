@@ -231,6 +231,8 @@ pub fn render_tab_bar(
     tabs: &[OpenTab],
     active_tab: usize,
     git_repo: Option<&RepoStatus>,
+    show_markdown_preview_button: bool,
+    markdown_preview_open: bool,
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -254,4 +256,25 @@ pub fn render_tab_bar(
                 .border_b_1()
                 .border_color(rgba(t.border_variant)),
         )
+        .when(show_markdown_preview_button, |bar| {
+            bar.child(
+                div()
+                    .id("toggle-markdown-preview")
+                    .h_full()
+                    .w(px(38.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .border_b_1()
+                    .border_color(rgba(t.border_variant))
+                    .when(markdown_preview_open, |button| button.bg(rgba(t.element_active)))
+                    .hover(|button| button.bg(rgba(t.element_hover)))
+                    .on_click(cx.listener(|workspace, _, _, cx| {
+                        workspace.toggle_markdown_preview(cx);
+                    }))
+                    .child(crate::markdown_preview::toolbar_icon(t)),
+            )
+        })
 }

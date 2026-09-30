@@ -59,6 +59,9 @@ lsp-types = "0.97.0"
 url = "2"
 async-channel = "2"
 portable-pty = "0.8"
+# Keep this aligned with Zed's markdown crate. The preview parser enables the
+# GFM table/task-list/strikethrough extensions plus footnotes explicitly.
+pulldown-cmark = { version = "0.13", default-features = false }
 notify = "7"
 alacritty_terminal = "0.25.1"
 gpui-terminal = "0.1.0"

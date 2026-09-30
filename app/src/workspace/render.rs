@@ -252,6 +252,16 @@ impl Render for Workspace {
 
         let active_tab_obj = self.tabs.get(active_tab);
         let lang_id = active_tab_obj.and_then(|t| t.language());
+        let active_markdown_path = active_tab_obj
+            .and_then(|tab| tab.path.as_ref())
+            .filter(|path| crate::markdown_preview::is_markdown_path(path));
+        let show_markdown_preview_button = active_markdown_path.is_some();
+        let markdown_preview_open = active_markdown_path.is_some_and(|path| {
+            self.markdown_preview
+                .as_ref()
+                .is_some_and(|preview| &preview.path == path)
+        });
+        let markdown_preview = self.markdown_preview.clone();
 
         let cursor_pos = self.active_editor().map(|ed| {
             let pos = ed.read(cx).cursor_position();
@@ -667,7 +677,13 @@ impl Render for Workspace {
                                         .bg(rgba(t.editor_bg))
                                         .when(!tabs.is_empty(), |d| {
                                             d.child(ui::tab_bar::render_tab_bar(
-                                                tabs, active_tab, git_repo, &t, cx,
+                                                tabs,
+                                                active_tab,
+                                                git_repo,
+                                                show_markdown_preview_button,
+                                                markdown_preview_open,
+                                                &t,
+                                                cx,
                                             ))
                                         })
                                         .when(welcome, |d| {
@@ -687,26 +703,54 @@ impl Render for Workspace {
                                                     diff, font_size, split_diff, &t, cx,
                                                 ))
                                             } else if let Some(editor) = editor {
-                                                d.when(!breadcrumb_items.is_empty(), |d| {
-                                                    d.child(ui::breadcrumbs::render_breadcrumbs(
-                                                        &breadcrumb_items,
-                                                        &t,
-                                                        cx,
-                                                    ))
-                                                })
-                                                .child(
+                                                let source_pane = div()
+                                                    .flex_1()
+                                                    .min_w(px(0.0))
+                                                    .h_full()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .when(!breadcrumb_items.is_empty(), |d| {
+                                                        d.child(ui::breadcrumbs::render_breadcrumbs(
+                                                            &breadcrumb_items,
+                                                            &t,
+                                                            cx,
+                                                        ))
+                                                    })
+                                                    .child(
+                                                        div()
+                                                            .flex_1()
+                                                            .min_h(px(0.0))
+                                                            .overflow_hidden()
+                                                            .font_family(crate::assets::MONO_FONT)
+                                                            .text_size(px(font_size))
+                                                            .child(
+                                                                Input::new(editor)
+                                                                    .text_size(px(font_size))
+                                                                    .h_full()
+                                                                    .appearance(false)
+                                                                    .bordered(false),
+                                                            ),
+                                                    );
+                                                d.child(
                                                     div()
                                                         .flex_1()
                                                         .min_h(px(0.0))
+                                                        .flex()
+                                                        .flex_row()
                                                         .overflow_hidden()
-                                                        .font_family(crate::assets::MONO_FONT)
-                                                        .text_size(px(font_size))
-                                                        .child(
-                                                            Input::new(editor)
-                                                                .text_size(px(font_size))
-                                                                .h_full()
-                                                                .appearance(false)
-                                                                .bordered(false),
+                                                        .child(source_pane)
+                                                        .when_some(
+                                                            markdown_preview.as_ref(),
+                                                            |row, preview| {
+                                                                row.child(
+                                                                    crate::markdown_preview::render_panel(
+                                                                        preview,
+                                                                        &t,
+                                                                        window,
+                                                                        cx,
+                                                                    ),
+                                                                )
+                                                            },
                                                         ),
                                                 )
                                             } else {

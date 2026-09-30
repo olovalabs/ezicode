@@ -7,6 +7,7 @@ mod lang;
 #[cfg(target_os = "linux")]
 mod linux_desktop;
 mod lsp;
+mod markdown_preview;
 mod search;
 mod settings;
 mod storage;
