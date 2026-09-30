@@ -868,7 +868,7 @@ impl FileBlame {
         let end = (start_row + removed).min(len);
         let tail = self.rows.split_off(end);
         self.rows.truncate(start);
-        self.rows.extend(std::iter::repeat(None).take(added));
+        self.rows.resize(start + added, None);
         self.rows.extend(tail);
     }
 }
@@ -914,48 +914,57 @@ pub fn parse_blame_incremental(raw: &str) -> Vec<BlameEntry> {
 
     for line in raw.lines() {
         let line = line.trim_end_matches(['\r', '\n']);
-        match current.as_mut() {
-            None => {
-                if let Some(mut entry) = parse_blame_header(line) {
-                    if let Some(&slot) = seen.get(&entry.sha) {
-                        if let Some(prev) = entries.get(slot) {
-                            entry.author.clone_from(&prev.author);
-                            entry.author_mail.clone_from(&prev.author_mail);
-                            entry.author_time = prev.author_time;
-                            entry.author_tz.clone_from(&prev.author_tz);
-                            entry.committer_time = prev.committer_time;
-                            entry.summary.clone_from(&prev.summary);
-                            entry.boundary = prev.boundary;
-                        }
+
+        // Start of a new commit run.
+        if current.is_none() {
+            if let Some(mut entry) = parse_blame_header(line) {
+                if let Some(&slot) = seen.get(&entry.sha) {
+                    if let Some(prev) = entries.get(slot) {
+                        entry.author.clone_from(&prev.author);
+                        entry.author_mail.clone_from(&prev.author_mail);
+                        entry.author_time = prev.author_time;
+                        entry.author_tz.clone_from(&prev.author_tz);
+                        entry.committer_time = prev.committer_time;
+                        entry.summary.clone_from(&prev.summary);
+                        entry.boundary = prev.boundary;
                     }
-                    current = Some(entry);
                 }
+                current = Some(entry);
             }
-            Some(entry) => {
-                if line == "boundary" {
-                    entry.boundary = true;
-                    continue;
-                }
-                let Some((key, value)) = line.split_once(' ') else {
-                    continue;
-                };
-                match key {
-                    "author" => entry.author = Some(value.to_string()),
-                    "author-mail" => entry.author_mail = Some(value.to_string()),
-                    "author-time" => entry.author_time = value.parse().ok(),
-                    "author-tz" => entry.author_tz = Some(value.to_string()),
-                    "committer-time" => entry.committer_time = value.parse().ok(),
-                    "summary" => entry.summary = Some(value.to_string()),
-                    "previous" => entry.previous = Some(value.to_string()),
-                    "filename" => {
-                        entry.filename = value.to_string();
-                        let done = current.take().expect("current entry present");
-                        seen.entry(done.sha.clone()).or_insert(entries.len());
-                        entries.push(done);
-                    }
-                    _ => {}
-                }
+            continue;
+        }
+
+        // Signature line for the run in progress. Borrow `current` only for the
+        // field updates; the `filename` line (which closes the run) sets a flag
+        // so `current.take()` runs *after* the borrow ends — otherwise the
+        // outstanding `&mut` and the `take()` would overlap.
+        let entry = current.as_mut().expect("run in progress");
+        if line == "boundary" {
+            entry.boundary = true;
+            continue;
+        }
+        let Some((key, value)) = line.split_once(' ') else {
+            continue;
+        };
+        let mut finished = false;
+        match key {
+            "author" => entry.author = Some(value.to_string()),
+            "author-mail" => entry.author_mail = Some(value.to_string()),
+            "author-time" => entry.author_time = value.parse().ok(),
+            "author-tz" => entry.author_tz = Some(value.to_string()),
+            "committer-time" => entry.committer_time = value.parse().ok(),
+            "summary" => entry.summary = Some(value.to_string()),
+            "previous" => entry.previous = Some(value.to_string()),
+            "filename" => {
+                entry.filename = value.to_string();
+                finished = true;
             }
+            _ => {}
+        }
+        if finished {
+            let done = current.take().expect("run in progress");
+            seen.entry(done.sha.clone()).or_insert(entries.len());
+            entries.push(done);
         }
     }
     entries
