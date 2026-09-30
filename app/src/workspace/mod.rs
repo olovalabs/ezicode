@@ -301,6 +301,10 @@ pub(crate) struct Workspace {
 
     pub(crate) tabs: Vec<OpenTab>,
 
+    /// Right-hand native preview bound to a Markdown buffer. The parsed model
+    /// and source are replaced atomically after the background debounce.
+    pub(crate) markdown_preview: Option<crate::markdown_preview::MarkdownPreviewState>,
+
     pub(crate) active_tab: usize,
 
     pub(crate) focus_handle: FocusHandle,
@@ -663,6 +667,7 @@ impl Workspace {
             fs_event_tx,
             _watcher: None,
             tabs: Vec::new(),
+            markdown_preview: None,
             active_tab: 0,
             focus_handle,
             sidebar_width: 300.0,
@@ -782,6 +787,100 @@ impl Workspace {
 
     pub fn active_path(&self) -> Option<&PathBuf> {
         self.tabs.get(self.active_tab)?.path.as_ref()
+    }
+
+    pub(crate) fn toggle_markdown_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            return;
+        };
+        let (Some(path), Some(editor)) = (tab.path.clone(), tab.editor.clone()) else {
+            return;
+        };
+        if !crate::markdown_preview::is_markdown_path(&path) {
+            return;
+        }
+        if self
+            .markdown_preview
+            .as_ref()
+            .is_some_and(|preview| preview.path == path)
+        {
+            self.close_markdown_preview(cx);
+            return;
+        }
+
+        let source: Arc<str> = editor.read(cx).value().to_string().into();
+        // Give the user an immediate pane, then replace its model through the
+        // same debounced background path used for edits.
+        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState {
+            path: path.clone(),
+            source: source.clone(),
+            document: Arc::new(crate::markdown_preview::MarkdownDocument::default()),
+            generation: 0,
+        });
+        self.schedule_markdown_preview_update(path, source, cx);
+        self.status = "Markdown preview opened".into();
+        cx.notify();
+    }
+
+    pub(crate) fn close_markdown_preview(&mut self, cx: &mut Context<Self>) {
+        if self.markdown_preview.take().is_some() {
+            self.status = "Markdown preview closed".into();
+            cx.notify();
+        }
+    }
+
+    fn schedule_markdown_preview_update(
+        &mut self,
+        path: PathBuf,
+        source: Arc<str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(preview) = self.markdown_preview.as_mut() else {
+            return;
+        };
+        if preview.path != path {
+            return;
+        }
+        preview.generation = preview.generation.wrapping_add(1);
+        let generation = preview.generation;
+
+        cx.spawn(async move |workspace, cx| {
+            cx.background_executor()
+                .timer(crate::markdown_preview::REPARSE_DEBOUNCE)
+                .await;
+            let parse_source = source.clone();
+            let parsed = cx
+                .background_executor()
+                .spawn(async move { crate::markdown_preview::parse(&parse_source) })
+                .await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                let Some(preview) = workspace.markdown_preview.as_mut() else {
+                    return;
+                };
+                if preview.path == path && preview.generation == generation {
+                    preview.source = source;
+                    preview.document = Arc::new(parsed);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn markdown_buffer_changed(
+        &mut self,
+        path: &Path,
+        editor: &Entity<InputState>,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .markdown_preview
+            .as_ref()
+            .is_some_and(|preview| preview.path == path)
+        {
+            let source: Arc<str> = editor.read(cx).value().to_string().into();
+            self.schedule_markdown_preview_update(path.to_path_buf(), source, cx);
+        }
     }
 
     #[allow(dead_code)]
@@ -1940,6 +2039,7 @@ impl Workspace {
                 if ui_changed {
                     cx.notify();
                 }
+                this.markdown_buffer_changed(&path_clone, &editor_ent, cx);
                 let tab_idx = this.active_tab;
                 this.trigger_auto_save_after_delay(tab_idx, cx);
             }
@@ -4704,6 +4804,15 @@ impl Workspace {
     }
 
     pub(crate) fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(closed_path) = self.tabs.get(index).and_then(|tab| tab.path.as_ref()) {
+            if self
+                .markdown_preview
+                .as_ref()
+                .is_some_and(|preview| &preview.path == closed_path)
+            {
+                self.markdown_preview = None;
+            }
+        }
         if let Some(closed_tab) = self.tabs.get(index) {
             if let Some(p) = &closed_tab.path {
                 if let Some(lang_id) = closed_tab.language() {
@@ -4758,6 +4867,15 @@ impl Workspace {
 
     pub(crate) fn close_tab_at_index(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.tabs.len() {
+            if let Some(closed_path) = self.tabs.get(index).and_then(|tab| tab.path.as_ref()) {
+                if self
+                    .markdown_preview
+                    .as_ref()
+                    .is_some_and(|preview| &preview.path == closed_path)
+                {
+                    self.markdown_preview = None;
+                }
+            }
             if let Some(closed_tab) = self.tabs.get(index) {
                 if let Some(p) = &closed_tab.path {
                     if let Some(lang_id) = closed_tab.language() {
@@ -5585,6 +5703,7 @@ impl Workspace {
                 if ui_changed {
                     cx.notify();
                 }
+                this.markdown_buffer_changed(&path_clone, &editor_ent, cx);
                 let tab_idx = this.active_tab;
                 this.trigger_auto_save_after_delay(tab_idx, cx);
             }
