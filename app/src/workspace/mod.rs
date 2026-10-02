@@ -378,7 +378,6 @@ pub(crate) struct Workspace {
 
     pub(crate) settings: crate::settings::Settings,
     pub(crate) settings_category: usize,
-    pub(crate) settings_scope: usize,
     pub(crate) settings_search_input: Option<Entity<InputState>>,
     pub(crate) settings_font_size_input: Option<Entity<InputState>>,
     pub(crate) settings_ui_font_size_input: Option<Entity<InputState>>,
@@ -721,7 +720,6 @@ impl Workspace {
             git_commit_input: None,
             git_commit_pending: false,
             settings_category: 0,
-            settings_scope: 0,
             settings_search_input: None,
             settings_font_size_input: None,
             settings_ui_font_size_input: None,
@@ -5421,11 +5419,6 @@ impl Workspace {
 
     pub(crate) fn set_settings_category(&mut self, cat: usize, cx: &mut Context<Self>) {
         self.settings_category = cat;
-        cx.notify();
-    }
-
-    pub(crate) fn set_settings_scope(&mut self, scope: usize, cx: &mut Context<Self>) {
-        self.settings_scope = scope;
         cx.notify();
     }
 

@@ -36,7 +36,6 @@ pub(crate) fn render_settings(
     active_theme_ix: usize,
     font_size: f32,
     active_category: usize,
-    active_scope: usize,
     inputs: SettingsInputs<'_>,
     search_query: &str,
     cx: &mut Context<Workspace>,
@@ -51,10 +50,9 @@ pub(crate) fn render_settings(
         .flex()
         .flex_col()
         .overflow_hidden()
-        .child(render_vscode_header(active_scope, inputs.search, t, cx))
+        .child(render_vscode_header(inputs.search, t, cx))
         .child(
             div()
-                .flex_1()
                 .min_h(px(0.0))
                 .w_full()
                 .flex()
@@ -74,11 +72,10 @@ pub(crate) fn render_settings(
         )
 }
 
-/// Top header matching the VS Code settings screenshot:
-/// - Search settings input box with blue focus border
-/// - Tabs row: [User] | Workspace + Open Settings (JSON) button on the right
+/// Top header:
+/// - Small simple search box on the left with search icon inside, black bg, and white border
+/// - Open Settings (JSON) button on the right
 fn render_vscode_header(
-    active_scope: usize,
     search_input: Option<&Entity<InputState>>,
     t: &Colors,
     cx: &mut Context<Workspace>,
@@ -86,146 +83,96 @@ fn render_vscode_header(
     div()
         .w_full()
         .px(rem(24.0))
-        .pt(rem(12.0))
-        .pb(rem(8.0))
+        .py(rem(10.0))
         .bg(rgba(t.editor_bg))
         .border_b_1()
         .border_color(rgba(t.border_variant))
         .flex()
-        .flex_col()
-        .gap(rem(8.0))
-        .child(
-            // Top Search Bar
-            div()
-                .w_full()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .gap(rem(16.0))
+        .child({
+            let mut box_el = div()
+                .id("settings-search-box-wrap")
+                .w(rem(240.0))
+                .h(rem(28.0))
+                .px(rem(8.0))
+                .rounded(px(3.0))
+                .bg(rgba(0x000000ff))
+                .border_1()
+                .border_color(rgba(0xffffffff))
                 .flex()
                 .items_center()
-                .justify_between()
-                .gap(rem(16.0))
-                .child({
-                    let mut box_el = div()
-                        .id("settings-search-box-wrap")
-                        .flex_1()
-                        .max_w(rem(780.0))
-                        .h(rem(32.0))
-                        .px(rem(10.0))
-                        .rounded(px(3.0))
-                        .bg(rgba(t.element_bg))
-                        .border_1()
-                        .border_color(rgba(t.border_focused))
-                        .flex()
-                        .items_center()
-                        .gap(rem(8.0));
+                .gap(rem(6.0));
 
-                    if let Some(input) = search_input {
-                        let input_clone = input.clone();
-                        box_el = box_el
-                            .cursor_text()
-                            .on_click(cx.listener(move |_this, _, window, cx| {
-                                input_clone.update(cx, |state, cx| state.focus(window, cx));
-                            }))
-                            .child(
-                                div().flex_1().min_w(px(0.0)).child(
-                                    Input::new(input)
-                                        .text_size(rem(13.0))
-                                        .appearance(false)
-                                        .cleanable(true),
-                                ),
-                            );
-                    } else {
-                        box_el = box_el.child(
-                            div()
-                                .text_size(rem(13.0))
-                                .text_color(rgba(t.text_muted))
-                                .child("Search settings"),
-                        );
-                    }
-                    box_el
-                })
-                .child(
-                    div()
-                        .id("open-settings-json-btn")
-                        .flex()
-                        .items_center()
-                        .gap(rem(6.0))
-                        .px(rem(10.0))
-                        .py(rem(4.0))
-                        .rounded(px(3.0))
-                        .bg(rgba(t.element_bg))
-                        .border_1()
-                        .border_color(rgba(t.border))
-                        .hover(|s| {
-                            s.bg(rgba(t.element_hover))
-                                .border_color(rgba(t.border_focused))
-                        })
-                        .cursor_pointer()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_settings_json(window, cx);
-                        }))
-                        .child(
-                            svg()
-                                .path("ui_icons/file-code_tint.svg")
-                                .w(rem(14.0))
-                                .h(rem(14.0))
-                                .text_color(rgba(t.text_accent)),
-                        )
-                        .child(
-                            div()
-                                .text_size(rem(12.0))
-                                .text_color(rgba(t.text))
-                                .child("Open Settings (JSON)"),
+            // Search icon inside
+            box_el = box_el.child(
+                svg()
+                    .path("ui_icons/search_tint.svg")
+                    .w(rem(13.0))
+                    .h(rem(13.0))
+                    .flex_none()
+                    .text_color(rgba(0xffffffff)),
+            );
+
+            if let Some(input) = search_input {
+                let input_clone = input.clone();
+                box_el = box_el
+                    .cursor_text()
+                    .on_click(cx.listener(move |_this, _, window, cx| {
+                        input_clone.update(cx, |state, cx| state.focus(window, cx));
+                    }))
+                    .child(
+                        div().flex_1().min_w(px(0.0)).child(
+                            Input::new(input)
+                                .text_size(rem(12.5))
+                                .appearance(false)
+                                .cleanable(true),
                         ),
-                ),
-        )
+                    );
+            } else {
+                box_el = box_el.child(
+                    div()
+                        .text_size(rem(12.5))
+                        .text_color(rgba(0x888888ff))
+                        .child("Search settings"),
+                );
+            }
+            box_el
+        })
         .child(
-            // Scope Tabs: [User] | Workspace
             div()
+                .id("open-settings-json-btn")
                 .flex()
                 .items_center()
-                .gap(rem(16.0))
+                .gap(rem(6.0))
+                .px(rem(10.0))
+                .py(rem(4.0))
+                .rounded(px(3.0))
+                .bg(rgba(t.element_bg))
+                .border_1()
+                .border_color(rgba(t.border))
+                .hover(|s| {
+                    s.bg(rgba(t.element_hover))
+                        .border_color(rgba(t.border_focused))
+                })
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_settings_json(window, cx);
+                }))
                 .child(
-                    div()
-                        .id("scope-tab-user")
-                        .px(rem(10.0))
-                        .py(rem(3.0))
-                        .rounded(px(3.0))
-                        .cursor_pointer()
-                        .when(active_scope == 0, |d| {
-                            d.bg(rgba(0x37373dff))
-                                .text_color(rgba(t.text))
-                                .font_weight(FontWeight::SEMIBOLD)
-                        })
-                        .when(active_scope != 0, |d| {
-                            d.text_color(rgba(t.text_muted))
-                                .hover(|s| s.text_color(rgba(t.text)))
-                        })
-                        .text_size(rem(13.0))
-                        .child("User")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_settings_scope(0, cx);
-                        })),
+                    svg()
+                        .path("ui_icons/file-code_tint.svg")
+                        .w(rem(14.0))
+                        .h(rem(14.0))
+                        .text_color(rgba(t.text_accent)),
                 )
                 .child(
                     div()
-                        .id("scope-tab-workspace")
-                        .px(rem(10.0))
-                        .py(rem(3.0))
-                        .rounded(px(3.0))
-                        .cursor_pointer()
-                        .when(active_scope == 1, |d| {
-                            d.bg(rgba(0x37373dff))
-                                .text_color(rgba(t.text))
-                                .font_weight(FontWeight::SEMIBOLD)
-                        })
-                        .when(active_scope != 1, |d| {
-                            d.text_color(rgba(t.text_muted))
-                                .hover(|s| s.text_color(rgba(t.text)))
-                        })
-                        .text_size(rem(13.0))
-                        .child("Workspace")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_settings_scope(1, cx);
-                        })),
+                        .text_size(rem(12.0))
+                        .text_color(rgba(t.text))
+                        .child("Open Settings (JSON)"),
                 ),
         )
 }

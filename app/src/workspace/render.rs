@@ -746,7 +746,6 @@ impl Render for Workspace {
                                                     theme_ix,
                                                     font_size,
                                                     self.settings_category,
-                                                    self.settings_scope,
                                                     inputs,
                                                     &search_query,
                                                     cx,
