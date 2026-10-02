@@ -583,14 +583,16 @@ impl Workspace {
         .detach();
 
         // GPUI waits for quit observers. Do not terminate before outstanding
-        // buffer saves and session snapshots have reached disk.
+        // buffer saves and session snapshots have reached disk. The flush is
+        // waited on synchronously: test teardown forbids dispatcher parking
+        // before quit, so an async recv would panic with "parked with nothing
+        // left to run" instead of waking from the native storage thread.
         cx.on_app_quit(|workspace, cx| {
             workspace.save_all_dirty_quiet(cx);
             workspace.persist_workspace_state(cx);
             let flushed = workspace.storage.flush();
-            async move {
-                let _ = flushed.recv().await;
-            }
+            let _ = flushed.recv_blocking();
+            async move {}
         })
         .detach();
         let settings = crate::settings::Settings::load();

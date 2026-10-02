@@ -1,7 +1,7 @@
 use gpui::{
     App, AppContext as _, Context, Corner, DismissEvent, Entity, IntoElement, MouseDownEvent,
-    ParentElement as _, Pixels, Point, Render, Styled, Subscription, Window, anchored, deferred,
-    div, prelude::FluentBuilder as _, px,
+    ParentElement as _, Pixels, Point, Render, Styled, Subscription, WeakEntity, Window, anchored,
+    deferred, div, prelude::FluentBuilder as _, px,
 };
 use rust_i18n::t;
 
@@ -12,7 +12,10 @@ use crate::{
 };
 
 pub(crate) struct MouseContextMenu {
-    editor: Entity<InputState>,
+    // Weak back-reference: the editor owns this menu, so a strong handle
+    // here would cycle (editor -> menu -> editor) and leak every closed
+    // editor.
+    editor: WeakEntity<InputState>,
     menu: Entity<PopupMenu>,
     mouse_position: Point<Pixels>,
     open: bool,
@@ -101,7 +104,7 @@ impl MouseContextMenu {
             })];
 
             Self {
-                editor,
+                editor: editor.downgrade(),
                 menu,
                 mouse_position: Point::default(),
                 open: false,
@@ -118,7 +121,9 @@ impl MouseContextMenu {
     #[inline]
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
-        self.editor.update(cx, |this, cx| {
+        // The editor may already be gone (tab closed while the menu was
+        // open); focus restoration is then a no-op.
+        let _ = self.editor.update(cx, |this, cx| {
             this.focus(window, cx);
         });
     }
