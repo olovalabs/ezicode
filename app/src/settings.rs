@@ -34,6 +34,7 @@ pub enum AutoSaveMode {
 }
 
 impl AutoSaveMode {
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             AutoSaveMode::Off => "A dirty file is never automatically saved (Ctrl+S to save).",
@@ -67,6 +68,7 @@ pub enum FormatOnSaveMode {
 }
 
 impl FormatOnSaveMode {
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             FormatOnSaveMode::Off => {

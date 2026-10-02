@@ -50,6 +50,14 @@ impl Render for Workspace {
         {
             self.ensure_search_inputs(window, cx);
         }
+        if self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|t| t.is_settings)
+            && self.settings_search_input.is_none()
+        {
+            self.ensure_settings_search_input(window, cx);
+        }
 
         // A search-result click on a closed file queues a cursor jump that
         // can only run once the async open has landed its tab.
@@ -715,11 +723,20 @@ impl Render for Workspace {
                                         })
                                         .when(!welcome, |d| {
                                             if is_settings {
+                                                let search_query = self
+                                                    .settings_search_input
+                                                    .as_ref()
+                                                    .map(|i| i.read(cx).value().to_string())
+                                                    .unwrap_or_default();
                                                 d.child(ui::settings::render_settings(
                                                     &self.settings,
                                                     &t,
                                                     theme_ix,
                                                     font_size,
+                                                    self.settings_category,
+                                                    self.settings_scope,
+                                                    self.settings_search_input.as_ref(),
+                                                    &search_query,
                                                     cx,
                                                 ))
                                             } else if let Some(diff) = active_diff {

@@ -377,6 +377,9 @@ pub(crate) struct Workspace {
     pub(crate) git_commit_pending: bool,
 
     pub(crate) settings: crate::settings::Settings,
+    pub(crate) settings_category: usize,
+    pub(crate) settings_scope: usize,
+    pub(crate) settings_search_input: Option<Entity<InputState>>,
 
     pub(crate) auto_save_generation: usize,
     auto_save_task: Option<Task<()>>,
@@ -713,6 +716,9 @@ impl Workspace {
             git_confirm: None,
             git_commit_input: None,
             git_commit_pending: false,
+            settings_category: 0,
+            settings_scope: 0,
+            settings_search_input: None,
             picker: None,
             picker_confirm_pending: false,
             workspace_files_cache: None,
@@ -5328,6 +5334,33 @@ impl Workspace {
             let _ = self.settings.save();
         }
         self.open_file(path, window, cx);
+    }
+    pub(crate) fn ensure_settings_search_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_search_input.is_none() {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
+            cx.subscribe(
+                &input,
+                |_this, _state, _event: &gpui_component::input::InputEvent, cx| {
+                    cx.notify();
+                },
+            )
+            .detach();
+            self.settings_search_input = Some(input);
+        }
+    }
+
+    pub(crate) fn set_settings_category(&mut self, cat: usize, cx: &mut Context<Self>) {
+        self.settings_category = cat;
+        cx.notify();
+    }
+
+    pub(crate) fn set_settings_scope(&mut self, scope: usize, cx: &mut Context<Self>) {
+        self.settings_scope = scope;
+        cx.notify();
     }
 
     pub(crate) fn reload_settings(&mut self, cx: &mut Context<Self>) {
