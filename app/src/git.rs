@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -116,6 +117,40 @@ impl RepoStatus {
             .filter(|c| !c.is_untracked() && !c.is_conflicted() && c.worktree.is_some())
             .count()
     }
+}
+
+/// Render-ready decorations. Building the ancestor map can be expensive in
+/// repositories with many untracked files, so callers prepare it off-thread.
+pub fn path_kinds(status: &RepoStatus) -> std::collections::HashMap<PathBuf, ChangeKind> {
+    let mut kinds: HashMap<PathBuf, ChangeKind> = HashMap::new();
+    for change in &status.changes {
+        let kind = if change.is_conflicted() {
+            ChangeKind::Conflicted
+        } else if change.is_untracked() {
+            ChangeKind::Untracked
+        } else if let Some(worktree) = change.worktree {
+            worktree
+        } else if let Some(index) = change.index {
+            index
+        } else {
+            continue;
+        };
+        kinds.insert(change.path.clone(), kind);
+        // Tint ancestor directories like VS Code/Zed do; conflicts win
+        // over the generic Modified marker so red propagates upward.
+        let mut dir = change.path.parent();
+        while let Some(d) = dir {
+            if !d.starts_with(&status.root) || d == status.root {
+                break;
+            }
+            let entry = kinds.entry(d.to_path_buf()).or_insert(ChangeKind::Modified);
+            if kind == ChangeKind::Conflicted {
+                *entry = ChangeKind::Conflicted;
+            }
+            dir = d.parent();
+        }
+    }
+    kinds
 }
 
 /// Find the repository root by walking up from `start` looking for `.git`

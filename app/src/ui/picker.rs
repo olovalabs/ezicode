@@ -1,3 +1,4 @@
+use crate::cancellation::Cancellation;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use gpui::prelude::FluentBuilder as _;
@@ -7,6 +8,7 @@ use gpui::{
 };
 use gpui_component::input::{Input, InputState};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::theme::Colors;
 use crate::workspace::Workspace;
@@ -38,7 +40,9 @@ pub struct PickerItem {
 pub struct PickerState {
     pub kind: PickerKind,
     pub input: Entity<InputState>,
-    pub raw_items: Vec<PickerItem>,
+    pub raw_items: Arc<Vec<PickerItem>>,
+    pub loading: bool,
+    pub indexing: bool,
     pub filtered_items: Vec<PickerItem>,
     pub selected_index: usize,
 }
@@ -53,59 +57,20 @@ impl PickerState {
         Self {
             kind,
             input,
-            raw_items,
+            raw_items: Arc::new(raw_items),
+            loading: false,
+            indexing: false,
             filtered_items,
             selected_index: 0,
         }
     }
 
     pub fn filter(&mut self, query: &str) {
-        if self.kind == PickerKind::GoToLine {
-            self.filtered_items.clear();
-            self.selected_index = 0;
-            return;
-        }
-
-        let query = query.trim();
-        if query.is_empty() {
-            self.filtered_items = self.raw_items.iter().take(40).cloned().collect();
-            self.selected_index = 0;
-            return;
-        }
-
-        // If user appends :line or :col, match against the file part
-        let query_match = if let Some((f, _)) = query.split_once(':') {
-            f.trim()
+        self.filtered_items = if self.kind == PickerKind::GoToLine {
+            Vec::new()
         } else {
-            query
+            filter_items(&self.raw_items, query, &Cancellation::default())
         };
-
-        let matcher = SkimMatcherV2::default();
-        let mut scored = Vec::new();
-
-        for item in &self.raw_items {
-            let score = if let Some(sub) = &item.subtitle {
-                if let Some(s) = matcher.fuzzy_match(&item.title, query_match) {
-                    Some(s + 30)
-                } else {
-                    matcher.fuzzy_match(sub, query_match)
-                }
-            } else {
-                matcher.fuzzy_match(&item.title, query_match)
-            };
-
-            if let Some(mut score) = score {
-                let mut it = item.clone();
-                if it.is_recent {
-                    score += 50;
-                }
-                it.score = score;
-                scored.push(it);
-            }
-        }
-
-        scored.sort_by_key(|a| std::cmp::Reverse(a.score));
-        self.filtered_items = scored.into_iter().take(40).collect();
         self.selected_index = 0;
     }
 
@@ -130,6 +95,91 @@ impl PickerState {
     }
 }
 
+/// Pure filtering. Score indices, not cloned items: only the best forty
+/// results allocate strings, even when every project file matches a query.
+pub fn filter_items(
+    items: &[PickerItem],
+    query: &str,
+    cancelled: &Cancellation,
+) -> Vec<PickerItem> {
+    filter_items_inner(items, query, cancelled, None)
+}
+
+pub fn filter_items_with_recents(
+    items: &[PickerItem],
+    query: &str,
+    cancelled: &Cancellation,
+    recent: &[PathBuf],
+) -> Vec<PickerItem> {
+    let ranks = recent
+        .iter()
+        .enumerate()
+        .map(|(index, path)| (path.to_string_lossy().into_owned(), index))
+        .collect();
+    filter_items_inner(items, query, cancelled, Some(&ranks))
+}
+
+fn filter_items_inner(
+    items: &[PickerItem],
+    query: &str,
+    cancelled: &Cancellation,
+    recent: Option<&std::collections::HashMap<String, usize>>,
+) -> Vec<PickerItem> {
+    if cancelled.is_cancelled() {
+        return Vec::new();
+    }
+    let query = query.trim();
+    if query.is_empty() && recent.is_none() {
+        return items.iter().take(40).cloned().collect();
+    }
+    // If user appends :line or :col, match against the file part.
+    let query_match = query.split_once(':').map_or(query, |(file, _)| file.trim());
+    let matcher = SkimMatcherV2::default();
+    let mut scored = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        if cancelled.is_cancelled() {
+            return Vec::new();
+        }
+        let rank = recent.and_then(|ranks| ranks.get(&item.id)).copied();
+        let is_recent = recent.map_or(item.is_recent, |_| rank.is_some());
+        let score = if query_match.is_empty() {
+            Some(0)
+        } else if let Some(subtitle) = &item.subtitle {
+            matcher
+                .fuzzy_match(&item.title, query_match)
+                .map(|score| score + 30)
+                .or_else(|| matcher.fuzzy_match(subtitle, query_match))
+        } else {
+            matcher.fuzzy_match(&item.title, query_match)
+        };
+        if let Some(score) = score {
+            scored.push((
+                score + if is_recent { 50 } else { 0 },
+                rank.unwrap_or(usize::MAX),
+                index,
+                is_recent,
+            ));
+        }
+    }
+    scored.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    scored
+        .into_iter()
+        .take(40)
+        .map(|(score, _, index, is_recent)| {
+            let mut item = items[index].clone();
+            item.score = score;
+            item.is_recent = is_recent;
+            item
+        })
+        .collect()
+}
+
 fn is_ignored_scan_dir(name: &str) -> bool {
     matches!(
         name,
@@ -150,13 +200,30 @@ fn is_ignored_scan_dir(name: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<PickerItem> {
+    scan_workspace_files_cancellable(root, recent_files, &Cancellation::default(), None)
+}
+
+pub fn scan_workspace_files_cancellable(
+    root: &Path,
+    recent_files: &[PathBuf],
+    cancelled: &Cancellation,
+    watches: Option<std::sync::mpsc::Sender<PathBuf>>,
+) -> Vec<PickerItem> {
+    let _span = crate::perf::span("workspace.file_index.background");
+    if cancelled.is_cancelled() {
+        return Vec::new();
+    }
     use ignore::WalkBuilder;
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     // 1. Add recent files first
     for path in recent_files {
+        if cancelled.is_cancelled() {
+            return Vec::new();
+        }
         if path.is_file() {
             let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
             if !seen.insert(rel) {
@@ -211,6 +278,14 @@ pub fn scan_workspace_files(root: &Path, recent_files: &[PathBuf]) -> Vec<Picker
         .build();
 
     for entry in walker.flatten() {
+        if cancelled.is_cancelled() {
+            return Vec::new();
+        }
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            if let Some(watches) = &watches {
+                let _ = watches.send(entry.path().to_path_buf());
+            }
+        }
         if entry.file_type().is_some_and(|ft| ft.is_file()) {
             let path = entry.path();
             let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
@@ -752,12 +827,16 @@ pub fn render_picker(
             .child("Type a line number (and optional :column) and press Enter to jump.")
             .into_any_element()
     } else if filtered_items.is_empty() {
-        let empty_text = match kind {
-            PickerKind::GitBranch => {
-                "No matching branch — press Enter to create a branch with the typed name"
+        let empty_text = if picker.loading {
+            "Loading files…"
+        } else {
+            match kind {
+                PickerKind::GitBranch => {
+                    "No matching branch — press Enter to create a branch with the typed name"
+                }
+                PickerKind::GitBranchDelete => "No matching branch",
+                _ => "No matching results",
             }
-            PickerKind::GitBranchDelete => "No matching branch",
-            _ => "No matching results",
         };
         div()
             .px(px(12.0))
@@ -1014,6 +1093,58 @@ pub fn render_picker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_indexes_use_current_recent_priority() {
+        let items = ["/project/old.txt", "/project/new.txt"]
+            .into_iter()
+            .map(|id| PickerItem {
+                id: id.into(),
+                title: "file.txt".into(),
+                subtitle: None,
+                icon: None,
+                shortcut: None,
+                is_recent: id.ends_with("old.txt"),
+                score: 0,
+            })
+            .collect::<Vec<_>>();
+        let recent = vec![PathBuf::from("/project/new.txt")];
+        for query in ["", "file", "file:12:3"] {
+            let filtered =
+                filter_items_with_recents(&items, query, &Cancellation::default(), &recent);
+            assert_eq!(filtered[0].id, "/project/new.txt");
+            assert!(filtered[0].is_recent);
+            assert!(!filtered[1].is_recent);
+        }
+    }
+
+    #[test]
+    fn filtering_large_indexes_is_cancellable_and_limits_results() {
+        let items = (0..15000)
+            .map(|index| PickerItem {
+                id: index.to_string(),
+                title: format!("file-{index}.rs"),
+                subtitle: None,
+                icon: None,
+                shortcut: None,
+                is_recent: false,
+                score: 0,
+            })
+            .collect::<Vec<_>>();
+        let cancellation = Cancellation::default();
+        assert_eq!(filter_items(&items, "file", &cancellation).len(), 40);
+        cancellation.cancel();
+        assert!(filter_items(&items, "file", &cancellation).is_empty());
+    }
+
+    #[test]
+    fn cancelled_indexes_do_not_scan_old_workspaces() {
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        assert!(
+            scan_workspace_files_cancellable(Path::new("."), &[], &cancellation, None).is_empty()
+        );
+    }
 
     #[test]
     fn test_command_palette_items_populated() {

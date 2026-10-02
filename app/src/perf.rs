@@ -32,15 +32,16 @@ pub fn mark(label: &str) {
     let now = elapsed_ms();
     let prev = LAST_MARK_MS.swap(now as u64, Ordering::Relaxed);
     eprintln!(
-        "[perf] {label}: {now:.1} ms total (+{:.1})",
-        now - prev as f64
+        "[perf] {label}: {now:.1} ms total (+{:.1}), {} filesystem probes",
+        now - prev as f64,
+        stat_count()
     );
 }
 
 /// RAII span. Reports elapsed time when the guard is dropped.
 ///
 /// `label` is `'static` on purpose: it is a fixed site name, not a formatted
-
+/// string, so building the span never allocates.
 pub struct Span {
     label: &'static str,
     start: Instant,

@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::cancellation::Cancellation;
 use grep_matcher::Matcher;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
@@ -231,12 +232,26 @@ fn regex_escape(literal: &str) -> String {
 
 /// Walk `root` and search every text file. Pure I/O + compute, no GPUI —
 /// call it from `background_spawn`.
+#[cfg(test)]
 pub fn run_search(
     root: &Path,
     opts: &SearchOptions,
     max_matches: usize,
     max_files: usize,
 ) -> Result<SearchOutput, String> {
+    run_search_cancellable(root, opts, max_matches, max_files, &Cancellation::default())
+}
+
+pub fn run_search_cancellable(
+    root: &Path,
+    opts: &SearchOptions,
+    max_matches: usize,
+    max_files: usize,
+    cancellation: &Cancellation,
+) -> Result<SearchOutput, String> {
+    if cancellation.is_cancelled() {
+        return Ok(SearchOutput::default());
+    }
     let started = Instant::now();
     let matcher = build_matcher(opts)?;
     let matcher = Arc::new(matcher);
@@ -269,10 +284,14 @@ pub fn run_search(
             });
         builder.build_parallel().run(|| {
             let candidates = candidates.clone();
+            let cancellation = cancellation.clone();
             let root_clone = root_clone.clone();
             let include = include.clone();
             Box::new(move |entry| {
                 use ignore::WalkState;
+                if cancellation.is_cancelled() {
+                    return WalkState::Quit;
+                }
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
                 };
@@ -295,6 +314,9 @@ pub fn run_search(
         });
     }
     let mut candidates = candidates.lock().unwrap().drain(..).collect::<Vec<_>>();
+    if cancellation.is_cancelled() {
+        return Ok(SearchOutput::default());
+    }
     candidates.sort();
 
     let mut searcher = SearcherBuilder::new()
@@ -305,6 +327,9 @@ pub fn run_search(
 
     let mut out = SearchOutput::default();
     for path in candidates {
+        if cancellation.is_cancelled() {
+            break;
+        }
         if out.total_matches >= max_matches || out.files.len() >= max_files {
             out.truncated = true;
             break;
@@ -314,6 +339,7 @@ pub fn run_search(
         // The sink borrows `matcher`; defined per file.
         struct LocalSink<'m> {
             matcher: &'m grep_regex::RegexMatcher,
+            cancellation: &'m Cancellation,
             matches: Vec<SearchMatch>,
         }
         impl grep_searcher::Sink for LocalSink<'_> {
@@ -323,6 +349,9 @@ pub fn run_search(
                 _searcher: &grep_searcher::Searcher,
                 mat: &grep_searcher::SinkMatch<'_>,
             ) -> Result<bool, std::io::Error> {
+                if self.cancellation.is_cancelled() {
+                    return Ok(false);
+                }
                 let line_number = mat.line_number().unwrap_or(1) as usize;
                 let bytes = mat.bytes();
                 let mut end = bytes.len();
@@ -372,6 +401,7 @@ pub fn run_search(
         }
         let mut sink = LocalSink {
             matcher: &matcher,
+            cancellation,
             matches: Vec::new(),
         };
         let r = searcher.search_path(&*matcher, &path, &mut sink);
@@ -565,6 +595,24 @@ mod tests {
             use_regex: false,
             include_filter: String::new(),
         }
+    }
+
+    #[test]
+    fn cancelled_search_does_not_walk_or_read_files() {
+        let fixture = crate::test_support::TempDir::new("cancelled-search");
+        fixture.file("file.txt", "needle");
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        let output = run_search_cancellable(
+            fixture.path(),
+            &opts("needle"),
+            MAX_MATCHES,
+            MAX_FILES,
+            &cancellation,
+        )
+        .unwrap();
+        assert_eq!(output.searched_files, 0);
+        assert_eq!(output.total_matches, 0);
     }
 
     #[test]

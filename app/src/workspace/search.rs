@@ -84,6 +84,8 @@ impl Workspace {
     /// Debounced entry point for typing: waits for a pause, then searches.
     /// Stale generations are dropped so only the latest query paints.
     pub(crate) fn schedule_search(&mut self, cx: &mut Context<Self>) {
+        self.search_cancel.cancel();
+        self.search_task = None;
         self.search_generation = self.search_generation.wrapping_add(1);
         let my_gen = self.search_generation;
         let query = self
@@ -116,6 +118,8 @@ impl Workspace {
 
     /// Immediate search (Enter key, flag toggles, refresh button).
     pub(crate) fn run_search_now(&mut self, cx: &mut Context<Self>) {
+        self.search_cancel.cancel();
+        self.search_task = None;
         let Some(root) = self.root.clone() else {
             self.search_error = Some("Open a folder to search".to_string());
             self.search_results.clear();
@@ -134,19 +138,30 @@ impl Workspace {
             cx.notify();
             return;
         }
+        self.search_cancel.cancel();
+        self.search_task = None;
         self.search_generation = self.search_generation.wrapping_add(1);
         let my_gen = self.search_generation;
         self.search_in_progress = true;
         self.search_error = None;
         cx.notify();
-        cx.spawn(async move |this, cx| {
+        self.search_cancel = self.session.child();
+        let cancelled = self.search_cancel.clone();
+        self.search_task = Some(cx.spawn(async move |this, cx| {
+            let scan_cancel = cancelled.clone();
             let output = cx
                 .background_spawn(async move {
-                    search::run_search(&root, &opts, MAX_MATCHES, MAX_FILES)
+                    search::run_search_cancellable(
+                        &root,
+                        &opts,
+                        MAX_MATCHES,
+                        MAX_FILES,
+                        &scan_cancel,
+                    )
                 })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
-                if workspace.search_generation != my_gen {
+                if cancelled.is_cancelled() || workspace.search_generation != my_gen {
                     return; // a newer query already superseded this run
                 }
                 workspace.search_in_progress = false;
@@ -186,8 +201,7 @@ impl Workspace {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     pub(crate) fn toggle_search_case(&mut self, cx: &mut Context<Self>) {
@@ -228,6 +242,8 @@ impl Workspace {
     }
 
     pub(crate) fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_cancel.cancel();
+        self.search_task = None;
         self.search_generation = self.search_generation.wrapping_add(1);
         self.search_results.clear();
         self.search_total_matches = 0;
@@ -319,11 +335,15 @@ impl Workspace {
             }
         );
         cx.notify();
+        let token = self.session.clone();
         cx.spawn(async move |this, cx| {
             let (changed, made) = cx
                 .background_spawn(async move { search::apply_replace(&files, &opts, &replace) })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 workspace.status = if made == 0 {
                     "Nothing replaced".into()
                 } else {
@@ -359,6 +379,7 @@ impl Workspace {
         let opts = self.search_snapshot(cx);
         let replace = self.replace_text(cx);
         let label = file.rel.clone();
+        let token = self.session.clone();
         cx.spawn(async move |this, cx| {
             let (changed, made) = cx
                 .background_spawn(async move {
@@ -366,6 +387,9 @@ impl Workspace {
                 })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 workspace.status = if made == 0 {
                     format!("Nothing replaced in {label}")
                 } else {
@@ -388,6 +412,8 @@ impl Workspace {
 
     /// Drop results when the project changes so stale paths never paint.
     pub(crate) fn clear_search_results(&mut self) {
+        self.search_cancel.cancel();
+        self.search_task = None;
         self.search_generation = self.search_generation.wrapping_add(1);
         self.search_results.clear();
         self.search_total_matches = 0;

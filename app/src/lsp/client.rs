@@ -60,6 +60,94 @@ pub enum LspEvent {
     },
 }
 
+#[derive(Clone, Debug)]
+pub struct ScopedLspEvent {
+    pub generation: Option<u64>,
+    pub event: LspEvent,
+}
+
+#[derive(Clone)]
+pub struct LspEventSender {
+    tx: async_channel::Sender<ScopedLspEvent>,
+    generation: Option<u64>,
+}
+
+impl LspEventSender {
+    fn try_send(&self, event: LspEvent) -> Result<(), async_channel::TrySendError<ScopedLspEvent>> {
+        self.tx.try_send(ScopedLspEvent {
+            generation: self.generation,
+            event,
+        })
+    }
+}
+
+/// Reserving is cheap and happens under the manager lock. Resolving PATH/npm
+/// and spawning the process happen outside that lock on a background executor.
+pub struct ServerLaunch {
+    adapter: &'static super::adapter::ServerAdapter,
+    root: Option<PathBuf>,
+    generation: u64,
+    events: LspEventSender,
+}
+
+pub enum LaunchResult {
+    Client(Box<LspClient>),
+    NeedsInstall,
+    Failed(String),
+}
+
+impl ServerLaunch {
+    pub fn name(&self) -> &'static str {
+        self.adapter.name
+    }
+
+    pub fn run(&self) -> LaunchResult {
+        let (program, args) = match self.adapter.source {
+            super::adapter::Source::Native { binary } => {
+                let fallbacks: &[&str] = match binary {
+                    "basedpyright-langserver" => {
+                        &["pyright-langserver", "pyright", "pylsp", "ruff"]
+                    }
+                    "csharp-ls" => &["OmniSharp", "omnisharp"],
+                    "language_server.sh" => &["elixir-ls"],
+                    _ => &[],
+                };
+                let Some(program) = find_binary_with_fallbacks(binary, fallbacks) else {
+                    return LaunchResult::Failed(format!(
+                        "{binary} is not installed or not on PATH"
+                    ));
+                };
+                (
+                    program,
+                    self.adapter
+                        .args
+                        .iter()
+                        .map(|arg| arg.to_string())
+                        .collect(),
+                )
+            }
+            super::adapter::Source::Npm { entry, .. } => {
+                match super::node::resolve_npm_server(self.adapter.name, entry, self.adapter.args) {
+                    super::node::Resolved::Ready { program, args } => (program, args),
+                    super::node::Resolved::Unavailable(reason) => {
+                        return LaunchResult::Failed(reason)
+                    }
+                    super::node::Resolved::NeedsInstall => return LaunchResult::NeedsInstall,
+                }
+            }
+        };
+        LspClient::spawn(
+            self.adapter,
+            program,
+            args,
+            self.root.as_deref(),
+            self.events.clone(),
+        )
+        .map(|client| LaunchResult::Client(Box::new(client)))
+        .unwrap_or_else(|| LaunchResult::Failed(format!("failed to start {}", self.adapter.name)))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerStatus {
     Installing,
@@ -78,8 +166,9 @@ pub struct LspManager {
 
     installing: HashSet<String>,
     root: Option<PathBuf>,
-    event_tx: async_channel::Sender<LspEvent>,
-    event_rx: async_channel::Receiver<LspEvent>,
+    event_tx: async_channel::Sender<ScopedLspEvent>,
+    event_rx: async_channel::Receiver<ScopedLspEvent>,
+    generation: u64,
 
     crash_counts: HashMap<String, (usize, Instant)>,
 }
@@ -92,25 +181,39 @@ impl LspManager {
             statuses: HashMap::new(),
             installing: HashSet::new(),
             root: None,
+            generation: 0,
             event_tx,
             event_rx,
             crash_counts: HashMap::new(),
         }
     }
 
-    pub fn event_receiver(&self) -> async_channel::Receiver<LspEvent> {
+    pub fn event_receiver(&self) -> async_channel::Receiver<ScopedLspEvent> {
         self.event_rx.clone()
     }
 
     pub fn set_root(&mut self, root: Option<PathBuf>) {
         if self.root != root {
             self.root = root;
-
+            self.generation = self.generation.wrapping_add(1);
+            for client in self.clients.values() {
+                client.stop();
+            }
             self.clients.clear();
             self.statuses.clear();
-            self.installing.clear();
+            // Installs are process-wide resources, not project resources.
+            // Retain their reservations across root switches to avoid two
+            // npm processes writing the same server installation concurrently.
+            for server in &self.installing {
+                self.statuses
+                    .insert(server.clone(), ServerStatus::Installing);
+            }
             self.crash_counts.clear();
         }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     #[allow(dead_code)]
@@ -118,105 +221,87 @@ impl LspManager {
         self.root.as_deref()
     }
 
-    pub fn ensure_server(&mut self, lang: &str, root_dir: Option<&Path>) -> Option<Arc<LspClient>> {
+    pub fn reserve_server(&mut self, lang: &str) -> Option<ServerLaunch> {
         let adapter = super::adapter::adapter_for_language(lang)?;
         let name = adapter.name;
-
-        if let Some(client) = self.clients.get(name) {
-            if client.is_alive() {
-                return Some(client.clone());
-            }
-
-            self.clients.remove(name);
+        if self.client_for(lang).is_some() {
+            return None;
         }
-
-        if let Some(status) = self.statuses.get(name) {
-            if matches!(status, ServerStatus::Failed(_)) {
-                if let Some((count, last_crash)) = self.crash_counts.get(name) {
-                    if *count >= 3 && last_crash.elapsed() < Duration::from_secs(60) {
-                        return None;
-                    }
-                }
+        if self.installing.contains(name)
+            || matches!(
+                self.statuses.get(name),
+                Some(ServerStatus::Starting | ServerStatus::Running)
+            )
+        {
+            return None;
+        }
+        if let Some((count, last_crash)) = self.crash_counts.get(name) {
+            if *count >= 3 && last_crash.elapsed() < Duration::from_secs(60) {
+                return None;
             }
         }
+        self.statuses
+            .insert(name.to_string(), ServerStatus::Starting);
+        Some(ServerLaunch {
+            adapter,
+            root: self.root.clone(),
+            generation: self.generation,
+            events: LspEventSender {
+                tx: self.event_tx.clone(),
+                generation: Some(self.generation),
+            },
+        })
+    }
 
-        let root = root_dir
-            .map(Path::to_path_buf)
-            .or_else(|| self.root.clone());
-
-        match adapter.source {
-            super::adapter::Source::Native { binary } => {
-                let fallbacks: &[&str] = match binary {
-                    "basedpyright-langserver" => {
-                        &["pyright-langserver", "pyright", "pylsp", "ruff"]
-                    }
-                    "csharp-ls" => &["OmniSharp", "omnisharp"],
-                    "language_server.sh" => &["elixir-ls"],
-                    _ => &[],
-                };
-                let Some(program) = find_binary_with_fallbacks(binary, fallbacks) else {
+    pub fn finish_start(&mut self, launch: &ServerLaunch, result: LaunchResult) -> bool {
+        if launch.generation != self.generation {
+            if let LaunchResult::Client(client) = result {
+                client.stop();
+            }
+            return false;
+        }
+        let name = launch.adapter.name;
+        match result {
+            LaunchResult::Client(client) => {
+                if !client.is_alive() {
+                    client.stop();
                     self.statuses.insert(
                         name.to_string(),
-                        ServerStatus::Failed(format!("{binary} is not installed or not on PATH")),
+                        ServerStatus::Failed("exited during startup".into()),
                     );
-                    return None;
-                };
-                self.spawn_client(
-                    adapter,
-                    program,
-                    adapter.args.iter().map(|s| s.to_string()).collect(),
-                    root,
-                )
-            }
-            super::adapter::Source::Npm { package, entry } => {
-                match super::node::resolve_npm_server(name, entry, adapter.args) {
-                    super::node::Resolved::Ready { program, args } => {
-                        self.spawn_client(adapter, program, args, root)
-                    }
-                    super::node::Resolved::Unavailable(reason) => {
-                        self.statuses
-                            .insert(name.to_string(), ServerStatus::Failed(reason));
-                        None
-                    }
-                    super::node::Resolved::NeedsInstall => {
-                        self.start_install(name, package, entry, adapter);
-                        None
-                    }
+                    return false;
                 }
+                let status = if client.is_ready() {
+                    ServerStatus::Running
+                } else {
+                    ServerStatus::Starting
+                };
+                self.clients.insert(name.to_string(), Arc::from(client));
+                self.statuses.insert(name.to_string(), status);
+                true
+            }
+            LaunchResult::NeedsInstall => {
+                if let super::adapter::Source::Npm { package, entry } = launch.adapter.source {
+                    self.start_install(name, package, entry, launch.adapter);
+                }
+                false
+            }
+            LaunchResult::Failed(reason) => {
+                self.statuses
+                    .insert(name.to_string(), ServerStatus::Failed(reason));
+                false
             }
         }
     }
 
-    fn spawn_client(
-        &mut self,
-        adapter: &'static super::adapter::ServerAdapter,
-        program: PathBuf,
-        args: Vec<String>,
-        root: Option<PathBuf>,
-    ) -> Option<Arc<LspClient>> {
-        let name = adapter.name;
-        match LspClient::spawn(
-            adapter,
-            program,
-            args,
-            root.as_deref(),
-            self.event_tx.clone(),
-        ) {
-            Some(client) => {
-                let client = Arc::new(client);
-                self.clients.insert(name.to_string(), client.clone());
-                self.statuses
-                    .insert(name.to_string(), ServerStatus::Starting);
-                Some(client)
-            }
-            None => {
-                self.statuses.insert(
-                    name.to_string(),
-                    ServerStatus::Failed(format!("failed to start {name}")),
-                );
-                None
-            }
+    #[cfg(test)]
+    pub fn ensure_server(&mut self, lang: &str, root: Option<&Path>) -> Option<Arc<LspClient>> {
+        self.set_root(root.map(Path::to_path_buf));
+        if let Some(launch) = self.reserve_server(lang) {
+            let result = launch.run();
+            self.finish_start(&launch, result);
         }
+        self.client_for(lang)
     }
 
     /// Kick off a background npm install for a server (once).
@@ -236,7 +321,10 @@ impl LspManager {
         let mut packages = vec![format!("{package}@latest")];
         packages.extend(adapter.extra_npm_packages().iter().map(|p| p.to_string()));
 
-        let tx = self.event_tx.clone();
+        let tx = LspEventSender {
+            tx: self.event_tx.clone(),
+            generation: None,
+        };
         std::thread::spawn(move || {
             let _ = tx.try_send(LspEvent::Status {
                 lang: name.to_string(),
@@ -261,6 +349,7 @@ impl LspManager {
     /// Clear the in-flight install flag so the server can be started.
     pub fn finish_install(&mut self, server: &str) {
         self.installing.remove(server);
+        self.statuses.remove(server);
     }
 
     /// Record a terminal failure for a server.
@@ -286,7 +375,11 @@ impl LspManager {
     /// teardown (app quit, root change) drops already-removed clients, and
     /// those must not trigger a respawn.
     pub fn drop_client(&mut self, server: &str) -> bool {
-        let removed = self.clients.remove(server).is_some();
+        let removed = self
+            .clients
+            .remove(server)
+            .map(|client| client.stop())
+            .is_some();
         if !removed {
             return false;
         }
@@ -414,7 +507,7 @@ impl LspClient {
         program: PathBuf,
         args: Vec<String>,
         root_dir: Option<&Path>,
-        event_tx: async_channel::Sender<LspEvent>,
+        event_tx: LspEventSender,
     ) -> Option<Self> {
         let mut cmd = Command::new(&program);
         cmd.args(&args);
@@ -429,6 +522,11 @@ impl LspClient {
         // and swallowing it is why "no diagnostics" bugs are so hard to
         // diagnose. A reader thread below logs it.
         cmd.stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            cmd.process_group(0);
+        }
 
         // Don't pop up a console window for each server on Windows.
         #[cfg(windows)]
@@ -878,6 +976,10 @@ impl LspClient {
         self.last_diagnostics.lock().unwrap().remove(path);
 
         self.pending_changes.lock().unwrap().remove(path);
+        self.pending_opens
+            .lock()
+            .unwrap()
+            .retain(|(pending_path, _, _)| pending_path != path);
 
         let params = DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri },
@@ -1024,21 +1126,37 @@ impl LspClient {
     }
 }
 
+impl Drop for LspManager {
+    fn drop(&mut self) {
+        for client in self.clients.values() {
+            client.stop();
+        }
+    }
+}
+
+impl LspClient {
+    /// Invalidate immediately, reap off-thread. Editor providers and in-flight
+    /// requests may still own Arcs, so relying on Drop alone leaks old servers
+    /// across project transitions even when the manager forgets the client.
+    pub fn stop(&self) {
+        *self.is_alive.lock().unwrap() = false;
+        self.pending.lock().unwrap().clear();
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            thread::spawn(move || {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+            });
+        }
+    }
+}
+
 impl Drop for LspClient {
     fn drop(&mut self) {
-        *self.is_alive.lock().unwrap() = false;
-        let shutdown =
-            json!({"jsonrpc": "2.0", "id": 999_999, "method": "shutdown", "params": null});
-        if let Some(bytes) = frame_payload(&shutdown) {
-            let _ = self.out.send(bytes);
-        }
-        let exit = json!({"jsonrpc": "2.0", "method": "exit"});
-        if let Some(bytes) = frame_payload(&exit) {
-            let _ = self.out.send(bytes);
-        }
-        if let Some(mut child) = self.child.lock().unwrap().take() {
-            let _ = child.kill();
-        }
+        self.stop();
     }
 }
 
@@ -1434,8 +1552,12 @@ fn next_change_for(
     text: &str,
     incremental: bool,
 ) -> Option<TextDocumentContentChangeEvent> {
-    let mut guard = synced.lock().unwrap();
-    let prev = guard.insert(path.to_path_buf(), text.to_string());
+    let next = text.to_string();
+    let prev = synced.lock().unwrap().insert(path.to_path_buf(), next);
+    // Computing an incremental diff may scan the entire buffer. Never hold
+    // the shared text lock while doing it: didClose on a folder switch runs
+    // on the UI thread and must not wait for a background diff.
+
     if prev.as_deref() == Some(text) {
         return None;
     }
@@ -1675,7 +1797,7 @@ fn handle_server_request(
 
 fn handle_incoming_message(
     msg: &mut Value,
-    event_tx: &async_channel::Sender<LspEvent>,
+    event_tx: &LspEventSender,
     last_diag: &Mutex<HashMap<PathBuf, Vec<lsp_types::Diagnostic>>>,
 ) {
     let Some(method) = msg.get("method").and_then(Value::as_str) else {
@@ -1716,6 +1838,76 @@ fn handle_incoming_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_startup_is_reserved_once_and_old_generations_cannot_publish() {
+        let mut manager = LspManager::new();
+        manager.set_root(Some(PathBuf::from("/project/a")));
+        let launch = manager.reserve_server("rust").unwrap();
+        assert!(manager.reserve_server("rust").is_none());
+        manager.set_root(Some(PathBuf::from("/project/b")));
+        assert!(!manager.finish_start(&launch, LaunchResult::Failed("old project".into())));
+        assert!(manager.status_for_language("rust").is_none());
+        assert!(manager.reserve_server("rust").is_some());
+    }
+
+    #[test]
+    fn installation_reservations_survive_workspace_changes() {
+        let mut manager = LspManager::new();
+        let server = "typescript-language-server";
+        manager.installing.insert(server.into());
+        manager.set_root(Some(PathBuf::from("/project/b")));
+        assert!(manager.reserve_server("typescript").is_none());
+        assert_eq!(
+            manager.status_for_language("typescript"),
+            Some(ServerStatus::Installing)
+        );
+        manager.finish_install(server);
+        assert!(manager.reserve_server("typescript").is_some());
+    }
+
+    #[test]
+    fn language_server_events_keep_their_original_generation() {
+        let manager = LspManager::new();
+        let sender = LspEventSender {
+            tx: manager.event_tx.clone(),
+            generation: Some(42),
+        };
+        sender
+            .try_send(LspEvent::Initialized {
+                server: "rust-analyzer".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            manager.event_receiver().try_recv().unwrap().generation,
+            Some(42)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_stop_does_not_wait_for_provider_arcs_to_be_released() {
+        let adapter = super::super::adapter::adapter_for_language("rust").unwrap();
+        let (tx, _rx) = async_channel::unbounded();
+        let client = Arc::new(
+            LspClient::spawn(
+                adapter,
+                PathBuf::from("sh"),
+                vec!["-c".into(), "sleep 30".into()],
+                None,
+                LspEventSender {
+                    tx,
+                    generation: Some(1),
+                },
+            )
+            .unwrap(),
+        );
+        let provider = client.clone();
+        client.stop();
+        assert!(!provider.is_alive());
+        assert!(provider.child.lock().unwrap().is_none());
+        provider.stop(); // idempotent cleanup, including Drop
+    }
 
     #[test]
     fn test_uri_path_roundtrip() {
@@ -2003,7 +2195,11 @@ mod tests {
         let start = std::time::Instant::now();
         let mut got = false;
         while start.elapsed() < Duration::from_secs(30) {
-            if let Ok(LspEvent::Diagnostics { path, diagnostics }) = rx.try_recv() {
+            if let Ok(ScopedLspEvent {
+                event: LspEvent::Diagnostics { path, diagnostics },
+                ..
+            }) = rx.try_recv()
+            {
                 if paths_match(&path, &file) && !diagnostics.is_empty() {
                     got = true;
                     break;
