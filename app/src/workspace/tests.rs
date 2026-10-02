@@ -555,7 +555,10 @@ fn ui_font_size_scales_the_interface_and_persists(cx: &mut TestAppContext) {
             assert_eq!(workspace.settings.ui_font_size, 20.0);
             // Live, not pending a restart: the global the UI reads has moved.
             assert_eq!(crate::ui::scale::ui_font_size(cx), 20.0);
-            assert_eq!(crate::ui::scale::ui_scale(cx), 20.0 / crate::ui::scale::UI_FONT_BASE);
+            assert_eq!(
+                crate::ui::scale::ui_scale(cx),
+                20.0 / crate::ui::scale::UI_FONT_BASE
+            );
             // The buffer keeps its own size, exactly as Zed splits
             // `ui_font_size` from `buffer_font_size`.
             assert_eq!(workspace.font_size, editor_font_size);

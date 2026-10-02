@@ -5,6 +5,7 @@ use crate::file_icons;
 use crate::git::{ChangeKind, RepoStatus};
 use crate::theme::Colors;
 use crate::ui::common::icon_img;
+use crate::ui::scale::rem;
 use crate::workspace::{OpenTab, Workspace};
 
 const TAB_HEIGHT: f32 = 35.0;
@@ -97,17 +98,17 @@ fn render_tab_content(
         .id(("tab", index))
         .group(group_name.clone())
         .relative()
-        .h(px(TAB_HEIGHT))
+        .h(rem(TAB_HEIGHT))
         .flex()
         .flex_row()
         .items_center()
-        .pl(px(10.0))
-        .pr(px(8.0))
-        .gap(px(6.0))
+        .pl(rem(10.0))
+        .pr(rem(8.0))
+        .gap(rem(6.0))
         .cursor_pointer()
-        .text_size(px(13.0))
+        .text_size(rem(14.0))
         .text_color(rgba(text_color))
-        .max_w(px(220.0))
+        .max_w(rem(220.0))
         .flex_shrink()
         .overflow_hidden()
         .border_r_1()
@@ -144,11 +145,11 @@ fn render_tab_content(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(6.0))
+        .gap(rem(6.0))
         .flex_1()
         .min_w(px(0.0))
         .overflow_hidden()
-        .child(icon_img(icon_path, px(15.0)))
+        .child(icon_img(icon_path, rem(16.0)))
         .child(
             div()
                 .overflow_hidden()
@@ -163,7 +164,7 @@ fn render_tab_content(
     if let Some((letter, color)) = git_letter.zip(git_color) {
         tab_div = tab_div.child(
             div()
-                .text_size(px(11.0))
+                .text_size(rem(11.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(color))
                 .child(letter),
@@ -173,7 +174,7 @@ fn render_tab_content(
     let mut close_btn = div()
         .id(("close-tab", index))
         .relative()
-        .size(px(18.0))
+        .size(rem(18.0))
         .rounded(px(3.0))
         .flex()
         .items_center()
@@ -196,7 +197,7 @@ fn render_tab_content(
         close_btn = close_btn
             .child(
                 div()
-                    .size(px(8.0))
+                    .size(rem(8.0))
                     .rounded_full()
                     .bg(rgba(icon_fg))
                     .group_hover(group_name.clone(), |s| s.invisible()),
@@ -204,7 +205,7 @@ fn render_tab_content(
             .child(
                 div()
                     .absolute()
-                    .text_size(px(10.5))
+                    .text_size(rem(10.5))
                     .text_color(rgba(icon_fg))
                     .invisible()
                     .group_hover(group_name.clone(), |s| s.visible())
@@ -218,7 +219,7 @@ fn render_tab_content(
         }
         close_btn = close_btn.child(
             div()
-                .text_size(px(10.5))
+                .text_size(rem(10.5))
                 .text_color(rgba(icon_fg))
                 .child("✕"),
         );
@@ -241,7 +242,7 @@ pub fn render_tab_bar(
         .flex()
         .flex_row()
         .items_center()
-        .h(px(TAB_HEIGHT))
+        .h(rem(TAB_HEIGHT))
         .bg(rgba(t.tab_bar))
         .w_full()
         .overflow_hidden()

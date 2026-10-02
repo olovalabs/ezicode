@@ -157,7 +157,10 @@ mod tests {
     fn clamped_sizes_stay_usable() {
         for requested in [0.0, -3.0, f32::NAN, 1e9] {
             let size = clamp_ui_font_size(requested);
-            assert!(size > 0.0 && size.is_finite(), "{requested} was not clamped");
+            assert!(
+                size > 0.0 && size.is_finite(),
+                "{requested} was not clamped"
+            );
             let row = rem(22.0).to_pixels(px(size));
             assert!(px_of(row) > 0.0 && px_of(row).is_finite());
         }

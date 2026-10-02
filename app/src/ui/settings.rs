@@ -5,6 +5,7 @@ use gpui_component::scroll::ScrollableElement;
 
 use crate::settings::{AutoSaveMode, FormatOnSaveMode, Settings};
 use crate::theme::{self, Colors};
+use crate::ui::scale::rem;
 use crate::workspace::Workspace;
 
 pub(crate) fn render_settings(
@@ -82,7 +83,7 @@ fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
                         )
                         .child(
                             div()
-                                .text_size(px(20.0))
+                                .text_size(rem(20.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgba(t.text))
                                 .child(SharedString::from("Settings")),
@@ -90,7 +91,7 @@ fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
                 )
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(format!(
                             "Stored in {settings_path_display}"
@@ -126,7 +127,7 @@ fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
                 )
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(rgba(t.text))
                         .child(SharedString::from("Open Settings (JSON)")),
@@ -169,14 +170,14 @@ fn render_theme_section(
                         .gap(px(2.0))
                         .child(
                             div()
-                                .text_size(px(16.0))
+                                .text_size(rem(16.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgba(t.text))
                                 .child(SharedString::from("🎨 Color Theme & UI Scale")),
                         )
                         .child(
                             div()
-                                .text_size(px(12.5))
+                                .text_size(rem(12.5))
                                 .text_color(rgba(t.text_muted))
                                 .child(SharedString::from(
                                     "Select the workbench color theme. Both apply instantly.",
@@ -196,13 +197,13 @@ fn render_theme_section(
                         .border_color(rgba(t.border))
                         .child(
                             div()
-                                .text_size(px(12.0))
+                                .text_size(rem(12.0))
                                 .text_color(rgba(t.text_muted))
                                 .child(SharedString::from("Current:")),
                         )
                         .child(
                             div()
-                                .text_size(px(12.0))
+                                .text_size(rem(12.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(rgba(t.text_accent))
                                 .child(SharedString::from(current_name.to_string())),
@@ -213,13 +214,12 @@ fn render_theme_section(
                                 .py(px(1.0))
                                 .rounded(px(3.0))
                                 .bg(rgba(t.element_active))
-                                .text_size(px(10.5))
+                                .text_size(rem(10.5))
                                 .text_color(rgba(t.text))
                                 .child(SharedString::from(current_app.to_uppercase())),
                         ),
                 ),
         )
-
         .child(
             div()
                 .flex()
@@ -260,7 +260,6 @@ fn render_theme_section(
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.apply_theme(idx, window, cx);
                         }))
-
                         .child(
                             div()
                                 .flex()
@@ -268,7 +267,7 @@ fn render_theme_section(
                                 .justify_between()
                                 .child(
                                     div()
-                                        .text_size(px(13.5))
+                                        .text_size(rem(13.5))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(rgba(t.text))
                                         .child(SharedString::from(th_name)),
@@ -285,7 +284,7 @@ fn render_theme_section(
                                                     .py(px(2.0))
                                                     .rounded(px(4.0))
                                                     .bg(rgba(t.border_focused))
-                                                    .text_size(px(10.5))
+                                                    .text_size(rem(10.5))
                                                     .font_weight(FontWeight::BOLD)
                                                     .text_color(rgba(t.background))
                                                     .child(SharedString::from("✓ Active")),
@@ -298,14 +297,15 @@ fn render_theme_section(
                                                     .py(px(1.0))
                                                     .rounded(px(3.0))
                                                     .bg(rgba(t.element_active))
-                                                    .text_size(px(10.0))
+                                                    .text_size(rem(10.0))
                                                     .text_color(rgba(t.text_muted))
-                                                    .child(SharedString::from(th_app.to_uppercase())),
+                                                    .child(SharedString::from(
+                                                        th_app.to_uppercase(),
+                                                    )),
                                             )
                                         }),
                                 ),
                         )
-
                         .child(
                             div()
                                 .flex()
@@ -318,7 +318,7 @@ fn render_theme_section(
                                 .child(
                                     div()
                                         .ml_auto()
-                                        .text_size(px(11.0))
+                                        .text_size(rem(11.0))
                                         .text_color(rgba(t.text_muted))
                                         .child(SharedString::from("Preview")),
                                 ),
@@ -338,30 +338,36 @@ fn render_theme_section(
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(
-                    btn_small("-", t, cx.listener(|this, _, _, cx| {
+                .child(btn_small(
+                    "-",
+                    t,
+                    cx.listener(|this, _, _, cx| {
                         this.decrease_ui_font_size(cx);
-                    })),
-                )
+                    }),
+                ))
                 .child(
                     div()
                         .min_w(px(55.0))
                         .text_center()
-                        .text_size(px(13.0))
+                        .text_size(rem(13.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(rgba(t.text))
                         .child(SharedString::from(format!("{ui_font_size:.1} px"))),
                 )
-                .child(
-                    btn_small("+", t, cx.listener(|this, _, _, cx| {
+                .child(btn_small(
+                    "+",
+                    t,
+                    cx.listener(|this, _, _, cx| {
                         this.increase_ui_font_size(cx);
-                    })),
-                )
-                .child(
-                    btn_small("Reset (14.0px)", t, cx.listener(|this, _, _, cx| {
+                    }),
+                ))
+                .child(btn_small(
+                    "Reset (14.0px)",
+                    t,
+                    cx.listener(|this, _, _, cx| {
                         this.reset_ui_font_size(cx);
-                    })),
-                ),
+                    }),
+                )),
             t,
         ))
 }
@@ -399,14 +405,14 @@ fn render_editor_section(
                 .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(16.0))
+                        .text_size(rem(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgba(t.text))
                         .child(SharedString::from("📝 Text Editor & Auto Save")),
                 )
                 .child(
                     div()
-                        .text_size(px(12.5))
+                        .text_size(rem(12.5))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(
                             "Auto-save triggers, font configuration, indentation and editor preferences",
@@ -553,7 +559,7 @@ fn render_editor_section(
                                 div()
                                     .min_w(px(55.0))
                                     .text_center()
-                                    .text_size(px(13.0))
+                                    .text_size(rem(13.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(rgba(t.text))
                                     .child(SharedString::from(format!("{font_size:.1} px"))),
@@ -670,7 +676,7 @@ fn render_editor_section(
                             .py(px(3.0))
                             .rounded(px(4.0))
                             .bg(rgba(t.border_focused))
-                            .text_size(px(11.5))
+                            .text_size(rem(11.5))
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgba(t.background))
                             .child(SharedString::from("Enabled")),
@@ -699,14 +705,14 @@ fn render_terminal_section(t: &Colors, cx: &mut Context<Workspace>) -> impl Into
                 .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(16.0))
+                        .text_size(rem(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgba(t.text))
                         .child(SharedString::from("⚡ Integrated Terminal")),
                 )
                 .child(
                     div()
-                        .text_size(px(12.5))
+                        .text_size(rem(12.5))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(
                             "Embedded terminal shell emulation and execution environment",
@@ -728,7 +734,7 @@ fn render_terminal_section(t: &Colors, cx: &mut Context<Workspace>) -> impl Into
                         .bg(rgba(t.element_bg))
                         .border_1()
                         .border_color(rgba(t.border))
-                        .text_size(px(12.5))
+                        .text_size(rem(12.5))
                         .text_color(rgba(t.text))
                         .child(SharedString::from(shell_label)),
                     t,
@@ -772,14 +778,14 @@ fn render_system_section(t: &Colors) -> impl IntoElement {
                 .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(16.0))
+                        .text_size(rem(16.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(rgba(t.text))
                         .child(SharedString::from("📁 Files & System")),
                 )
                 .child(
                     div()
-                        .text_size(px(12.5))
+                        .text_size(rem(12.5))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(
                             "File system watchers, buffers and background tasks",
@@ -802,7 +808,7 @@ fn render_system_section(t: &Colors) -> impl IntoElement {
                             .bg(rgba(t.element_bg))
                             .border_1()
                             .border_color(rgba(t.border))
-                            .text_size(px(11.5))
+                            .text_size(rem(11.5))
                             .text_color(rgba(t.text_muted))
                             .child(SharedString::from("Active · 150ms debounce")),
                         t,
@@ -819,7 +825,7 @@ fn render_system_section(t: &Colors) -> impl IntoElement {
                             .bg(rgba(t.element_bg))
                             .border_1()
                             .border_color(rgba(t.border))
-                            .text_size(px(12.5))
+                            .text_size(rem(12.5))
                             .text_color(rgba(t.text))
                             .child(SharedString::from("8 MB Limit")),
                         t,
@@ -852,14 +858,14 @@ fn setting_row(
                 .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(13.5))
+                        .text_size(rem(13.5))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(rgba(t.text))
                         .child(SharedString::from(title)),
                 )
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(desc)),
                 ),
@@ -885,7 +891,7 @@ fn btn_small(
                 .border_color(rgba(t.border_focused))
         })
         .cursor_pointer()
-        .text_size(px(12.0))
+        .text_size(rem(12.0))
         .text_color(rgba(t.text))
         .child(SharedString::from(label))
         .on_click(on_click)
@@ -904,7 +910,7 @@ fn btn_pill(
         .py(px(4.0))
         .rounded(px(4.0))
         .cursor_pointer()
-        .text_size(px(12.0))
+        .text_size(rem(12.0))
         .font_weight(if is_active {
             FontWeight::BOLD
         } else {

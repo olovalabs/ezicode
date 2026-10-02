@@ -136,7 +136,7 @@ fn menu_btn(
     Button::new(id)
         .ghost()
         .compact()
-        .label(label)
+        .child(div().text_size(px(13.0)).child(SharedString::from(label)))
         .text_color(rgba(t.text))
         .dropdown_menu(build)
 }

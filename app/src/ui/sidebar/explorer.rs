@@ -51,9 +51,9 @@ use crate::workspace::{CreatingKind, ExplorerDrag, InlineCreating, InlineRenamin
 const INDENT_STEP: f32 = 8.0;
 const BASE_PAD: f32 = 8.0;
 /// VS Code's list row height.
-pub(crate) const ROW_HEIGHT: f32 = 22.0;
+pub(crate) const ROW_HEIGHT: f32 = 24.0;
 const ICON_SIZE: f32 = 16.0;
-const TEXT_SIZE: f32 = 13.0;
+const TEXT_SIZE: f32 = 14.0;
 /// The disclosure triangle's glyph, and the gaps that space a row's leading
 /// elements. The box the triangle sits in is the same square as a file icon.
 const CHEVRON_SIZE: f32 = 12.0;

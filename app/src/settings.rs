@@ -382,7 +382,10 @@ mod tests {
         // Unparseable JSON must not wedge the UI either: the defaults come
         // back, and the good file is written over the broken one.
         std::fs::write(&path, "not json").unwrap();
-        assert_eq!(Settings::load_from(&path).ui_font_size, DEFAULT_UI_FONT_SIZE);
+        assert_eq!(
+            Settings::load_from(&path).ui_font_size,
+            DEFAULT_UI_FONT_SIZE
+        );
         let repaired = std::fs::read_to_string(&path).unwrap();
         assert!(repaired.contains("\"ui_font_size\""), "{repaired}");
     }
