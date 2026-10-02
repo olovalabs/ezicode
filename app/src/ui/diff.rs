@@ -125,7 +125,7 @@ pub(crate) fn render_diff_view(
                         .flex_row()
                         .items_center()
                         .gap(px(8.0))
-                        .child(icon_img(file_icon_path, 16.0))
+                        .child(icon_img(file_icon_path, px(16.0)))
                         .child(
                             div()
                                 .text_size(px(13.0))

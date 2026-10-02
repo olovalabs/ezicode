@@ -23,8 +23,12 @@ use crate::file_icons;
 use crate::git::{ChangeKind, GitChange, RepoStatus};
 use crate::theme::Colors;
 use crate::ui::common::icon_img;
+use crate::ui::scale::rem;
 use crate::workspace::{GitConfirm, GitSection, Workspace};
 
+/// Design pixels: the height of a change row at the design UI font size. Like
+/// the explorer's rows it is scaled through `rem`, so the two sidebar panels
+/// grow and shrink together when `ui_font_size` changes.
 const ROW_HEIGHT: f32 = 26.0;
 
 fn kind_color(kind: ChangeKind, t: &Colors) -> u32 {
@@ -781,13 +785,13 @@ fn change_row(
         .id((ElementId::from(id_prefix), change.rel.clone()))
         .group("git-row")
         .w_full()
-        .h(px(ROW_HEIGHT))
-        .pl(px(20.0))
-        .pr(px(12.0))
+        .h(rem(ROW_HEIGHT))
+        .pl(rem(20.0))
+        .pr(rem(12.0))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(6.0))
+        .gap(rem(6.0))
         .cursor_pointer()
         .hover(|s| s.bg(rgba(t.ghost_hover)))
         .on_click(cx.listener({
@@ -803,8 +807,9 @@ fn change_row(
             }
         }));
 
-    // Official file type icon.
-    row = row.child(icon_img(file_icon_path, 18.0));
+    // Official file type icon, the same size relative to the row as in the file
+    // tree, because both are expressed in design pixels.
+    row = row.child(icon_img(file_icon_path, rem(18.0)));
 
     // File name, folder subpath, rename source.
     row = row.child(
@@ -814,14 +819,14 @@ fn change_row(
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(6.0))
+            .gap(rem(6.0))
             .child(
                 div()
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .text_size(px(13.5))
+                    .text_size(rem(13.5))
                     .text_color(rgba(if is_conflict { t.vc_deleted } else { t.text }))
                     .child(SharedString::from(name)),
             )
@@ -829,7 +834,7 @@ fn change_row(
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(parent)),
                 )
@@ -838,7 +843,7 @@ fn change_row(
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(format!("← {old}"))),
                 )
