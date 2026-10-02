@@ -587,17 +587,10 @@ fn ui_font_size_scales_the_interface_and_persists(cx: &mut TestAppContext) {
         });
     });
 
-    // A reload is the restart path: the size comes back off disk.
+    // The disk round trip itself is covered in `settings.rs`, against a file of
+    // its own: every workspace test shares this one settings file, so reading
+    // back what was just written here would race with another test's save.
     cx.run_until_parked();
-    cx.update(|_, cx| {
-        workspace.update(cx, |workspace, cx| {
-            workspace.set_ui_font_size(22.0, cx);
-            workspace.reload_settings(cx);
-            assert_eq!(workspace.ui_font_size, 22.0);
-            assert_eq!(crate::ui::scale::ui_font_size(cx), 22.0);
-        });
-    });
-
     cx.update(|_, cx| {
         workspace.update(cx, |workspace, _| {
             workspace.settings = saved_settings;

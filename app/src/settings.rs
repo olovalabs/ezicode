@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -273,8 +273,14 @@ pub fn settings_file_path() -> PathBuf {
 impl Settings {
     /// Loads settings from `settings.json` on disk, creating a default file if none exists.
     pub fn load() -> Self {
-        let path = settings_file_path();
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        Self::load_from(&settings_file_path())
+    }
+
+    /// `load` with the file spelled out, so a caller that is not the workbench —
+    /// a test, or a second settings file — reads a path of its own instead of
+    /// the one in the config directory.
+    pub fn load_from(path: &Path) -> Self {
+        if let Ok(content) = std::fs::read_to_string(path) {
             if let Ok(mut settings) = serde_json::from_str::<Settings>(&content) {
                 // Values a user typed into the JSON by hand are clamped on the
                 // way in (the same place Zed clamps them), so one bad number
@@ -285,15 +291,20 @@ impl Settings {
         }
 
         let defaults = Settings::default();
-        let _ = defaults.save();
+        let _ = defaults.save_to(path);
         defaults
     }
 
     /// Saves the current settings to `settings.json` with pretty JSON formatting.
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let dir = config_dir();
-        std::fs::create_dir_all(&dir)?;
-        let path = settings_file_path();
+        self.save_to(&settings_file_path())
+    }
+
+    /// `save` with the file spelled out; its directory is created when missing.
+    pub fn save_to(&self, path: &Path) -> Result<(), std::io::Error> {
+        if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)?;
+        }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, json.as_bytes())?;
@@ -347,13 +358,26 @@ mod tests {
         assert_eq!(clamp_ui_font_size(f32::INFINITY), DEFAULT_UI_FONT_SIZE);
     }
 
-    /// A hand-edited size is repaired while reading the file, so no code path
-    /// has to remember to validate it again.
+    /// The restart story: what is written to the file is what the next load
+    /// reads back, and a size edited by hand is repaired while reading — so no
+    /// code path has to remember to validate it again.
     #[test]
-    fn clamping_happens_when_the_file_is_read() {
-        let mut settings: Settings = serde_json::from_str(r#"{"ui_font_size": 900}"#).unwrap();
-        assert_eq!(settings.ui_font_size, 900.0);
-        settings.ui_font_size = clamp_ui_font_size(settings.ui_font_size);
-        assert_eq!(settings.ui_font_size, MAX_UI_FONT_SIZE);
+    fn a_saved_size_is_what_the_next_load_reads() {
+        let fixture = crate::test_support::TempDir::new("ui-font-size-file");
+        let path = fixture.path().join("settings.json");
+
+        let mut settings = Settings::default();
+        settings.ui_font_size = 21.5;
+        settings.save_to(&path).unwrap();
+        assert_eq!(Settings::load_from(&path).ui_font_size, 21.5);
+
+        std::fs::write(&path, r#"{ "ui_font_size": 900 }"#).unwrap();
+        assert_eq!(Settings::load_from(&path).ui_font_size, MAX_UI_FONT_SIZE);
+
+        // Unparseable JSON must not wedge the UI either: the defaults come
+        // back, and the good file is written over the broken one.
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(Settings::load_from(&path).ui_font_size, DEFAULT_UI_FONT_SIZE);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("\"ui_font_size\""));
     }
 }

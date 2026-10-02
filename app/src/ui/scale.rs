@@ -146,9 +146,10 @@ mod tests {
         // what keeps guide lines and disclosure triangles on the column they
         // belong to when the UI is scaled.
         let depth = 4.0;
-        let pad = rem(8.0 + depth * 8.0).to_pixels(double);
-        let per_level = rem(8.0).to_pixels(double);
-        assert!((px_of(pad) - (8.0 * 2.0 + depth * px_of(per_level))).abs() < 1e-2);
+        let pad = px_of(rem(8.0 + depth * 8.0).to_pixels(double));
+        let per_level = px_of(rem(8.0).to_pixels(double));
+        let expected = 8.0 * 2.0 + depth * per_level;
+        assert!((pad - expected).abs() < 1e-2, "{pad} vs {expected}");
     }
 
     /// Clamping is the guard rail of the setting: no size, valid or not,
