@@ -148,7 +148,7 @@ fn render_tab_content(
         .flex_1()
         .min_w(px(0.0))
         .overflow_hidden()
-        .child(icon_img(icon_path, px(15.0)))
+        .child(icon_img(icon_path, 15.0))
         .child(
             div()
                 .overflow_hidden()
