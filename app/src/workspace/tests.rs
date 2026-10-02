@@ -534,3 +534,67 @@ async fn ordered_saves_do_not_clear_edits_made_after_the_snapshot(cx: &mut TestA
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "snapshot");
     workspace.read_with(cx, |workspace, _| assert!(workspace.tabs[0].dirty));
 }
+
+/// `ui_font_size` is both a setting and the live scale of the interface: one
+/// call moves the number every scalable metric is laid out from, and the same
+/// number lands in `settings.json`.
+#[gpui::test]
+fn ui_font_size_scales_the_interface_and_persists(cx: &mut TestAppContext) {
+    let fixture = TempDir::new("ui-font-size");
+    let (workspace, cx) = workspace(cx, &fixture);
+    // These tests share the real config directory rather than a fixture of
+    // their own, so remember what was in it and put it back afterwards: a stray
+    // font size would otherwise be waiting for the next launch of the editor.
+    let saved_settings = workspace.read_with(cx, |workspace, _| workspace.settings.clone());
+
+    cx.update(|_, cx| {
+        workspace.update(cx, |workspace, cx| {
+            let editor_font_size = workspace.font_size;
+            workspace.set_ui_font_size(20.0, cx);
+            assert_eq!(workspace.ui_font_size, 20.0);
+            assert_eq!(workspace.settings.ui_font_size, 20.0);
+            // Live, not pending a restart: the global the UI reads has moved.
+            assert_eq!(crate::ui::scale::ui_font_size(cx), 20.0);
+            assert_eq!(
+                crate::ui::scale::ui_scale(cx),
+                20.0 / crate::ui::scale::UI_FONT_BASE
+            );
+            // The buffer keeps its own size, exactly as Zed splits
+            // `ui_font_size` from `buffer_font_size`.
+            assert_eq!(workspace.font_size, editor_font_size);
+
+            // A hand-edited or over-enthusiastic value is clamped, never
+            // obeyed.
+            workspace.set_ui_font_size(900.0, cx);
+            assert_eq!(workspace.ui_font_size, crate::settings::MAX_UI_FONT_SIZE);
+            workspace.set_ui_font_size(1.0, cx);
+            assert_eq!(workspace.ui_font_size, crate::settings::MIN_UI_FONT_SIZE);
+
+            // Zed's one-pixel steps, and a reset to the design size (14.0).
+            workspace.reset_ui_font_size(cx);
+            assert_eq!(workspace.ui_font_size, 14.0);
+            workspace.increase_ui_font_size(cx);
+            assert_eq!(workspace.ui_font_size, 15.0);
+            workspace.decrease_ui_font_size(cx);
+            workspace.decrease_ui_font_size(cx);
+            assert_eq!(workspace.ui_font_size, 13.0);
+
+            // Asking for the size that is already in effect must not repaint
+            // the workbench.
+            let status = workspace.status.clone();
+            workspace.set_ui_font_size(13.0, cx);
+            assert_eq!(workspace.status, status);
+        });
+    });
+
+    // The disk round trip itself is covered in `settings.rs`, against a file of
+    // its own: every workspace test shares this one settings file, so reading
+    // back what was just written here would race with another test's save.
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        workspace.update(cx, |workspace, _| {
+            workspace.settings = saved_settings;
+            let _ = workspace.settings.save();
+        });
+    });
+}

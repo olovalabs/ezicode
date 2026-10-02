@@ -300,9 +300,10 @@ impl Settings {
         self.save_to(&settings_file_path())
     }
 
-    /// `save` with the file spelled out; its directory is created when missing.
+    /// `save` with the file spelled out; its directory is created when missing
+    /// (`create_dir_all` accepts the empty parent of a bare file name).
     pub fn save_to(&self, path: &Path) -> Result<(), std::io::Error> {
-        if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
         let json = serde_json::to_string_pretty(self)
@@ -312,7 +313,7 @@ impl Settings {
     }
 }
 
-#[cfg(any())] // TEMP bisection: re-enable once CI is green
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -378,6 +379,7 @@ mod tests {
         // back, and the good file is written over the broken one.
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(Settings::load_from(&path).ui_font_size, DEFAULT_UI_FONT_SIZE);
-        assert!(std::fs::read_to_string(&path).unwrap().contains("\"ui_font_size\""));
+        let repaired = std::fs::read_to_string(&path).unwrap();
+        assert!(repaired.contains("\"ui_font_size\""), "{repaired}");
     }
 }

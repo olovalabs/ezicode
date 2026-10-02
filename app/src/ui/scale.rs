@@ -104,7 +104,7 @@ pub(crate) fn sync_window_rem_size(window: &mut Window, cx: &App) {
     }
 }
 
-#[cfg(any())] // TEMP bisection: re-enable once CI is green
+#[cfg(test)]
 mod tests {
     use super::*;
 
