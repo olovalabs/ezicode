@@ -18,32 +18,15 @@ impl Render for Workspace {
             self.open_file(path, window, cx);
         }
 
-        if !self.pending_restore_tabs.is_empty() {
-            let tabs_to_restore = std::mem::take(&mut self.pending_restore_tabs);
-            let target_active = self.pending_restore_active_tab.take();
-            for tab_info in tabs_to_restore {
-                if tab_info.path.is_file() {
-                    self.restore_tab(tab_info, window, cx);
-                }
-            }
-            if let Some(target) = target_active {
-                if target < self.tabs.len() {
-                    self.active_tab = target;
-                }
-            }
-            if let Some(editor) = self.active_editor() {
-                editor.update(cx, |this, cx| {
-                    this.focus(window, cx);
-                });
-            }
-        }
+        self.restore_active_tab(window, cx);
 
         if self.git_commit_pending {
             self.git_commit_pending = false;
             self.git_commit(window, cx);
         }
 
-        if self.picker_confirm_pending {
+        if self.picker_confirm_pending && self.picker.as_ref().is_none_or(|picker| !picker.loading)
+        {
             self.picker_confirm_pending = false;
             self.confirm_picker(window, cx);
         }

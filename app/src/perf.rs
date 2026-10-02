@@ -32,8 +32,9 @@ pub fn mark(label: &str) {
     let now = elapsed_ms();
     let prev = LAST_MARK_MS.swap(now as u64, Ordering::Relaxed);
     eprintln!(
-        "[perf] {label}: {now:.1} ms total (+{:.1})",
-        now - prev as f64
+        "[perf] {label}: {now:.1} ms total (+{:.1}), {} filesystem probes",
+        now - prev as f64,
+        stat_count()
     );
 }
 

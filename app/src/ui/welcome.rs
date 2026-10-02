@@ -3,7 +3,6 @@ use gpui::{
     Window,
 };
 
-use crate::storage::GlobalState;
 use crate::theme::Colors;
 use crate::ui::app_icon;
 use crate::workspace::Workspace;
@@ -77,12 +76,8 @@ fn welcome_button(
 }
 
 pub(crate) fn render_no_folder_panel(t: &Colors, cx: &mut Context<Workspace>) -> gpui::AnyElement {
-    let global_state = GlobalState::load();
-    let recent_folders: Vec<_> = global_state
-        .recent_folders
-        .into_iter()
-        .filter(|p| p.exists())
-        .collect();
+    let global_state = cx.entity().read(cx).storage.recent();
+    let recent_folders: Vec<_> = global_state.recent_folders.into_iter().collect();
 
     div()
         .size_full()

@@ -1,5 +1,6 @@
 mod actions;
 mod assets;
+mod cancellation;
 mod file_icons;
 mod fs_tree;
 mod git;
@@ -8,10 +9,13 @@ mod lang;
 mod linux_desktop;
 mod lsp;
 mod markdown_preview;
+mod perf;
 mod search;
 mod settings;
 mod storage;
 mod terminal;
+#[cfg(test)]
+mod test_support;
 mod theme;
 mod ui;
 mod workspace;
@@ -74,6 +78,7 @@ fn chrono_like_timestamp() -> String {
 
 fn main() {
     install_panic_logger();
+    perf::reset_stats();
 
     // Windows gets its taskbar icon from the .ico resource that build.rs links
     // into the executable. Linux has no such thing: panels and compositors look

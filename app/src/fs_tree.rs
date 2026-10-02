@@ -39,44 +39,62 @@ struct Entry {
 }
 
 pub fn load_dir(dir: &Path) -> Vec<TreeNode> {
-    let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return out;
-    };
+    try_load_dir(dir, || false).unwrap_or_default()
+}
+
+/// Read a single level. Cancellation is checked between entries so obsolete
+/// scans of very wide directories release their memory promptly.
+pub fn try_load_dir(dir: &Path, cancelled: impl Fn() -> bool) -> std::io::Result<Vec<TreeNode>> {
+    let _span = crate::perf::span("workspace.read_directory.background");
+    if cancelled() {
+        return Err(std::io::ErrorKind::Interrupted.into());
+    }
+    let rd = std::fs::read_dir(dir)?;
     let mut entries: Vec<Entry> = Vec::new();
-    for e in rd.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if SKIP.iter().any(|s| *s == name) {
+    for entry in rd {
+        if cancelled() {
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if SKIP.iter().any(|skip| *skip == name) {
             continue;
         }
-
-        let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        crate::perf::note_stat();
+        let is_dir = entry.file_type()?.is_dir();
         entries.push(Entry {
             sort_key: name.to_lowercase(),
-            path: e.path(),
+            path: entry.path(),
             is_dir,
             name,
         });
     }
-
+    if cancelled() {
+        return Err(std::io::ErrorKind::Interrupted.into());
+    }
     entries.sort_by(|a, b| {
-        if a.is_dir != b.is_dir {
-            return b.is_dir.cmp(&a.is_dir);
-        }
-        a.sort_key.cmp(&b.sort_key)
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.sort_key.cmp(&b.sort_key))
     });
-
-    for e in entries {
-        out.push(TreeNode {
-            name: e.name,
-            path: e.path,
-            is_dir: e.is_dir,
+    Ok(entries
+        .into_iter()
+        .map(|entry| TreeNode {
+            name: entry.name,
+            path: entry.path,
+            is_dir: entry.is_dir,
             expanded: false,
             children_loaded: false,
             children: Vec::new(),
-        });
-    }
-    out
+        })
+        .collect())
+}
+
+pub fn entries_match(previous: &[TreeNode], current: &[TreeNode]) -> bool {
+    previous.len() == current.len()
+        && previous.iter().zip(current).all(|(old, new)| {
+            old.path == new.path && old.name == new.name && old.is_dir == new.is_dir
+        })
 }
 
 #[allow(dead_code)]
@@ -368,6 +386,77 @@ pub fn path_after_move(path: &Path, source: &Path, destination: &Path) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_reads_are_shallow_sorted_and_skip_dependency_trees() {
+        let fixture = crate::test_support::TempDir::new("lazy-tree");
+        fixture.file("node_modules/dependency/deep.js", "ignored");
+        fixture.file("target/debug/deep.o", "ignored");
+        fixture.file("src/nested/main.rs", "fn main() {}");
+        fixture.file("z.txt", "z");
+        fixture.file("A.txt", "a");
+        let nodes = try_load_dir(fixture.path(), || false).unwrap();
+        assert_eq!(
+            nodes
+                .iter()
+                .map(|node| node.name.as_str())
+                .collect::<Vec<_>>(),
+            ["src", "A.txt", "z.txt"]
+        );
+        assert!(nodes
+            .iter()
+            .all(|node| !node.children_loaded && node.children.is_empty()));
+    }
+
+    #[test]
+    fn invalid_directories_are_errors_not_empty_successful_workspaces() {
+        let fixture = crate::test_support::TempDir::new("invalid-tree");
+        let file = fixture.file("not-a-directory", "text");
+        assert!(try_load_dir(&file, || false).is_err());
+        assert!(try_load_dir(&fixture.path().join("missing"), || false).is_err());
+    }
+
+    #[test]
+    fn cancelled_wide_scans_stop_between_entries() {
+        let fixture = crate::test_support::TempDir::new("wide-tree");
+        for index in 0..2000 {
+            fixture.file(&format!("{index}.txt"), "text");
+        }
+        let probes = std::cell::Cell::new(0);
+        let error = try_load_dir(fixture.path(), || {
+            let count = probes.get() + 1;
+            probes.set(count);
+            count > 10
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(probes.get(), 11);
+        assert_eq!(
+            try_load_dir(&fixture.path().join("missing"), || true)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::Interrupted
+        );
+    }
+
+    #[test]
+    fn unchanged_snapshots_reuse_expanded_tree_state() {
+        let mut previous = vec![TreeNode {
+            name: "src".into(),
+            path: PathBuf::from("src"),
+            is_dir: true,
+            expanded: true,
+            children_loaded: true,
+            children: Vec::new(),
+        }];
+        previous[0].children_loaded = true;
+        let mut next = previous.clone();
+        next[0].expanded = false;
+        next[0].children.clear();
+        assert!(entries_match(&previous, &next));
+        next[0].is_dir = false;
+        assert!(!entries_match(&previous, &next));
+    }
 
     #[test]
     fn shallow_merge_preserves_loaded_descendants() {

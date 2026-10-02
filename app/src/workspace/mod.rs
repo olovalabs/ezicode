@@ -1,6 +1,9 @@
 mod render;
 mod search;
+mod session;
 mod terminal_tabs;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -9,19 +12,20 @@ use std::time::Duration;
 
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, ScrollHandle, ScrollStrategy, SharedString,
-    UniformListScrollHandle, Window,
+    Task, UniformListScrollHandle, Window,
 };
 use gpui_component::input::{InputEvent, InputState, RopeExt as _, TabSize};
-use notify::Watcher as _;
 
+use crate::cancellation::Cancellation;
 use crate::fs_tree::{
-    collapse_all, display_name, flatten_visible, is_same_or_descendant, load_dir, merge_loaded_dir,
-    path_after_move, valid_entry_name, TreeNode, VisibleTreeRow,
+    collapse_all, display_name, entries_match, flatten_visible, is_same_or_descendant,
+    merge_loaded_dir, path_after_move, try_load_dir, valid_entry_name, TreeNode, VisibleTreeRow,
 };
 use crate::git::{self, ChangeKind, GitChange, RepoStatus};
 use crate::lang;
 use crate::lsp::{LspEvent, LspManager};
 use crate::theme;
+use session::{DirectoryWatcher, PreparedWorkspace};
 
 #[derive(Clone)]
 pub struct OpenTab {
@@ -187,6 +191,12 @@ const TERMINAL_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub(crate) const TERMINAL_RIGHT_DEFAULT_WIDTH: f32 = 420.0;
 pub(crate) const TERMINAL_RIGHT_MIN_WIDTH: f32 = 120.0;
 
+struct FileLoad {
+    token: Cancellation,
+    pinned: bool,
+    open_generation: Option<u64>,
+}
+
 pub(crate) struct Workspace {
     /// None until the user opens a folder (VS Code-style start state).
     pub(crate) root: Option<PathBuf>,
@@ -288,16 +298,25 @@ pub(crate) struct Workspace {
     pub(crate) terminal_drag_target: Option<TerminalDragTarget>,
     /// In-flight inline rename of a terminal tab, if any.
     pub(crate) terminal_renaming: Option<TerminalRenaming>,
-    /// File system change notification sender: the changed path, so reloads
-    /// can be scoped to the affected directory instead of rescanning the
-    /// whole tree on every event.
-    pub(crate) fs_event_tx: async_channel::Sender<PathBuf>,
+    pub(crate) storage: crate::storage::StateStore,
+    /// The active session and the pending transition have independent lifetimes.
+    pub(crate) session: Cancellation,
+    transition: Cancellation,
+    transition_task: Option<Task<()>>,
+    pub(crate) loading_root: Option<PathBuf>,
+    restore_startup_workspace: bool,
+    project_tasks: Vec<(Task<()>, Cancellation)>,
+    directory_loads: HashMap<PathBuf, bool>,
+    file_loads: HashMap<PathBuf, FileLoad>,
+    pending_user_open: Option<PathBuf>,
+    file_open_generation: u64,
+    pending_reveal: Option<PathBuf>,
+    fs_watcher: Option<DirectoryWatcher>,
+    fs_task: Option<Task<()>>,
     /// Cached `display_name(root)` so the title bar and explorer header don't
     pub(crate) root_display: String,
 
     pub(crate) root_display_shared: SharedString,
-
-    pub(crate) _watcher: Option<notify::RecommendedWatcher>,
 
     pub(crate) tabs: Vec<OpenTab>,
 
@@ -345,12 +364,17 @@ pub(crate) struct Workspace {
     pub(crate) settings: crate::settings::Settings,
 
     pub(crate) auto_save_generation: usize,
+    auto_save_task: Option<Task<()>>,
 
     pub(crate) picker: Option<crate::ui::picker::PickerState>,
 
     pub(crate) picker_confirm_pending: bool,
 
-    pub(crate) workspace_files_cache: Option<(PathBuf, Vec<crate::ui::picker::PickerItem>)>,
+    pub(crate) workspace_files_cache: Option<(PathBuf, Arc<Vec<crate::ui::picker::PickerItem>>)>,
+    file_index_task: Option<Task<()>>,
+    file_index_cancel: Cancellation,
+    picker_filter_task: Option<Task<()>>,
+    picker_filter_cancel: Cancellation,
 
     pub(crate) cached_breadcrumbs: Option<(
         PathBuf,
@@ -373,13 +397,14 @@ pub(crate) struct Workspace {
     pub(crate) search_error: Option<String>,
     pub(crate) search_elapsed_ms: u64,
     pub(crate) search_generation: u64,
+    pub(crate) search_cancel: Cancellation,
+    pub(crate) search_task: Option<Task<()>>,
     pub(crate) search_collapsed: HashSet<PathBuf>,
     pub(crate) search_replace_open: bool,
     /// Jump applied once an async `open_file` finishes (search result click
     /// on a file that is not open yet).
     pub(crate) pending_search_jump: Option<(PathBuf, usize, usize)>,
     pub(crate) pending_restore_tabs: Vec<crate::storage::OpenTabState>,
-    pub(crate) pending_restore_active_tab: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -412,45 +437,65 @@ pub(crate) struct LoadedBuffer {
 /// computation, no GPUI handles — safe (and intended) to run on the
 /// background executor. The `Err` strings are user-facing status messages,
 /// worded exactly like the old synchronous open path produced them.
-fn load_buffer_file(path: &std::path::Path) -> Result<LoadedBuffer, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("open failed: {e}"))?;
-    if bytes.len() > 8_000_000 {
+fn load_buffer_file(path: &Path, cancellation: &Cancellation) -> Result<LoadedBuffer, String> {
+    use std::io::Read as _;
+    let _span = crate::perf::span("workspace.read_buffer.background");
+    const LIMIT: usize = 8_000_000;
+    let metadata = std::fs::metadata(path).map_err(|error| format!("open failed: {error}"))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a regular file", display_name(path)));
+    }
+    if metadata.len() > LIMIT as u64 {
         return Err(format!("{} is too large (>8MB)", display_name(path)));
     }
-    if bytes.iter().take(8000).any(|&b| b == 0) {
+    let mut file = std::fs::File::open(path).map_err(|error| format!("open failed: {error}"))?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut chunk = [0; 64 * 1024];
+    loop {
+        if cancellation.is_cancelled() {
+            return Err("File opening cancelled".into());
+        }
+        let remaining = (LIMIT + 1 - bytes.len()).min(chunk.len());
+        let count = file
+            .read(&mut chunk[..remaining])
+            .map_err(|error| format!("open failed: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        if bytes.len() > LIMIT {
+            return Err(format!("{} is too large (>8MB)", display_name(path)));
+        }
+    }
+    if bytes.iter().take(8000).any(|&byte| byte == 0) {
         return Err(format!("{} looks binary", display_name(path)));
     }
-    let newline_count = bytes.iter().filter(|&&b| b == b'\n').count();
+    let newline_count = bytes.iter().filter(|&&byte| byte == b'\n').count();
     let highlight = bytes.len() <= 400_000 && newline_count <= 8_000;
     let lang_id = if highlight {
         lang::language_for(path).unwrap_or("text")
     } else {
         "text"
     };
-    let text = String::from_utf8_lossy(&bytes).into_owned();
     Ok(LoadedBuffer {
-        text,
+        text: String::from_utf8_lossy(&bytes).into_owned(),
         lang_id,
         highlight,
     })
 }
 
-fn expand_saved_folders(nodes: &mut [TreeNode], expanded: &[PathBuf]) {
-    let set: HashSet<&PathBuf> = expanded.iter().collect();
-    for n in nodes {
-        if n.is_dir && set.contains(&n.path) {
-            n.expanded = true;
-            if !n.children_loaded {
-                n.children = load_dir(&n.path);
-                n.children_loaded = true;
-            }
-            expand_saved_folders(&mut n.children, expanded);
-        }
-    }
-}
-
 impl Workspace {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (storage, storage_ready) = crate::storage::StateStore::new();
+        Self::new_with_storage(window, cx, storage, storage_ready)
+    }
+
+    fn new_with_storage(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        storage: crate::storage::StateStore,
+        storage_ready: async_channel::Receiver<crate::storage::GlobalState>,
+    ) -> Self {
         // Zed focuses the workspace on activation so keybindings always have
         // a focused element to dispatch through, even on the welcome screen.
         let focus_handle = cx.focus_handle();
@@ -465,8 +510,18 @@ impl Workspace {
         cx.spawn({
             let rx = rx.clone();
             async move |this, cx| {
-                while let Ok(event) = rx.recv().await {
-                    match event {
+                while let Ok(message) = rx.recv().await {
+                    let current = this
+                        .update(cx, |workspace, _| {
+                            message.generation.is_none_or(|generation| {
+                                generation == workspace.lsp.lock().unwrap().generation()
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !current {
+                        continue;
+                    }
+                    match message.event {
                         LspEvent::Diagnostics { path, diagnostics } => {
                             let _ = this.update(cx, |workspace, cx| {
                                 workspace.apply_diagnostics(&path, diagnostics, cx);
@@ -527,81 +582,17 @@ impl Workspace {
         })
         .detach();
 
-        let (fs_event_tx, fs_event_rx) = async_channel::unbounded::<PathBuf>();
-        // Resolved "directories to reload" channel, produced off the UI
-        // thread and consumed on it.
-        let (fs_reload_tx, fs_reload_rx) = async_channel::unbounded::<Vec<PathBuf>>();
-
-        // Debounce + coalesce raw filesystem events on a dedicated OS thread
-        // (never the UI thread — the old handler slept a blocking 150 ms
-        // twice inside the foregound executor). Only the *changed path* is
-        // forwarded; the UI-side reload is then scoped to the affected
-        // directory instead of rescanning the whole tree.
-        let fs_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-        std::thread::spawn(move || {
-            let rx = fs_event_rx;
-            loop {
-                if fs_stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
-                }
-                let Ok(first) = rx.recv_blocking() else { break };
-                let mut paths = vec![first];
-                while let Ok(more) = rx.try_recv() {
-                    paths.push(more);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(120));
-                while let Ok(more) = rx.try_recv() {
-                    paths.push(more);
-                }
-
-                // The parent always needs a refresh because a create/delete
-                // changes its entry set. A directory's own level is included
-
-                let mut dirs: HashSet<PathBuf> = HashSet::new();
-                for p in paths {
-                    if let Some(parent) = p.parent() {
-                        dirs.insert(parent.to_path_buf());
-                    }
-                    if p.is_dir() {
-                        dirs.insert(p);
-                    }
-                }
-                if !dirs.is_empty() {
-                    let _ = fs_reload_tx.try_send(dirs.into_iter().collect());
-                }
-            }
-        });
-
-        cx.spawn({
-            let rx = fs_reload_rx.clone();
-            async move |this, cx| {
-                while let Ok(dirs) = rx.recv().await {
-                    let scanned = cx
-                        .background_spawn(async move {
-                            dirs.into_iter()
-                                .map(|dir| {
-                                    let entries = load_dir(&dir);
-                                    (dir, entries)
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .await;
-                    let _ = this.update(cx, |workspace, cx| {
-                        let mut changed = false;
-                        for (dir, entries) in scanned {
-                            changed |= workspace.apply_loaded_dir_inner(&dir, entries);
-                        }
-                        if changed {
-                            workspace.rebuild_explorer_rows();
-                            cx.notify();
-                        }
-                    });
-                }
+        // GPUI waits for quit observers. Do not terminate before outstanding
+        // buffer saves and session snapshots have reached disk.
+        cx.on_app_quit(|workspace, cx| {
+            workspace.save_all_dirty_quiet(cx);
+            workspace.persist_workspace_state(cx);
+            let flushed = workspace.storage.flush();
+            async move {
+                let _ = flushed.recv().await;
             }
         })
         .detach();
-
         let settings = crate::settings::Settings::load();
         let themes = theme::all();
         let theme_ix = themes
@@ -610,7 +601,7 @@ impl Workspace {
             .unwrap_or_else(theme::default_index);
         let font_size = settings.editor_font_size;
 
-        let mut workspace = Self {
+        let workspace = Self {
             root: None,
             tree: Vec::new(),
             explorer_rows: Arc::from(Vec::<VisibleTreeRow>::new()),
@@ -647,6 +638,7 @@ impl Workspace {
             font_size,
             settings,
             auto_save_generation: 0,
+            auto_save_task: None,
             lsp,
             diagnostics_by_path: HashMap::new(),
             terminal_tabs: Vec::new(),
@@ -664,8 +656,20 @@ impl Workspace {
             terminal_right_pinned_count: 0,
             terminal_drag_target: None,
             terminal_renaming: None,
-            fs_event_tx,
-            _watcher: None,
+            storage,
+            session: Cancellation::default(),
+            transition: Cancellation::default(),
+            transition_task: None,
+            loading_root: None,
+            restore_startup_workspace: true,
+            project_tasks: Vec::new(),
+            directory_loads: HashMap::new(),
+            file_loads: HashMap::new(),
+            pending_user_open: None,
+            file_open_generation: 0,
+            pending_reveal: None,
+            fs_watcher: None,
+            fs_task: None,
             tabs: Vec::new(),
             markdown_preview: None,
             active_tab: 0,
@@ -684,6 +688,10 @@ impl Workspace {
             picker: None,
             picker_confirm_pending: false,
             workspace_files_cache: None,
+            file_index_task: None,
+            file_index_cancel: Cancellation::default(),
+            picker_filter_task: None,
+            picker_filter_cancel: Cancellation::default(),
             cached_breadcrumbs: None,
             search_query_input: None,
             search_replace_input: None,
@@ -698,19 +706,30 @@ impl Workspace {
             search_error: None,
             search_elapsed_ms: 0,
             search_generation: 0,
+            search_cancel: Cancellation::default(),
+            search_task: None,
             search_collapsed: HashSet::new(),
             search_replace_open: false,
             pending_search_jump: None,
             pending_restore_tabs: Vec::new(),
-            pending_restore_active_tab: None,
         };
 
-        let global_state = crate::storage::GlobalState::load();
-        if let Some(root) = global_state.last_workspace_root {
-            if root.is_dir() {
-                workspace.load_root(root, cx);
+        cx.spawn(async move |this, cx| {
+            if let Ok(global) = storage_ready.recv().await {
+                let _ = this.update(cx, |workspace, cx| {
+                    if workspace.restore_startup_workspace
+                        && workspace.root.is_none()
+                        && workspace.loading_root.is_none()
+                    {
+                        if let Some(root) = global.last_workspace_root {
+                            workspace.load_root(root, cx);
+                        }
+                    }
+                    cx.notify();
+                });
             }
-        }
+        })
+        .detach();
 
         workspace
     }
@@ -872,6 +891,7 @@ impl Workspace {
         preview.generation = preview.generation.wrapping_add(1);
         let generation = preview.generation;
 
+        let token = self.session.clone();
         cx.spawn(async move |workspace, cx| {
             cx.background_executor()
                 .timer(crate::markdown_preview::REPARSE_DEBOUNCE)
@@ -882,6 +902,9 @@ impl Workspace {
                 .spawn(async move { crate::markdown_preview::parse(&parse_source) })
                 .await;
             let _ = workspace.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 let Some(preview) = workspace.markdown_preview.as_mut() else {
                     return;
                 };
@@ -962,41 +985,192 @@ impl Workspace {
     }
 
     pub(crate) fn load_root(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        let switching_project = self.root.as_ref() != Some(&path);
-
-        if switching_project && self.root.is_some() {
-            self.persist_workspace_state(cx);
+        self.restore_startup_workspace = false;
+        let _span = crate::perf::span("workspace.switch.request.ui");
+        // Opening the active root is a no-op, but still supersedes a pending
+        // request for another root. In particular, A -> B -> A is not B.
+        self.transition.cancel();
+        self.transition_task = None;
+        self.loading_root = None;
+        if self.root.as_ref() == Some(&path) {
+            self.status = format!("Opened folder {}", self.root_display);
+            cx.notify();
+            return;
         }
+        self.transition = Cancellation::default();
+        let transition = self.transition.clone();
+        let prepare_cancel = transition.clone();
+        let store = self.storage.clone();
+        self.loading_root = Some(path.clone());
+        self.status = format!("Loading folder {}…", display_name(&path));
+        cx.notify();
+        self.transition_task = Some(cx.spawn(async move |this, cx| {
+            let prepared = cx
+                .background_spawn(async move {
+                    session::prepare_workspace(path, &store, &prepare_cancel)
+                })
+                .await;
+            if transition.is_cancelled() {
+                return;
+            }
+            let mut prepared = match prepared {
+                Ok(prepared) => Some(prepared),
+                Err(error) => {
+                    let _ = this.update(cx, |workspace, cx| {
+                        if !transition.is_cancelled() {
+                            workspace.loading_root = None;
+                            workspace.status = error;
+                            cx.notify();
+                        }
+                    });
+                    return;
+                }
+            };
+            // Keep the outgoing editors alive until their named dirty buffers
+            // are safely saved. Failed writes leave the old workspace intact.
+            // If typing continues during a write, flush its newer snapshot
+            // before committing, rather than silently discarding those edits.
+            loop {
+                let saves = this
+                    .update(cx, |workspace, cx| {
+                        if transition.is_cancelled() {
+                            return None;
+                        }
+                        if workspace.root.as_ref() == prepared.as_ref().map(|p| &p.root) {
+                            workspace.loading_root = None;
+                            workspace.status = format!("Opened folder {}", workspace.root_display);
+                            cx.notify();
+                            return None;
+                        }
+                        let mut saves = Vec::new();
+                        for tab in &workspace.tabs {
+                            if !tab.dirty {
+                                continue;
+                            }
+                            if let (Some(path), Some(editor)) = (&tab.path, &tab.editor) {
+                                let text: Arc<str> = editor.read(cx).value().to_string().into();
+                                let result =
+                                    workspace.storage.write_file(path.clone(), text.clone());
+                                saves.push((editor.downgrade(), text, result));
+                            }
+                        }
+                        Some(saves)
+                    })
+                    .ok()
+                    .flatten();
+                let Some(saves) = saves else {
+                    return;
+                };
+                let mut saved = Vec::new();
+                let mut error = None;
+                for (editor, text, result) in saves {
+                    match result.recv().await {
+                        Ok(Ok(())) => saved.push((editor, text)),
+                        Ok(Err(message)) => {
+                            error = Some(message);
+                            break;
+                        }
+                        Err(_) => {
+                            error = Some("Storage worker stopped".into());
+                            break;
+                        }
+                    }
+                }
+                if transition.is_cancelled() {
+                    return;
+                }
+                let done = this
+                    .update(cx, |workspace, cx| {
+                        if transition.is_cancelled() {
+                            return true;
+                        }
+                        if let Some(error) = error {
+                            workspace.loading_root = None;
+                            workspace.status =
+                                format!("Folder switch cancelled — could not save {error}");
+                            cx.notify();
+                            return true;
+                        }
+                        for (editor, text) in saved {
+                            if let Some(editor) = editor.upgrade() {
+                                if editor.read(cx).value().as_str() == text.as_ref() {
+                                    if let Some(tab) = workspace
+                                        .tabs
+                                        .iter_mut()
+                                        .find(|tab| tab.editor.as_ref() == Some(&editor))
+                                    {
+                                        tab.dirty = false;
+                                    }
+                                }
+                            }
+                        }
+                        if workspace
+                            .tabs
+                            .iter()
+                            .any(|tab| tab.dirty && tab.path.is_some() && tab.editor.is_some())
+                        {
+                            return false;
+                        }
+                        workspace.commit_workspace(prepared.take().unwrap(), cx);
+                        true
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+            }
+        }));
+    }
 
-        let mut global_state = crate::storage::GlobalState::load();
-        global_state.add_recent_folder(path.clone());
-
-        self.workspace_files_cache = None;
-        self.root = Some(path.clone());
-        self.root_display = display_name(&path);
+    fn commit_workspace(&mut self, prepared: PreparedWorkspace, cx: &mut Context<Self>) {
+        let _span = crate::perf::span("workspace.switch.commit.ui");
+        self.persist_workspace_state(cx);
+        self.session.cancel();
+        self.project_tasks.clear();
+        self.directory_loads.clear();
+        self.file_loads.clear();
+        self.pending_user_open = None;
+        self.file_open_generation = self.file_open_generation.wrapping_add(1);
+        self.fs_task = None;
+        self.fs_watcher = None;
+        self.file_index_cancel.cancel();
+        self.file_index_task = None;
+        self.picker_filter_cancel.cancel();
+        self.picker_filter_task = None;
+        self.close_all_project_tabs(cx);
+        self.session = Cancellation::default();
+        self.auto_save_generation = self.auto_save_generation.wrapping_add(1);
+        self.auto_save_task = None;
+        self.explorer_typeahead_generation = self.explorer_typeahead_generation.wrapping_add(1);
+        self.explorer_drag_generation = self.explorer_drag_generation.wrapping_add(1);
+        self.root_display = display_name(&prepared.root);
         self.root_display_shared = SharedString::from(self.root_display.clone());
-
-        self.lsp.lock().unwrap().set_root(Some(path.clone()));
-
-        // Opening a different folder must drop the previous project's editors.
-        if switching_project {
-            self.close_all_project_tabs(cx);
-        }
-
-        let saved_state = crate::storage::WorkspaceState::load(&path);
-        let saved_expanded = saved_state
-            .as_ref()
-            .map(|s| s.expanded_folders.clone())
-            .unwrap_or_default();
-        let saved_selection = saved_state
-            .as_ref()
-            .and_then(|s| s.explorer_selected.clone())
-            .filter(|path| path.exists());
-
-        if let Some(saved) = &saved_state {
-            let max_w = 800.0f32;
-            let min_w = 170.0f32;
-            self.sidebar_width = saved.layout.sidebar_width.clamp(min_w, max_w);
+        self.root = Some(prepared.root.clone());
+        self.lsp
+            .lock()
+            .unwrap()
+            .set_root(Some(prepared.root.clone()));
+        self.storage.add_recent_folder(prepared.root.clone());
+        self.tree = prepared.tree;
+        self.explorer_rows = prepared.rows;
+        self.explorer_scroll_handle = UniformListScrollHandle::new();
+        self.explorer_section_expanded = true;
+        self.explorer_sticky_rows = 0;
+        self.selected_path = None;
+        self.explorer_selection.clear();
+        self.explorer_selection_anchor = None;
+        self.explorer_typeahead.clear();
+        self.explorer_drag_target = None;
+        self.pending_reveal = None;
+        self.inline_creating = None;
+        self.inline_renaming = None;
+        self.explorer_clipboard = None;
+        self.markdown_preview = None;
+        self.pending_restore_tabs.clear();
+        self.picker_confirm_pending = false;
+        self.panel_resize = None;
+        if let Some(saved) = prepared.saved {
+            self.sidebar_width = saved.layout.sidebar_width.clamp(170.0, 800.0);
             self.terminal_height = saved.layout.terminal_height.clamp(80.0, 800.0);
             self.show_sidebar = saved.layout.show_sidebar;
             self.show_terminal = saved.layout.show_terminal;
@@ -1005,10 +1179,6 @@ impl Workspace {
                 .layout
                 .terminal_right_width
                 .clamp(TERMINAL_RIGHT_MIN_WIDTH, 800.0);
-            // PTY sessions die with the process, so after a restart the right
-            // dock always starts closed — one click on the status-bar icon
-            // spawns a fresh shell. Mid-session folder switches keep live
-            // terminals, and there the saved visibility is honored.
             self.show_terminal_right =
                 saved.layout.show_terminal_right && !self.terminal_right_tabs.is_empty();
             self.explorer_sticky_scroll = saved.layout.explorer_sticky_scroll;
@@ -1018,83 +1188,101 @@ impl Workspace {
                 "Extensions" => Activity::Extensions,
                 _ => Activity::Explorer,
             };
-            self.pending_restore_tabs = saved.tabs.clone();
-            self.pending_restore_active_tab = Some(saved.active_tab);
-        }
-
-        self.tree.clear();
-        self.explorer_section_expanded = true;
-        self.rebuild_explorer_rows();
-        self.selected_path = None;
-        self.explorer_selection.clear();
-        self.explorer_selection_anchor = None;
-        self.explorer_typeahead.clear();
-        self.inline_creating = None;
-        self.inline_renaming = None;
-        self.explorer_clipboard = None;
-        self.clear_search_results();
-        self.status = format!("Loading folder {}…", self.root_display);
-        let scan_root = path.clone();
-        cx.spawn(async move |this, cx| {
-            let entries = cx
-                .background_spawn({
-                    let scan_root = scan_root.clone();
-                    async move { load_dir(&scan_root) }
-                })
-                .await;
-            let _ = this.update(cx, |workspace, cx| {
-                if workspace.root.as_ref() == Some(&scan_root) {
-                    let previous = std::mem::take(&mut workspace.tree);
-                    let mut merged = merge_loaded_dir(&scan_root, previous, entries);
-                    if !saved_expanded.is_empty() {
-                        expand_saved_folders(&mut merged, &saved_expanded);
-                    }
-                    workspace.tree = merged;
-                    workspace.rebuild_explorer_rows();
-                    // Restore the previously focused row and scroll it into
-                    // view, the way VS Code reopens an explorer.
-                    if let Some(selected) = saved_selection.clone() {
-                        workspace.reveal_tree_path(&selected);
-                        workspace.set_explorer_selection(selected);
-                    }
-                    workspace.status = format!("Opened folder {}", workspace.root_display);
-                    cx.notify();
+            self.active_tab = self.tabs.len() + saved.active_tab;
+            // Saved tabs are lightweight placeholders. Only the active tab
+            // acquires a buffer/highlighter/LSP when it is actually visited.
+            for tab in &saved.tabs {
+                self.tabs.push(OpenTab {
+                    path: Some(tab.path.clone()),
+                    editor: None,
+                    dirty: false,
+                    untitled: false,
+                    preview: tab.preview,
+                    is_settings: false,
+                    diff: None,
+                    language_override: tab.language_override.clone(),
+                });
+            }
+            self.pending_restore_tabs = saved.tabs;
+            if let Some(selected) = saved.explorer_selected {
+                self.set_explorer_selection(selected.clone());
+                if let Some(index) = self
+                    .explorer_rows
+                    .iter()
+                    .position(|row| row.path == selected)
+                {
+                    self.explorer_reveal_index(index);
                 }
-            });
-        })
-        .detach();
-
-        let tx = self.fs_event_tx.clone();
-        let watcher =
-            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                if let Ok(event) = res {
-                    for p in event.paths {
-                        let path_str = p.to_string_lossy();
-                        let relevant = !path_str.contains("target")
-                            && !path_str.contains(".git")
-                            && !path_str.contains(".DS_Store");
-                        if relevant {
-                            let _ = tx.try_send(p);
-                        }
-                    }
-                }
-            });
-
-        if let Ok(mut w) = watcher {
-            let _ = w.watch(&path, notify::RecursiveMode::Recursive);
-            self._watcher = Some(w);
+            }
         }
-
-        self.start_git_watcher(&path, cx);
-
+        self.active_tab = self.active_tab.min(self.tabs.len().saturating_sub(1));
+        self.loading_root = None;
+        self.status = format!("Opened folder {}", self.root_display);
+        self.start_explorer_watcher(cx);
+        self.start_git_watcher(&prepared.root, cx);
+        crate::perf::mark("workspace.snapshot.published");
         cx.notify();
+    }
+
+    fn track_project_task(&mut self, task: Task<()>, cx: &mut Context<Self>) {
+        self.project_tasks.retain(|(_, done)| !done.is_cancelled());
+        let done = Cancellation::default();
+        let completed = done.clone();
+        let task = cx.spawn(async move |_, _| {
+            task.await;
+            completed.cancel();
+        });
+        self.project_tasks.push((task, done));
+    }
+
+    fn start_explorer_watcher(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let token = self.session.clone();
+        let (watcher, events) = DirectoryWatcher::new(root.clone(), token.clone());
+        for directory in session::loaded_directories(&root, &self.tree) {
+            watcher.watch(directory);
+        }
+        self.fs_watcher = Some(watcher);
+        self.fs_task = Some(cx.spawn(async move |this, cx| {
+            while events.recv().await.is_ok() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(120))
+                    .await;
+                let done = this
+                    .update(cx, |workspace, cx| {
+                        if token.is_cancelled() {
+                            return true;
+                        }
+                        if let Some(watcher) = &workspace.fs_watcher {
+                            let (directories, error) = watcher.drain();
+                            if !directories.is_empty() {
+                                workspace.invalidate_file_index(cx);
+                                for directory in directories {
+                                    if workspace.directory_is_loaded(&directory) {
+                                        workspace.load_directory_async(directory, cx);
+                                    }
+                                }
+                            }
+                            if let Some(error) = error {
+                                workspace.status = error;
+                                cx.notify();
+                            }
+                        }
+                        false
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+            }
+        }));
     }
 
     /// Close every open editor when leaving a project so the next folder
     /// starts clean. Unsaved buffers are flushed first.
     fn close_all_project_tabs(&mut self, cx: &mut Context<Self>) {
-        self.save_all_dirty_quiet(cx);
-
         for tab in &self.tabs {
             if let Some(p) = &tab.path {
                 if let Some(lang_id) = tab.language() {
@@ -1103,7 +1291,9 @@ impl Workspace {
             }
         }
 
-        self.tabs.clear();
+        // Untitled scratch buffers have no save destination; keep them rather
+        // than lose unsaved text during a folder switch.
+        self.tabs.retain(|tab| tab.untitled);
         self.active_tab = 0;
         self.diagnostics_by_path.clear();
         self.cached_breadcrumbs = None;
@@ -1130,6 +1320,7 @@ impl Workspace {
         self.git = None;
         self.git_path_kinds = Arc::new(HashMap::new());
         self.git_confirm = None;
+        self.git_op_running = None;
     }
 
     pub(crate) fn start_git_watcher(&mut self, root: &Path, cx: &mut Context<Self>) {
@@ -1137,34 +1328,42 @@ impl Workspace {
         // same folder, or a folder that is not a repository) before starting
         // a new one, so stale snapshots can never race the fresh ones.
         self.stop_git_watcher();
-        let Some(repo_root) = git::find_repo_root(root) else {
-            cx.notify();
-            return;
-        };
+        let root = root.to_path_buf();
+        let token = self.session.clone();
         let generation = self.git_watch_generation;
         let (poke_tx, poke_rx) = std::sync::mpsc::channel::<()>();
-        let (status_tx, status_rx) = async_channel::unbounded::<RepoStatus>();
-
-        if let Some(status) = git::status(&repo_root) {
-            self.apply_git_status(status, cx);
-        }
-
+        let (status_tx, status_rx) =
+            async_channel::bounded::<(RepoStatus, Arc<HashMap<PathBuf, ChangeKind>>)>(1);
         std::thread::spawn(move || {
+            if token.is_cancelled() {
+                return;
+            }
+            let Some(repo_root) = git::find_repo_root(&root) else {
+                return;
+            };
             let mut last: Option<RepoStatus> = None;
             loop {
+                if token.is_cancelled() {
+                    break;
+                }
                 if let Some(status) = git::status(&repo_root) {
+                    if token.is_cancelled() {
+                        break;
+                    }
                     if last.as_ref() != Some(&status) {
-                        if status_tx.try_send(status.clone()).is_err() {
+                        let kinds = Arc::new(git::path_kinds(&status));
+                        if status_tx.send_blocking((status.clone(), kinds)).is_err() {
                             break;
                         }
                         last = Some(status);
                     }
                 }
-
                 match poke_rx.recv_timeout(Duration::from_millis(1500)) {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
+                // Multiple saves/stage operations need only one fresh status.
+                while poke_rx.try_recv().is_ok() {}
             }
         });
 
@@ -1173,7 +1372,7 @@ impl Workspace {
         cx.spawn({
             let rx = status_rx.clone();
             async move |this, cx| {
-                while let Ok(status) = rx.recv().await {
+                while let Ok((status, kinds)) = rx.recv().await {
                     let done = this
                         .update(cx, |workspace, cx| {
                             // A snapshot from a superseded watcher must not
@@ -1181,7 +1380,7 @@ impl Workspace {
                             if workspace.git_watch_generation != generation {
                                 return true;
                             }
-                            workspace.apply_git_status(status, cx);
+                            workspace.apply_git_status(status, kinds, cx);
                             false
                         })
                         .unwrap_or(true);
@@ -1196,36 +1395,13 @@ impl Workspace {
 
     /// Install a fresh status snapshot and refresh everything derived from
     /// it: the path→kind lookup used by the explorer, and any open diff tabs.
-    fn apply_git_status(&mut self, status: RepoStatus, cx: &mut Context<Self>) {
-        let mut kinds: HashMap<PathBuf, ChangeKind> = HashMap::new();
-        for change in &status.changes {
-            let kind = if change.is_conflicted() {
-                ChangeKind::Conflicted
-            } else if change.is_untracked() {
-                ChangeKind::Untracked
-            } else if let Some(worktree) = change.worktree {
-                worktree
-            } else if let Some(index) = change.index {
-                index
-            } else {
-                continue;
-            };
-            kinds.insert(change.path.clone(), kind);
-            // Tint ancestor directories like VS Code/Zed do; conflicts win
-            // over the generic Modified marker so red propagates upward.
-            let mut dir = change.path.parent();
-            while let Some(d) = dir {
-                if !d.starts_with(&status.root) || d == status.root {
-                    break;
-                }
-                let entry = kinds.entry(d.to_path_buf()).or_insert(ChangeKind::Modified);
-                if kind == ChangeKind::Conflicted {
-                    *entry = ChangeKind::Conflicted;
-                }
-                dir = d.parent();
-            }
-        }
-        self.git_path_kinds = Arc::new(kinds);
+    fn apply_git_status(
+        &mut self,
+        status: RepoStatus,
+        kinds: Arc<HashMap<PathBuf, ChangeKind>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.git_path_kinds = kinds;
         self.git = Some(status);
         self.refresh_diff_tabs(cx);
         cx.notify();
@@ -1238,11 +1414,15 @@ impl Workspace {
     }
 
     pub(crate) fn open_folder_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_startup_workspace = false;
         self.status = "Choose folder…".into();
         cx.notify();
         // Native dialogs pump Windows messages; run them outside the App borrow.
         cx.spawn(async move |this, cx| {
-            let path = rfd::FileDialog::new().pick_folder();
+            let path = rfd::AsyncFileDialog::new()
+                .pick_folder()
+                .await
+                .map(|handle| handle.path().to_path_buf());
             let _ = this.update(cx, |workspace, cx| match path {
                 Some(path) => workspace.load_root(path, cx),
                 None => {
@@ -1255,10 +1435,14 @@ impl Workspace {
     }
 
     pub(crate) fn open_file_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_startup_workspace = false;
         self.status = "Choose file…".into();
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
-            let path = rfd::FileDialog::new().pick_file();
+            let path = rfd::AsyncFileDialog::new()
+                .pick_file()
+                .await
+                .map(|handle| handle.path().to_path_buf());
             let _ = this.update_in(cx, |workspace, window, cx| match path {
                 Some(path) => workspace.open_file(path, window, cx),
                 None => {
@@ -1271,6 +1455,7 @@ impl Workspace {
     }
 
     pub(crate) fn new_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_startup_workspace = false;
         let editor = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("text")
@@ -1285,19 +1470,7 @@ impl Workspace {
                 .placeholder("Start typing...")
         });
 
-        cx.subscribe(&editor, move |this, _state, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                if let Some(tab) = this.tabs.get_mut(this.active_tab) {
-                    if !tab.dirty {
-                        tab.dirty = true;
-                        cx.notify();
-                    }
-                }
-                let tab_idx = this.active_tab;
-                this.trigger_auto_save_after_delay(tab_idx, cx);
-            }
-        })
-        .detach();
+        self.watch_editor(&editor, cx);
 
         self.tabs.push(OpenTab {
             path: None,
@@ -1901,68 +2074,236 @@ impl Workspace {
         cx.notify();
     }
 
-    fn reveal_tree_path(&mut self, path: &Path) {
-        let Some(root) = self.root.clone() else {
+    fn reveal_tree_path(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if !self
+            .root
+            .as_ref()
+            .is_some_and(|root| path.starts_with(root))
+        {
+            return;
+        }
+        self.pending_reveal = Some(path.to_path_buf());
+        self.continue_tree_reveal(cx);
+    }
+
+    fn continue_tree_reveal(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.pending_reveal.clone() else {
             return;
         };
-        if !path.starts_with(&root) {
-            return;
-        }
-        fn expand_to(nodes: &mut [TreeNode], target: &Path) {
+        fn expand_to(nodes: &mut [TreeNode], target: &Path, changed: &mut bool) -> Option<PathBuf> {
             for node in nodes {
-                if target.starts_with(&node.path) {
-                    if node.is_dir {
-                        node.expanded = true;
-                        if !node.children_loaded {
-                            node.children = load_dir(&node.path);
-                            node.children_loaded = true;
-                        }
-                        if target != node.path {
-                            expand_to(&mut node.children, target);
-                        }
+                if target.starts_with(&node.path) && node.is_dir {
+                    *changed |= !node.expanded;
+                    node.expanded = true;
+                    if !node.children_loaded {
+                        return Some(node.path.clone());
                     }
-                    return;
+                    return expand_to(&mut node.children, target, changed);
                 }
             }
+            None
         }
-        expand_to(&mut self.tree, path);
+        let mut changed = !self.explorer_section_expanded;
         self.explorer_section_expanded = true;
-        self.rebuild_explorer_rows();
-        if let Some(index) = self.explorer_rows.iter().position(|row| row.path == path) {
-            // Minimal reveal, clear of the sticky headers — VS Code only
-            // scrolls when the row is actually out of view.
-            self.explorer_reveal_index(index);
+        let directory = expand_to(&mut self.tree, &path, &mut changed);
+        if changed {
+            self.rebuild_explorer_rows();
+        }
+        if let Some(directory) = directory {
+            self.request_directory(directory, false, cx);
+        } else {
+            self.pending_reveal = None;
+            if let Some(index) = self.explorer_rows.iter().position(|row| row.path == path) {
+                self.explorer_reveal_index(index);
+            }
         }
     }
 
     pub(crate) fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_startup_workspace = false;
+        self.file_open_generation = self.file_open_generation.wrapping_add(1);
+        if let Some(previous) = self
+            .pending_user_open
+            .take()
+            .filter(|previous| previous != &path)
+        {
+            if self
+                .file_loads
+                .get(&previous)
+                .is_some_and(|load| !load.pinned)
+            {
+                self.cancel_file_load(&previous);
+            }
+        }
         self.set_explorer_selection(path.clone());
-        self.reveal_tree_path(&path);
-
-        if let Some(idx) = self
+        self.reveal_tree_path(&path, cx);
+        if let Some(index) = self
             .tabs
             .iter()
-            .position(|t| t.path.as_ref() == Some(&path))
+            .position(|tab| tab.path.as_ref() == Some(&path))
         {
-            self.active_tab = idx;
-
-            if let Some(tab) = self.tabs.get_mut(idx) {
-                tab.preview = false;
-            }
+            self.active_tab = index;
+            self.tabs[index].preview = false;
+            self.storage.add_recent_file(path.clone());
             cx.notify();
             return;
         }
-
+        self.pending_user_open = Some(path.clone());
+        if let Some(load) = self.file_loads.get_mut(&path) {
+            load.open_generation = Some(self.file_open_generation);
+            return;
+        }
+        let token = self.session.child();
+        self.file_loads.insert(
+            path.clone(),
+            FileLoad {
+                token: token.clone(),
+                pinned: false,
+                open_generation: Some(self.file_open_generation),
+            },
+        );
         self.status = format!("Opening {}…", display_name(&path));
         cx.notify();
-        cx.spawn_in(window, async move |this, cx| {
+        let task = cx.spawn_in(window, async move |this, cx| {
             let load_path = path.clone();
+            let load_token = token.clone();
             let loaded = cx
-                .background_spawn(async move { load_buffer_file(&load_path) })
+                .background_spawn(async move { load_buffer_file(&load_path, &load_token) })
                 .await;
             let _ = this.update_in(cx, move |workspace, window, cx| {
-                workspace.finish_open_file(path, loaded, window, cx);
+                workspace.complete_file_load(path, &token, loaded, window, cx);
             });
+        });
+        self.track_project_task(task, cx);
+    }
+
+    fn complete_file_load(
+        &mut self,
+        path: PathBuf,
+        token: &Cancellation,
+        loaded: Result<LoadedBuffer, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if token.is_cancelled() {
+            return;
+        }
+        let Some(load) = self.file_loads.remove(&path) else {
+            return;
+        };
+        let activate = load.open_generation == Some(self.file_open_generation);
+        if self.pending_user_open.as_ref() == Some(&path) {
+            self.pending_user_open = None;
+        }
+        self.finish_open_file(path, loaded, activate, load.pinned, window, cx);
+    }
+
+    fn cancel_file_load(&mut self, path: &Path) {
+        if let Some(load) = self.file_loads.remove(path) {
+            load.token.cancel();
+        }
+        self.pending_restore_tabs.retain(|tab| tab.path != path);
+    }
+
+    /// Render schedules at most the active restored buffer. Inactive tabs
+    /// remain cheap metadata, preserving their order, cursor and language.
+    pub(crate) fn restore_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            return;
+        };
+        if tab.editor.is_some() {
+            return;
+        }
+        let Some(path) = tab.path.clone() else {
+            return;
+        };
+        let Some(info) = self
+            .pending_restore_tabs
+            .iter()
+            .find(|tab| tab.path == path)
+            .cloned()
+        else {
+            return;
+        };
+        if self.file_loads.contains_key(&path) {
+            return;
+        }
+        let token = self.session.child();
+        self.file_loads.insert(
+            path.clone(),
+            FileLoad {
+                token: token.clone(),
+                pinned: !info.preview,
+                open_generation: None,
+            },
+        );
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let load_path = path.clone();
+            let load_token = token.clone();
+            let loaded = cx
+                .background_spawn(async move { load_buffer_file(&load_path, &load_token) })
+                .await;
+            let _ = this.update_in(cx, move |workspace, window, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
+                workspace.file_loads.remove(&path);
+                workspace
+                    .pending_restore_tabs
+                    .retain(|tab| tab.path != path);
+                if let Some(index) = workspace
+                    .tabs
+                    .iter()
+                    .position(|tab| tab.path.as_ref() == Some(&path))
+                {
+                    match loaded {
+                        Ok(loaded) => workspace.restore_tab(index, info, loaded, window, cx),
+                        Err(error) => {
+                            workspace.close_tab_at_index(index, cx);
+                            workspace.status = error;
+                        }
+                    }
+                    cx.notify();
+                }
+            });
+        });
+        self.track_project_task(task, cx);
+    }
+
+    fn watch_editor(&self, editor: &Entity<InputState>, cx: &mut Context<Self>) {
+        // GPUI passes the emitting entity. Capturing a strong editor handle in
+        // its own detached subscription creates a cycle in App::event_listeners
+        // and keeps the buffer AND every attached language server alive forever.
+        cx.subscribe(editor, |workspace, editor, event: &InputEvent, cx| {
+            if !matches!(event, InputEvent::Change) {
+                return;
+            }
+            let Some(index) = workspace
+                .tabs
+                .iter()
+                .position(|tab| tab.editor.as_ref() == Some(&editor))
+            else {
+                return;
+            };
+            let tab = &mut workspace.tabs[index];
+            let changed = !tab.dirty || tab.preview;
+            tab.dirty = true;
+            tab.preview = false;
+            let path = tab.path.clone();
+            let language = tab.language().map(str::to_string);
+            if let (Some(path), Some(language)) = (path, language) {
+                {
+                    let mut lsp = workspace.lsp.lock().unwrap();
+                    if lsp.has_client(&language) {
+                        lsp.change_document(&path, &language, editor.read(cx).value().to_string());
+                    }
+                }
+                workspace.markdown_buffer_changed(&path, &editor, cx);
+            }
+            workspace.trigger_auto_save_after_delay(index, cx);
+            if changed {
+                cx.notify();
+            }
         })
         .detach();
     }
@@ -1971,12 +2312,17 @@ impl Workspace {
         &mut self,
         path: PathBuf,
         loaded: Result<LoadedBuffer, String>,
+        activate: bool,
+        pinned: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let loaded = match loaded {
             Ok(loaded) => loaded,
             Err(message) => {
+                if !activate {
+                    return;
+                }
                 self.status = message;
                 // A failed open can never satisfy a queued search jump.
                 if self
@@ -1997,7 +2343,9 @@ impl Workspace {
             .iter()
             .position(|t| t.path.as_ref() == Some(&path))
         {
-            self.active_tab = idx;
+            if activate {
+                self.active_tab = idx;
+            }
             if let Some(tab) = self.tabs.get_mut(idx) {
                 tab.preview = false;
             }
@@ -2006,7 +2354,7 @@ impl Workspace {
         }
 
         let replace_preview = if let Some(active_idx) = self.tabs.get(self.active_tab) {
-            active_idx.preview && !active_idx.dirty
+            activate && active_idx.preview && !active_idx.dirty
         } else {
             false
         };
@@ -2032,54 +2380,24 @@ impl Workspace {
 
         self.attach_language_server(&path, lang_id, &editor, cx);
 
-        let path_clone = path.clone();
-        let lang_str = lang_id.to_string();
-        let editor_ent = editor.clone();
-
-        cx.subscribe(&editor, move |this, _state, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                let mut ui_changed = false;
-                if let Some(tab) = this.tabs.get_mut(this.active_tab) {
-                    if !tab.dirty {
-                        tab.dirty = true;
-                        ui_changed = true;
-                    }
-
-                    if tab.preview {
-                        tab.preview = false;
-                        ui_changed = true;
-                    }
-                }
-                {
-                    let current_lang = this
-                        .tabs
-                        .iter()
-                        .find(|t| t.path.as_ref() == Some(&path_clone))
-                        .and_then(|t| t.language())
-                        .unwrap_or(lang_str.as_str());
-                    let mut lsp = this.lsp.lock().unwrap();
-                    if lsp.has_client(current_lang) {
-                        let text = editor_ent.read(cx).value().to_string();
-                        lsp.change_document(&path_clone, current_lang, text);
-                    }
-                }
-
-                if ui_changed {
-                    cx.notify();
-                }
-                this.markdown_buffer_changed(&path_clone, &editor_ent, cx);
-                let tab_idx = this.active_tab;
-                this.trigger_auto_save_after_delay(tab_idx, cx);
-            }
-        })
-        .detach();
+        self.watch_editor(&editor, cx);
 
         if replace_preview {
+            if let Some(previous) = self
+                .tabs
+                .get(self.active_tab)
+                .and_then(|tab| tab.path.clone())
+            {
+                self.cancel_file_load(&previous);
+                if let Some(language) = lang::language_for(&previous) {
+                    self.lsp.lock().unwrap().close_document(&previous, language);
+                }
+            }
             if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                 tab.path = Some(path.clone());
                 tab.dirty = false;
                 tab.untitled = false;
-                tab.preview = true;
+                tab.preview = !pinned;
                 tab.is_settings = false;
                 tab.diff = None;
                 tab.language_override = None;
@@ -2091,21 +2409,25 @@ impl Workspace {
                 editor: Some(editor),
                 dirty: false,
                 untitled: false,
-                preview: true,
+                preview: !pinned,
                 is_settings: false,
                 diff: None,
                 language_override: None,
             });
-            self.active_tab = self.tabs.len() - 1;
+            if activate {
+                self.active_tab = self.tabs.len() - 1;
+            }
         }
-        self.status = if highlight {
-            path.display().to_string()
-        } else {
-            format!("{} (plain text — large file)", display_name(&path))
-        };
+        if activate {
+            self.status = if highlight {
+                path.display().to_string()
+            } else {
+                format!("{} (plain text — large file)", display_name(&path))
+            };
 
-        let mut global_state = crate::storage::GlobalState::load();
-        global_state.add_recent_file(path.clone());
+            self.storage.add_recent_file(path.clone());
+        }
+
         self.persist_workspace_state(cx);
 
         // A search-result click on a closed file queued `pending_search_jump`:
@@ -2187,6 +2509,7 @@ impl Workspace {
         cx.notify();
 
         let editor_weak = editor.downgrade();
+        let token = self.session.clone();
         cx.spawn_in(window, async move |this, cx| {
             // `background_spawn` needs a 'static future, so the request gets
             // its own copies of the snapshot and path; `text` and `path`
@@ -2198,6 +2521,9 @@ impl Workspace {
                     async move { client.format_document(&req_path, &req_text, tab_size) },
                 )
                 .await;
+            if token.is_cancelled() {
+                return;
+            }
             // Apply the edits to the live buffer (guarded against a stale
             // snapshot), then persist whatever the buffer now contains.
             let saved_text: Option<String> = editor_weak
@@ -2214,6 +2540,9 @@ impl Workspace {
                 .ok()
                 .flatten();
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 match saved_text {
                     Some(text) => workspace.write_file_async(path, text, "Saved", cx),
                     // The tab was closed while formatting; nothing to save.
@@ -2232,40 +2561,44 @@ impl Workspace {
         done_label: &'static str,
         cx: &mut Context<Self>,
     ) {
+        let text: Arc<str> = text.into();
+        let editor = self
+            .tabs
+            .iter()
+            .find(|tab| tab.path.as_ref() == Some(&path))
+            .and_then(|tab| tab.editor.as_ref())
+            .map(Entity::downgrade);
+        let token = self.session.clone();
+        let saved = self.storage.write_file(path.clone(), text.clone());
         self.status = format!("Saving {}…", display_name(&path));
         cx.spawn(async move |this, cx| {
-            let write_path = path.clone();
-            let write_text = text.clone();
-            let result = cx
-                .background_spawn(async move { std::fs::write(&write_path, write_text.as_bytes()) })
-                .await;
+            let result = saved
+                .recv()
+                .await
+                .unwrap_or_else(|_| Err("Storage worker stopped".into()));
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
+                let Some(editor) = editor.and_then(|editor| editor.upgrade()) else {
+                    return;
+                };
+                let Some(index) = workspace.tabs.iter().position(|tab| {
+                    tab.editor.as_ref() == Some(&editor) && tab.path.as_ref() == Some(&path)
+                }) else {
+                    return;
+                };
                 match result {
                     Ok(()) => {
-                        if let Some(tab) = workspace
-                            .tabs
-                            .iter_mut()
-                            .find(|t| t.path.as_ref() == Some(&path))
-                        {
-                            if let Some(editor) = &tab.editor {
-                                if editor.read(cx).value() == text {
-                                    tab.dirty = false;
-                                }
-                            }
+                        if editor.read(cx).value().as_str() == text.as_ref() {
+                            workspace.tabs[index].dirty = false;
                         }
-                        // Tell the server the file hit disk.
-                        let lang_id = workspace
-                            .tabs
-                            .iter()
-                            .find(|t| t.path.as_ref() == Some(&path))
-                            .and_then(|t| t.language())
-                            .or_else(|| lang::language_for(&path));
-                        if let Some(lang_id) = lang_id {
+                        if let Some(language) = workspace.tabs[index].language() {
                             workspace
                                 .lsp
                                 .lock()
                                 .unwrap()
-                                .save_document(&path, lang_id, &text);
+                                .save_document(&path, language, &text);
                         }
                         workspace.git_poke();
                         if path == crate::settings::settings_file_path() {
@@ -2274,9 +2607,7 @@ impl Workspace {
                         workspace.status = format!("{done_label} {}", display_name(&path));
                         workspace.persist_workspace_state(cx);
                     }
-                    Err(e) => {
-                        workspace.status = format!("save failed: {e}");
-                    }
+                    Err(error) => workspace.status = format!("save failed: {error}"),
                 }
                 cx.notify();
             });
@@ -2285,30 +2616,30 @@ impl Workspace {
     }
 
     fn save_as(&mut self, cx: &mut Context<Self>) {
-        let active_idx = self.active_tab;
-        let text = {
-            let tab = match self.tabs.get(active_idx) {
-                Some(t) => t,
-                None => return,
-            };
-            if tab.is_settings {
-                return;
-            }
-            let Some(editor) = &tab.editor else {
-                return;
-            };
-            editor.read(cx).value().to_string()
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            return;
         };
-
+        if tab.is_settings {
+            return;
+        }
+        let Some(editor) = tab.editor.as_ref() else {
+            return;
+        };
+        let text: Arc<str> = editor.read(cx).value().to_string().into();
+        let editor = editor.downgrade();
+        let token = self.session.clone();
+        let store = self.storage.clone();
         self.status = "Choose save location…".into();
         cx.notify();
-
-        // Native save dialogs pump Windows messages; never call them while App is borrowed.
         cx.spawn(async move |this, cx| {
-            let path = rfd::FileDialog::new()
+            let path = rfd::AsyncFileDialog::new()
                 .set_file_name("untitled.txt")
-                .save_file();
-
+                .save_file()
+                .await
+                .map(|handle| handle.path().to_path_buf());
+            if token.is_cancelled() {
+                return;
+            }
             let Some(path) = path else {
                 let _ = this.update(cx, |workspace, cx| {
                     workspace.status = "Save cancelled".into();
@@ -2316,43 +2647,43 @@ impl Workspace {
                 });
                 return;
             };
-
-            let write_path = path.clone();
-            let write_text = text.clone();
-            let result = cx
-                .background_spawn(async move { std::fs::write(&write_path, write_text.as_bytes()) })
-                .await;
-
+            let result = store
+                .write_file(path.clone(), text.clone())
+                .recv()
+                .await
+                .unwrap_or_else(|_| Err("Storage worker stopped".into()));
             let _ = this.update(cx, move |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 match result {
                     Ok(()) => {
-                        let lang_id = lang::language_for(&path).unwrap_or("text");
-                        if let Some(tab) = workspace.tabs.get_mut(active_idx) {
-                            tab.path = Some(path.clone());
-                            tab.untitled = false;
-                            tab.dirty = false;
-                            tab.is_settings = false;
-                            if let Some(editor) = &tab.editor {
-                                editor.update(cx, |state, cx| {
-                                    state.set_highlighter(lang_id, cx);
-                                });
-                            }
-                        }
-                        if let Some(editor) = workspace
+                        let Some(editor) = editor.upgrade() else {
+                            return;
+                        };
+                        let Some(index) = workspace
                             .tabs
-                            .get(active_idx)
-                            .and_then(|t| t.editor.clone())
-                        {
-                            workspace.attach_language_server(&path, lang_id, &editor, cx);
-                        }
+                            .iter()
+                            .position(|tab| tab.editor.as_ref() == Some(&editor))
+                        else {
+                            return;
+                        };
+                        let language = lang::language_for(&path).unwrap_or("text");
+                        let tab = &mut workspace.tabs[index];
+                        tab.path = Some(path.clone());
+                        tab.untitled = false;
+                        tab.dirty = editor.read(cx).value().as_str() != text.as_ref();
+                        editor.update(cx, |state, cx| state.set_highlighter(language, cx));
+                        workspace.attach_language_server(&path, language, &editor, cx);
                         workspace.selected_path = Some(path.clone());
-                        if let Some(parent) = path.parent().map(|p| p.to_path_buf()) {
-                            workspace.reload_dir(&parent, cx);
+                        if let Some(parent) = path.parent() {
+                            workspace.reload_dir(parent, cx);
                         }
                         workspace.git_poke();
                         workspace.status = format!("Saved {}", display_name(&path));
+                        workspace.persist_workspace_state(cx);
                     }
-                    Err(e) => workspace.status = format!("save failed: {e}"),
+                    Err(error) => workspace.status = format!("save failed: {error}"),
                 }
                 cx.notify();
             });
@@ -2388,7 +2719,7 @@ impl Workspace {
         self.persist_workspace_state(cx);
         cx.notify();
         if let Some(dir) = dir_to_load {
-            self.load_directory_async(dir, cx);
+            self.request_directory(dir, false, cx);
         }
     }
 
@@ -2397,45 +2728,19 @@ impl Workspace {
         let Some(root) = self.root.clone() else {
             return;
         };
-        self.status = "Refreshing explorer…".into();
-        let mut scan_dirs = vec![root.clone()];
-        fn collect_loaded_dirs(nodes: &[TreeNode], out: &mut Vec<PathBuf>) {
-            for node in nodes {
-                if node.is_dir && node.children_loaded {
-                    out.push(node.path.clone());
-                    collect_loaded_dirs(&node.children, out);
-                }
-            }
+        for directory in session::loaded_directories(&root, &self.tree) {
+            self.load_directory_async(directory, cx);
         }
-        collect_loaded_dirs(&self.tree, &mut scan_dirs);
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let scanned = cx
-                .background_spawn(async move {
-                    scan_dirs
-                        .into_iter()
-                        .map(|dir| {
-                            let entries = load_dir(&dir);
-                            (dir, entries)
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .await;
-            let _ = this.update(cx, |workspace, cx| {
-                if workspace.root.as_ref() == Some(&root) {
-                    let mut changed = false;
-                    for (dir, entries) in scanned {
-                        changed |= workspace.apply_loaded_dir_inner(&dir, entries);
-                    }
-                    if changed {
-                        workspace.rebuild_explorer_rows();
-                    }
-                    workspace.status = "Explorer refreshed".into();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+    }
+
+    fn directory_is_loaded(&self, directory: &Path) -> bool {
+        fn loaded(nodes: &[TreeNode], directory: &Path) -> bool {
+            nodes.iter().any(|node| {
+                (node.path == directory && node.children_loaded)
+                    || (directory.starts_with(&node.path) && loaded(&node.children, directory))
+            })
+        }
+        self.root.as_deref() == Some(directory) || loaded(&self.tree, directory)
     }
 
     fn apply_loaded_dir_inner(&mut self, dir: &Path, entries: Vec<TreeNode>) -> bool {
@@ -2443,6 +2748,9 @@ impl Workspace {
             return false;
         };
         if dir == root.as_path() {
+            if entries_match(&self.tree, &entries) {
+                return false;
+            }
             let previous = std::mem::take(&mut self.tree);
             self.tree = merge_loaded_dir(dir, previous, entries);
             return true;
@@ -2452,6 +2760,11 @@ impl Workspace {
             for node in nodes {
                 if node.path == dir {
                     if node.is_dir && node.expanded {
+                        if node.children_loaded
+                            && entries_match(&node.children, entries.as_deref().unwrap_or_default())
+                        {
+                            return false;
+                        }
                         let previous = std::mem::take(&mut node.children);
                         node.children =
                             merge_loaded_dir(dir, previous, entries.take().unwrap_or_default());
@@ -2476,27 +2789,64 @@ impl Workspace {
         apply(&mut self.tree, dir, &mut entries)
     }
 
-    fn load_directory_async(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else {
+    fn load_directory_async(&mut self, directory: PathBuf, cx: &mut Context<Self>) {
+        self.request_directory(directory, true, cx);
+    }
+
+    fn request_directory(&mut self, directory: PathBuf, refresh: bool, cx: &mut Context<Self>) {
+        if !self
+            .root
+            .as_ref()
+            .is_some_and(|root| directory.starts_with(root))
+        {
             return;
-        };
-        cx.spawn(async move |this, cx| {
+        }
+        if let Some(again) = self.directory_loads.get_mut(&directory) {
+            *again |= refresh;
+            return;
+        }
+        self.directory_loads.insert(directory.clone(), false);
+        let token = self.session.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let scan_directory = directory.clone();
+            let scan_token = token.clone();
             let entries = cx
-                .background_spawn({
-                    let dir = dir.clone();
-                    async move { load_dir(&dir) }
+                .background_spawn(async move {
+                    try_load_dir(&scan_directory, || scan_token.is_cancelled())
                 })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
-                if workspace.root.as_ref() == Some(&root)
-                    && workspace.apply_loaded_dir_inner(&dir, entries)
-                {
-                    workspace.rebuild_explorer_rows();
-                    cx.notify();
+                if token.is_cancelled() {
+                    return;
+                }
+                let again = workspace
+                    .directory_loads
+                    .remove(&directory)
+                    .unwrap_or(false);
+                match entries {
+                    Ok(entries) => {
+                        if workspace.apply_loaded_dir_inner(&directory, entries) {
+                            workspace.rebuild_explorer_rows();
+                            cx.notify();
+                        }
+                        if let Some(watcher) = &workspace.fs_watcher {
+                            watcher.watch(directory.clone());
+                        }
+                        workspace.continue_tree_reveal(cx);
+                    }
+                    Err(error) => {
+                        workspace.pending_reveal = None;
+                        workspace.status =
+                            format!("Could not read {}: {error}", directory.display());
+                        cx.notify();
+                    }
+                }
+                if again {
+                    workspace.load_directory_async(directory, cx);
                 }
             });
-        })
-        .detach();
+        });
+        self.track_project_task(task, cx);
     }
 
     pub(crate) fn reload_dir(&mut self, dir: &Path, cx: &mut Context<Self>) {
@@ -2677,6 +3027,9 @@ impl Workspace {
     /// Double clicking a file in VS Code turns the italic preview tab into a
     /// permanent one.
     pub(crate) fn pin_preview_tab(&mut self, path: &Path, cx: &mut Context<Self>) {
+        if let Some(load) = self.file_loads.get_mut(path) {
+            load.pinned = true;
+        }
         if let Some(tab) = self
             .tabs
             .iter_mut()
@@ -2801,7 +3154,7 @@ impl Workspace {
             }
         }
         if !moved.is_empty() {
-            self.ensure_directory_visible(&destination_dir);
+            self.ensure_directory_visible(&destination_dir, cx);
             self.rebuild_explorer_rows();
             self.set_explorer_selection_many(moved);
         }
@@ -3090,30 +3443,8 @@ impl Workspace {
             .is_some_and(|root| is_same_or_descendant(root, path))
     }
 
-    fn ensure_directory_visible(&mut self, dir: &Path) {
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        if dir == root {
-            return;
-        }
-
-        fn expand(nodes: &mut [TreeNode], target: &Path) {
-            for node in nodes {
-                if target.starts_with(&node.path) {
-                    if node.is_dir {
-                        node.expanded = true;
-                        if !node.children_loaded {
-                            node.children = load_dir(&node.path);
-                            node.children_loaded = true;
-                        }
-                        expand(&mut node.children, target);
-                    }
-                    return;
-                }
-            }
-        }
-        expand(&mut self.tree, dir);
+    fn ensure_directory_visible(&mut self, dir: &Path, cx: &mut Context<Self>) {
+        self.reveal_tree_path(dir, cx);
     }
 
     pub(crate) fn start_inline_create_at_root(
@@ -3163,7 +3494,7 @@ impl Workspace {
         }
 
         self.selected_path = Some(dir.clone());
-        self.ensure_directory_visible(&dir);
+        self.ensure_directory_visible(&dir, cx);
         self.explorer_section_expanded = true;
         self.rebuild_explorer_rows();
 
@@ -3221,7 +3552,7 @@ impl Workspace {
         match result {
             Ok(()) => {
                 self.selected_path = Some(target_path.clone());
-                self.ensure_directory_visible(&creating.parent_dir);
+                self.ensure_directory_visible(&creating.parent_dir, cx);
                 self.rebuild_explorer_rows();
                 self.reload_dir(&creating.parent_dir, cx);
                 if creating.kind == CreatingKind::File {
@@ -3259,7 +3590,7 @@ impl Workspace {
         self.inline_creating = None;
         self.inline_renaming = None;
         self.selected_path = Some(path.clone());
-        self.reveal_tree_path(&path);
+        self.reveal_tree_path(&path, cx);
 
         let name = display_name(&path);
         let input = cx.new(|cx| {
@@ -3583,7 +3914,7 @@ impl Workspace {
         }
 
         if !pasted.is_empty() {
-            self.ensure_directory_visible(&destination_dir);
+            self.ensure_directory_visible(&destination_dir, cx);
             self.reload_dir(&destination_dir, cx);
             self.status = if pasted.len() == 1 {
                 format!("Pasted {}", display_name(&pasted[0]))
@@ -3829,22 +4160,50 @@ impl Workspace {
         editor: &Entity<InputState>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let root = self.root.clone();
-        let client = {
+        let (client, launch) = {
             let mut lsp = self.lsp.lock().unwrap();
-            lsp.ensure_server(lang_id, root.as_deref())
+            let client = lsp.client_for(lang_id);
+            let launch = if client.is_none() {
+                lsp.reserve_server(lang_id)
+            } else {
+                None
+            };
+            (client, launch)
         };
+        if let Some(launch) = launch {
+            let token = self.session.clone();
+            let manager = self.lsp.clone();
+            let task = cx.spawn(async move |this, cx| {
+                let (launch, result) = cx
+                    .background_spawn(async move {
+                        let result = launch.run();
+                        (launch, result)
+                    })
+                    .await;
+                if token.is_cancelled() {
+                    return;
+                }
+                let ready = manager.lock().unwrap().finish_start(&launch, result);
+                let _ = this.update(cx, |workspace, cx| {
+                    if token.is_cancelled() {
+                        return;
+                    }
+                    if ready {
+                        workspace.start_server_for_open_buffers(launch.name(), cx);
+                    }
+                    cx.notify();
+                });
+            });
+            self.track_project_task(task, cx);
+        }
         let Some(client) = client else {
             return false;
         };
-
         let text = editor.read(cx).value().to_string();
         client.did_open(path, lang_id, &text);
-
-        let attach_client = client.clone();
         let lsp_path = path.to_path_buf();
         editor.update(cx, move |state, _cx| {
-            crate::lsp::attach_lsp_providers(state, attach_client, lsp_path);
+            crate::lsp::attach_lsp_providers(state, client, lsp_path);
         });
         true
     }
@@ -3958,14 +4317,21 @@ impl Workspace {
         cx.notify();
         let generation = self.git_watch_generation;
         cx.spawn(async move |this, cx| {
-            let status = cx.background_spawn(async move { git::status(&root) }).await;
+            let status = cx
+                .background_spawn(async move {
+                    git::status(&root).map(|status| {
+                        let kinds = Arc::new(git::path_kinds(&status));
+                        (status, kinds)
+                    })
+                })
+                .await;
             let _ = this.update(cx, |workspace, cx| {
                 if workspace.git_watch_generation != generation {
                     return;
                 }
                 match status {
-                    Some(status) => {
-                        workspace.apply_git_status(status, cx);
+                    Some((status, kinds)) => {
+                        workspace.apply_git_status(status, kinds, cx);
                         workspace.status = "Source control refreshed".into();
                     }
                     None => workspace.status = "git status failed".into(),
@@ -4199,9 +4565,13 @@ impl Workspace {
         let rel_name = rels.first().cloned().unwrap_or_default();
         self.status = "Working…".into();
         cx.notify();
+        let token = self.session.clone();
         cx.spawn(async move |this, cx| {
             let ok = cx.background_spawn(async move { op(root, rels) }).await;
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 if ok {
                     if success.contains("{}") {
                         workspace.status = success.replace("{}", &rel_name);
@@ -4344,6 +4714,7 @@ impl Workspace {
         };
         cx.notify();
         let commit_input = self.git_commit_input.clone();
+        let token = self.session.clone();
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_spawn(async move { git::commit(&root, &message, amend, all) })
@@ -4355,14 +4726,17 @@ impl Workspace {
                 Err(e) => format!("Commit failed: {e}"),
             };
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 workspace.status = status;
-                if is_ok {
+                if is_ok && !token.is_cancelled() {
                     workspace.git_poke();
                 }
                 cx.notify();
             });
 
-            if is_ok {
+            if is_ok && !token.is_cancelled() {
                 if let Some(input) = &commit_input {
                     let _ = input.downgrade().update_in(cx, |state, window, cx| {
                         state.set_value("", window, cx);
@@ -4397,9 +4771,13 @@ impl Workspace {
         self.git_op_running = Some(verb);
         self.status = format!("{verb}…");
         cx.notify();
+        let token = self.session.clone();
         cx.spawn(async move |this, cx| {
             let result = cx.background_spawn(async move { op(root) }).await;
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 workspace.git_op_running = None;
                 match result {
                     Ok(msg) => {
@@ -4493,12 +4871,16 @@ impl Workspace {
         }
         self.status = "Initializing repository…".into();
         cx.notify();
+        let token = self.session.clone();
         cx.spawn(async move |this, cx| {
             let init_root = root.clone();
             let result = cx
                 .background_spawn(async move { git::init(&init_root) })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 match result {
                     Ok(_) => {
                         workspace.status = "Initialized empty git repository".into();
@@ -4577,6 +4959,7 @@ impl Workspace {
         staged: bool,
         cx: &mut Context<Self>,
     ) {
+        let token = self.session.clone();
         cx.spawn(async move |this, cx| {
             let tab_path_bg = tab_path.clone();
             let rel_bg = rel.clone();
@@ -4614,6 +4997,9 @@ impl Workspace {
                 })
                 .await;
             let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 if let Some(tab) = workspace.tabs.iter_mut().find(|t| {
                     t.diff
                         .as_ref()
@@ -4680,28 +5066,41 @@ impl Workspace {
         cx.notify();
         let editor_weak = editor.downgrade();
         let display = display_name(&path);
+        let token = self.session.clone();
         cx.spawn_in(window, async move |this, cx| {
             let edits = cx
                 .background_spawn(async move { client.format_document(&path, &text, tab_size) })
                 .await;
+            if token.is_cancelled() {
+                return;
+            }
             match edits {
                 Some(edits) if !edits.is_empty() => {
                     let _ = editor_weak.update_in(cx, |state, window, cx| {
                         state.apply_lsp_edits(&edits, window, cx);
                     });
                     let _ = this.update(cx, |workspace, cx| {
+                        if token.is_cancelled() {
+                            return;
+                        }
                         workspace.status = format!("Formatted {display}");
                         cx.notify();
                     });
                 }
                 Some(_) => {
                     let _ = this.update(cx, |workspace, cx| {
+                        if token.is_cancelled() {
+                            return;
+                        }
                         workspace.status = "Document already formatted".into();
                         cx.notify();
                     });
                 }
                 None => {
                     let _ = this.update(cx, |workspace, cx| {
+                        if token.is_cancelled() {
+                            return;
+                        }
                         workspace.status = "Formatting not supported by the language server".into();
                         cx.notify();
                     });
@@ -4712,6 +5111,7 @@ impl Workspace {
     }
 
     pub(crate) fn open_settings(&mut self, cx: &mut Context<Self>) {
+        self.restore_startup_workspace = false;
         if let Some(idx) = self.tabs.iter().position(|t| t.is_settings) {
             self.active_tab = idx;
         } else {
@@ -4769,9 +5169,8 @@ impl Workspace {
         }
         // Auto-save deliberately skips format-on-save: formatting mid-typing
         // (the `afterDelay` mode fires every second) would fight the user
-        // for the buffer. `save_tab_quiet` is also synchronous by design —
-        // unifying it with the async format-then-save path is described in
-        // docs/architecture-themes-syntax-formatting.md.
+        // for the buffer. Snapshots go through the same ordered background
+        // writer as manual saves and workspace transitions.
         let path = tab.path.clone().unwrap();
         let Some(editor) = &tab.editor else {
             return false;
@@ -4805,7 +5204,7 @@ impl Workspace {
         let current_gen = self.auto_save_generation;
         let delay = std::time::Duration::from_millis(self.settings.editor_auto_save_delay);
 
-        cx.spawn(async move |this, cx| {
+        self.auto_save_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
 
             let _ = this.update(cx, |workspace, cx| {
@@ -4813,8 +5212,7 @@ impl Workspace {
                     workspace.save_all_dirty_quiet(cx);
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     pub(crate) fn trigger_auto_save_on_focus_change(&mut self, cx: &mut Context<Self>) {
@@ -4832,6 +5230,12 @@ impl Workspace {
     }
 
     pub(crate) fn close_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        if let Some(path) = self.tabs[index].path.clone() {
+            self.cancel_file_load(&path);
+        }
         if let Some(closed_path) = self.tabs.get(index).and_then(|tab| tab.path.as_ref()) {
             if self
                 .markdown_preview
@@ -4885,7 +5289,7 @@ impl Workspace {
             // editor, expanding and scrolling to the file it belongs to.
             if self.activity == Activity::Explorer {
                 if let Some(path) = self.tabs.get(index).and_then(|tab| tab.path.clone()) {
-                    self.reveal_tree_path(&path);
+                    self.reveal_tree_path(&path, cx);
                 }
             }
             self.persist_workspace_state(cx);
@@ -4895,6 +5299,9 @@ impl Workspace {
 
     pub(crate) fn close_tab_at_index(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.tabs.len() {
+            if let Some(path) = self.tabs[index].path.clone() {
+                self.cancel_file_load(&path);
+            }
             if let Some(closed_path) = self.tabs.get(index).and_then(|tab| tab.path.as_ref()) {
                 if self
                     .markdown_preview
@@ -5038,53 +5445,13 @@ impl Workspace {
             }
         }
 
-        let root_dir = self.root.as_deref().unwrap_or(Path::new("."));
-        let global_state = crate::storage::GlobalState::load();
-        let mut recent_files: Vec<PathBuf> =
-            self.tabs.iter().filter_map(|t| t.path.clone()).collect();
-        for p in global_state.recent_files {
-            if !recent_files.contains(&p) {
-                if let Some(root) = &self.root {
-                    if p.starts_with(root) {
-                        recent_files.push(p);
-                    }
-                } else {
-                    recent_files.push(p);
-                }
-            }
-        }
-
-        let items = if let Some((cached_root, cached_items)) = &self.workspace_files_cache {
-            if cached_root == root_dir {
-                // Instantly reuse cached workspace files with fresh recent files prioritization
-                let recent_set: std::collections::HashSet<_> = recent_files.iter().collect();
-                let mut ordered = Vec::with_capacity(cached_items.len());
-                for item in cached_items {
-                    let p = PathBuf::from(&item.id);
-                    if recent_set.contains(&p) {
-                        let mut it = item.clone();
-                        it.is_recent = true;
-                        ordered.push(it);
-                    }
-                }
-                for item in cached_items {
-                    let p = PathBuf::from(&item.id);
-                    if !recent_set.contains(&p) {
-                        ordered.push(item.clone());
-                    }
-                }
-                ordered
-            } else {
-                let scanned = crate::ui::picker::scan_workspace_files(root_dir, &recent_files);
-                self.workspace_files_cache = Some((root_dir.to_path_buf(), scanned.clone()));
-                scanned
-            }
-        } else {
-            let scanned = crate::ui::picker::scan_workspace_files(root_dir, &recent_files);
-            self.workspace_files_cache = Some((root_dir.to_path_buf(), scanned.clone()));
-            scanned
-        };
-
+        let root_dir = self.root.clone().unwrap_or_else(|| PathBuf::from("."));
+        let recent_files = self.file_finder_recent_files();
+        let cached = self
+            .workspace_files_cache
+            .as_ref()
+            .filter(|(root, _)| root == &root_dir)
+            .map(|(_, items)| items.clone());
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Search files by name (append : to go to line or @ to go to symbol)")
@@ -5106,12 +5473,150 @@ impl Workspace {
             this.focus(window, cx);
         });
 
-        self.picker = Some(crate::ui::picker::PickerState::new(
+        let mut picker = crate::ui::picker::PickerState::new(
             crate::ui::picker::PickerKind::FileFinder,
             input,
-            items,
-        ));
+            Vec::new(),
+        );
+        picker.indexing = cached.is_none();
+        picker.loading = true;
+        if let Some(cached) = cached {
+            picker.raw_items = cached;
+        }
+        self.picker = Some(picker);
+        if self.picker.as_ref().is_some_and(|picker| !picker.indexing) {
+            self.filter_file_finder(cx);
+        } else {
+            self.start_file_index(root_dir, recent_files, cx);
+        }
         cx.notify();
+    }
+
+    fn invalidate_file_index(&mut self, cx: &mut Context<Self>) {
+        self.workspace_files_cache = None;
+        self.file_index_cancel.cancel();
+        self.file_index_task = None;
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| picker.kind == crate::ui::picker::PickerKind::FileFinder)
+        {
+            let root = self.root.clone().unwrap_or_else(|| PathBuf::from("."));
+            let recent = self.storage.recent().recent_files;
+            if let Some(picker) = &mut self.picker {
+                picker.indexing = true;
+                picker.loading = true;
+            }
+            self.start_file_index(root, recent, cx);
+        }
+    }
+
+    fn start_file_index(&mut self, root: PathBuf, recent: Vec<PathBuf>, cx: &mut Context<Self>) {
+        // Closing/reopening Ctrl+P while a scan runs shares that scan. It
+        // belongs to the project, not to the lifetime of a particular modal.
+        if self.file_index_task.is_some() {
+            return;
+        }
+        self.file_index_cancel = self.session.child();
+        let cancelled = self.file_index_cancel.clone();
+        let token = self.session.clone();
+        let watches = self.fs_watcher.as_ref().map(DirectoryWatcher::sender);
+        self.file_index_task = Some(cx.spawn(async move |this, cx| {
+            let scan_root = root.clone();
+            let scan_cancel = cancelled.clone();
+            let scan_token = token.clone();
+            let items = cx
+                .background_spawn(async move {
+                    if scan_token.is_cancelled() {
+                        return Vec::new();
+                    }
+                    crate::ui::picker::scan_workspace_files_cancellable(
+                        &scan_root,
+                        &recent,
+                        &scan_cancel,
+                        watches,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() || cancelled.is_cancelled() {
+                    return;
+                }
+                workspace.file_index_task = None;
+                let items = Arc::new(items);
+                workspace.workspace_files_cache = Some((root, items.clone()));
+                if let Some(picker) = workspace
+                    .picker
+                    .as_mut()
+                    .filter(|picker| picker.kind == crate::ui::picker::PickerKind::FileFinder)
+                {
+                    picker.raw_items = items;
+                    picker.indexing = false;
+                    workspace.filter_file_finder(cx);
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn file_finder_recent_files(&self) -> Vec<PathBuf> {
+        let mut recent = Vec::new();
+        for path in self
+            .active_path()
+            .into_iter()
+            .cloned()
+            .chain(self.storage.recent().recent_files)
+            .chain(self.tabs.iter().rev().filter_map(|tab| tab.path.clone()))
+        {
+            if !recent.contains(&path)
+                && self.root.as_ref().is_none_or(|root| path.starts_with(root))
+            {
+                recent.push(path);
+            }
+        }
+        recent
+    }
+
+    fn filter_file_finder(&mut self, cx: &mut Context<Self>) {
+        let recent_files = self.file_finder_recent_files();
+        let Some(picker) = self.picker.as_mut() else {
+            return;
+        };
+        let query = picker.input.read(cx).value().to_string();
+        let input = picker.input.downgrade();
+        let items = picker.raw_items.clone();
+        picker.loading = true;
+        self.picker_filter_cancel.cancel();
+        self.picker_filter_cancel = self.session.child();
+        let cancelled = self.picker_filter_cancel.clone();
+        let token = self.session.clone();
+        self.picker_filter_task = Some(cx.spawn(async move |this, cx| {
+            let filter_cancel = cancelled.clone();
+            let results = cx
+                .background_spawn(async move {
+                    crate::ui::picker::filter_items_with_recents(
+                        &items,
+                        &query,
+                        &filter_cancel,
+                        &recent_files,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |workspace, cx| {
+                if token.is_cancelled() || cancelled.is_cancelled() {
+                    return;
+                }
+                if let Some(picker) = workspace.picker.as_mut() {
+                    if input.upgrade().as_ref() != Some(&picker.input) {
+                        return;
+                    }
+                    picker.filtered_items = results;
+                    picker.selected_index = 0;
+                    picker.loading = picker.indexing;
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     pub(crate) fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5246,11 +5751,15 @@ impl Workspace {
             cx.notify();
             return;
         };
+        let token = self.session.clone();
         cx.spawn_in(window, async move |this, cx| {
             let branches = cx
                 .background_spawn(async move { git::branches(&root) })
                 .await;
             let _ = this.update_in(cx, |workspace, window, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 workspace.open_branch_picker(branches, false, window, cx);
             });
         })
@@ -5274,11 +5783,15 @@ impl Workspace {
             cx.notify();
             return;
         };
+        let token = self.session.clone();
         cx.spawn_in(window, async move |this, cx| {
             let branches = cx
                 .background_spawn(async move { git::branches(&root) })
                 .await;
             let _ = this.update_in(cx, |workspace, window, cx| {
+                if token.is_cancelled() {
+                    return;
+                }
                 workspace.open_branch_picker(branches, true, window, cx);
             });
         })
@@ -5397,6 +5910,9 @@ impl Workspace {
             return;
         }
         if self.picker.take().is_some() {
+            self.picker_filter_cancel.cancel();
+            self.picker_filter_task = None;
+            self.picker_confirm_pending = false;
             self.focus_active_editor_or_self(window, cx);
             cx.notify();
         } else {
@@ -5426,11 +5942,16 @@ impl Workspace {
     }
 
     pub(crate) fn on_picker_input_changed(&mut self, cx: &mut Context<Self>) {
-        if let Some(p) = &mut self.picker {
-            let query = p.input.read(cx).value().to_string();
-            p.filter(&query);
-            cx.notify();
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| picker.kind == crate::ui::picker::PickerKind::FileFinder)
+        {
+            self.filter_file_finder(cx);
+        } else if let Some(picker) = &mut self.picker {
+            picker.filter(&picker.input.read(cx).value().to_string());
         }
+        cx.notify();
     }
 
     pub(crate) fn confirm_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5647,33 +6168,24 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn restore_tab(
+    fn restore_tab(
         &mut self,
-        tab_info: crate::storage::OpenTabState,
+        index: usize,
+        info: crate::storage::OpenTabState,
+        loaded: LoadedBuffer,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let crate::storage::OpenTabState {
-            path,
-            preview,
-            language_override,
-            cursor,
-        } = tab_info;
-        let loaded = match load_buffer_file(&path) {
-            Ok(loaded) => loaded,
-            Err(_) => return,
-        };
-
-        let lang_id: String = if let Some(override_lang) = &language_override {
-            override_lang.clone()
+        let language = if loaded.highlight {
+            info.language_override
+                .clone()
+                .unwrap_or_else(|| loaded.lang_id.to_string())
         } else {
-            loaded.lang_id.to_string()
+            "text".to_string()
         };
-        let text = loaded.text;
-
         let editor = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
-                .code_editor(lang_id.clone())
+                .code_editor(language.clone())
                 .line_number(true)
                 .indent_guides(false)
                 .soft_wrap(false)
@@ -5682,12 +6194,12 @@ impl Workspace {
                     tab_size: 4,
                     hard_tabs: false,
                 });
-            state.set_value(text, window, cx);
-            if let Some(pos) = cursor {
+            state.set_value(loaded.text, window, cx);
+            if let Some(position) = info.cursor {
                 state.set_cursor_position(
                     lsp_types::Position {
-                        line: pos.line,
-                        character: pos.character,
+                        line: position.line,
+                        character: position.character,
                     },
                     window,
                     cx,
@@ -5695,59 +6207,12 @@ impl Workspace {
             }
             state
         });
-
-        self.attach_language_server(&path, lang_id.as_str(), &editor, cx);
-
-        let path_clone = path.clone();
-        let lang_str = lang_id.clone();
-        let editor_ent = editor.clone();
-
-        cx.subscribe(&editor, move |this, _state, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                let mut ui_changed = false;
-                if let Some(tab) = this.tabs.get_mut(this.active_tab) {
-                    if !tab.dirty {
-                        tab.dirty = true;
-                        ui_changed = true;
-                    }
-                    if tab.preview {
-                        tab.preview = false;
-                        ui_changed = true;
-                    }
-                }
-                {
-                    let current_lang = this
-                        .tabs
-                        .iter()
-                        .find(|t| t.path.as_ref() == Some(&path_clone))
-                        .and_then(|t| t.language())
-                        .unwrap_or(lang_str.as_str());
-                    let mut lsp = this.lsp.lock().unwrap();
-                    if lsp.has_client(current_lang) {
-                        let text = editor_ent.read(cx).value().to_string();
-                        lsp.change_document(&path_clone, current_lang, text);
-                    }
-                }
-                if ui_changed {
-                    cx.notify();
-                }
-                this.markdown_buffer_changed(&path_clone, &editor_ent, cx);
-                let tab_idx = this.active_tab;
-                this.trigger_auto_save_after_delay(tab_idx, cx);
-            }
-        })
-        .detach();
-
-        self.tabs.push(OpenTab {
-            path: Some(path),
-            editor: Some(editor),
-            dirty: false,
-            untitled: false,
-            preview,
-            is_settings: false,
-            diff: None,
-            language_override,
-        });
+        self.watch_editor(&editor, cx);
+        self.tabs[index].editor = Some(editor.clone());
+        self.attach_language_server(&info.path, &language, &editor, cx);
+        if index == self.active_tab {
+            editor.update(cx, |state, cx| state.focus(window, cx));
+        }
     }
 
     pub(crate) fn collect_expanded_folders(&self) -> Vec<PathBuf> {
@@ -5770,15 +6235,28 @@ impl Workspace {
         };
 
         let mut tab_states = Vec::new();
-        for tab in &self.tabs {
+        let mut active_tab = 0;
+        for (index, tab) in self.tabs.iter().enumerate() {
             if let Some(path) = &tab.path {
-                let cursor = tab.editor.as_ref().map(|ed| {
-                    let pos = ed.read(cx).cursor_position();
-                    crate::storage::CursorPosition {
-                        line: pos.line,
-                        character: pos.character,
-                    }
-                });
+                if index == self.active_tab {
+                    active_tab = tab_states.len();
+                }
+                let cursor = tab
+                    .editor
+                    .as_ref()
+                    .map(|ed| {
+                        let pos = ed.read(cx).cursor_position();
+                        crate::storage::CursorPosition {
+                            line: pos.line,
+                            character: pos.character,
+                        }
+                    })
+                    .or_else(|| {
+                        self.pending_restore_tabs
+                            .iter()
+                            .find(|tab| &tab.path == path)
+                            .and_then(|tab| tab.cursor.clone())
+                    });
 
                 tab_states.push(crate::storage::OpenTabState {
                     path: path.clone(),
@@ -5800,7 +6278,7 @@ impl Workspace {
         let state = crate::storage::WorkspaceState {
             root: root.clone(),
             tabs: tab_states,
-            active_tab: self.active_tab,
+            active_tab,
             layout: crate::storage::LayoutState {
                 sidebar_width: self.sidebar_width,
                 terminal_height: self.terminal_height,
@@ -5816,6 +6294,13 @@ impl Workspace {
             explorer_selected: self.selected_path.clone(),
         };
 
-        let _ = state.save();
+        self.storage.save(state);
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        self.transition.cancel();
+        self.session.cancel();
     }
 }
