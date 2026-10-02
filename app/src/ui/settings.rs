@@ -40,7 +40,7 @@ pub(crate) fn render_settings(
                         .flex()
                         .flex_col()
                         .gap(px(28.0))
-                        .child(render_theme_section(t, active_theme_ix, cx))
+                        .child(render_theme_section(settings, t, active_theme_ix, cx))
                         .child(render_editor_section(settings, t, font_size, cx))
                         .child(render_terminal_section(t, cx))
                         .child(render_system_section(t)),
@@ -134,11 +134,16 @@ fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
         )
 }
 
+/// Section 1: appearance — the color theme, and the size of the interface
+/// itself. Both live here because both are "how the workbench looks" rather
+/// than "how the buffer looks", and both are applied the instant they change.
 fn render_theme_section(
+    settings: &Settings,
     t: &Colors,
     active_theme_ix: usize,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
+    let ui_font_size = settings.ui_font_size;
     let themes = theme::all();
     let current_theme = themes.get(active_theme_ix);
     let current_name = current_theme
@@ -167,14 +172,14 @@ fn render_theme_section(
                                 .text_size(px(16.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgba(t.text))
-                                .child(SharedString::from("🎨 Color Theme")),
+                                .child(SharedString::from("🎨 Color Theme & UI Scale")),
                         )
                         .child(
                             div()
                                 .text_size(px(12.5))
                                 .text_color(rgba(t.text_muted))
                                 .child(SharedString::from(
-                                    "Select the workbench color theme. Theme and syntax tokens apply instantly.",
+                                    "Select the workbench color theme. Both apply instantly.",
                                 )),
                         ),
                 )
@@ -320,6 +325,45 @@ fn render_theme_section(
                         )
                 })),
         )
+        // The interface's own font size — Zed's `ui_font_size`. It sits in this
+        // section next to the theme because it is the other half of "how the
+        // workbench looks": the theme picks the colors, this picks the size they
+        // are drawn at. Each button calls straight back into the workspace, which
+        // is what writes settings.json and rescales the open windows, so the row
+        // works exactly like the editor font-size row below it.
+        .child(setting_row(
+            "UI: Font Size",
+            "Scales the whole interface: text, tree rows, icons, indents and spacing",
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    btn_small("-", t, cx.listener(|this, _, _, cx| {
+                        this.decrease_ui_font_size(cx);
+                    })),
+                )
+                .child(
+                    div()
+                        .min_w(px(55.0))
+                        .text_center()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgba(t.text))
+                        .child(SharedString::from(format!("{ui_font_size:.1} px"))),
+                )
+                .child(
+                    btn_small("+", t, cx.listener(|this, _, _, cx| {
+                        this.increase_ui_font_size(cx);
+                    })),
+                )
+                .child(
+                    btn_small("Reset (14.0px)", t, cx.listener(|this, _, _, cx| {
+                        this.reset_ui_font_size(cx);
+                    })),
+                ),
+            t,
+        ))
 }
 
 fn color_swatch(color_hex: u32, _label: &'static str, t: &Colors) -> impl IntoElement {
