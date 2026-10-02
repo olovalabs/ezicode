@@ -64,8 +64,14 @@ impl Render for Workspace {
         // The search view owns real text inputs: while it is the visible panel,
         // focus is left alone, otherwise every render would yank focus out of
         // the query/replace boxes and make them untypeable.
+        if !self.project_switcher_visible
+            && self.project_switcher_focus_handle.is_focused(window)
+        {
+            self.focus_active_editor_or_self(window, cx);
+        }
         let search_panel_visible = self.show_sidebar && self.activity == Activity::Search;
         if self.picker.is_none()
+            && !self.project_switcher_visible
             && self.active_editor().is_none()
             && !self.show_terminal
             && !self.show_terminal_right
@@ -88,6 +94,12 @@ impl Render for Workspace {
         let t = th.colors;
         let welcome = self.welcome_visible();
         let title = self.title();
+        let project_switcher_visible = self.project_switcher_visible;
+        let project_switcher_closing = self.project_switcher_closing;
+        let project_switcher_width =
+            (f32::from(window.viewport_size().width) - ui::activity_bar::ACTIVITY_BAR_WIDTH)
+                .max(0.0)
+                .min(360.0);
 
         let max_sidebar = f32::from(window.viewport_size().width - px(320.0)).max(220.0);
         let min_sidebar = if self.panel_resize.is_some() {
@@ -305,6 +317,18 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &ShowExtensions, window, cx| {
                 this.set_activity_explicit(Activity::Extensions, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleProjectSwitcher, window, cx| {
+                this.toggle_project_switcher(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ProjectSwitcherNext, _, cx| {
+                this.move_project_switcher_selection(1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ProjectSwitcherPrev, _, cx| {
+                this.move_project_switcher_selection(-1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ProjectSwitcherActivate, window, cx| {
+                this.activate_project_switcher_selection(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 this.show_sidebar = !this.show_sidebar;
@@ -583,6 +607,7 @@ impl Render for Workspace {
             .child(ui::titlebar::render_titlebar(&title, &t, theme_ix))
             .child(
                 div()
+                    .relative()
                     .flex()
                     .flex_row()
                     .flex_1()
@@ -592,6 +617,7 @@ impl Render for Workspace {
                         activity,
                         show_sidebar,
                         git_changes,
+                        project_switcher_visible,
                         &t,
                         cx,
                     ))
@@ -844,7 +870,16 @@ impl Render for Workspace {
                                         )),
                                 )
                         },
-                    ),
+                    )
+                    .when(project_switcher_visible, |row| {
+                        row.child(ui::sidebar::projects::render_overlay(
+                            self,
+                            project_switcher_closing,
+                            project_switcher_width,
+                            &t,
+                            cx,
+                        ))
+                    }),
             )
             .child(ui::status_bar::render_status_bar(
                 status,

@@ -184,6 +184,7 @@ pub(crate) struct ExplorerClipboard {
 /// that a tab flips to "(exit 0)" promptly, long enough that the per-frame
 /// `kill(2)` cost stays negligible no matter how many tabs are open.
 const TERMINAL_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+pub(crate) const PROJECT_SWITCHER_ANIMATION_DURATION: Duration = Duration::from_millis(180);
 
 /// Default width of the right terminal dock, and the smallest width the
 /// tab bar stays usable at. Dragging narrower than the minimum hides the
@@ -249,6 +250,14 @@ pub(crate) struct Workspace {
     pub(crate) status: String,
     pub(crate) activity: Activity,
     pub(crate) show_sidebar: bool,
+    /// The project switcher is an overlay, not another editor/sidebar layout
+    /// column; `closing` keeps it mounted for its horizontal exit animation.
+    pub(crate) project_switcher_visible: bool,
+    pub(crate) project_switcher_closing: bool,
+    pub(crate) project_switcher_selection: Option<PathBuf>,
+    pub(crate) project_switcher_focus_handle: FocusHandle,
+    pub(crate) project_switcher_scroll_handle: ScrollHandle,
+    project_switcher_close_generation: u64,
     pub(crate) show_terminal: bool,
     pub(crate) terminal_maximized: bool,
     pub(crate) theme_ix: usize,
@@ -501,6 +510,7 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
         let explorer_focus_handle = cx.focus_handle();
+        let project_switcher_focus_handle = cx.focus_handle();
         let explorer_scroll_handle = UniformListScrollHandle::new();
 
         let lsp_mgr = LspManager::new();
@@ -634,6 +644,12 @@ impl Workspace {
             status: "Welcome — open a folder or create a file to begin".into(),
             activity: Activity::Explorer,
             show_sidebar: true,
+            project_switcher_visible: false,
+            project_switcher_closing: false,
+            project_switcher_selection: None,
+            project_switcher_focus_handle,
+            project_switcher_scroll_handle: ScrollHandle::new(),
+            project_switcher_close_generation: 0,
             show_terminal: false,
             terminal_maximized: false,
             theme_ix,
@@ -988,6 +1004,7 @@ impl Workspace {
 
     pub(crate) fn load_root(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.restore_startup_workspace = false;
+        self.close_project_switcher(cx);
         let _span = crate::perf::span("workspace.switch.request.ui");
         // Opening the active root is a no-op, but still supersedes a pending
         // request for another root. In particular, A -> B -> A is not B.
@@ -2074,6 +2091,163 @@ impl Workspace {
         }
         self.status = activity.status_label().into();
         cx.notify();
+    }
+
+    pub(crate) fn toggle_project_switcher(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.project_switcher_visible && !self.project_switcher_closing {
+            self.close_project_switcher(cx);
+            self.focus_active_editor_or_self(window, cx);
+            return;
+        }
+
+        self.project_switcher_close_generation =
+            self.project_switcher_close_generation.wrapping_add(1);
+        self.project_switcher_visible = true;
+        self.project_switcher_closing = false;
+        let paths = self.project_switcher_paths();
+        self.project_switcher_selection = self
+            .root
+            .clone()
+            .or_else(|| self.loading_root.clone())
+            .or_else(|| paths.first().cloned());
+        if let Some(selection) = self.project_switcher_selection.as_deref() {
+            self.scroll_project_switcher_to(selection);
+        }
+        window.focus(&self.project_switcher_focus_handle);
+        cx.notify();
+    }
+
+    /// Recent project paths are sourced only from the real global session
+    /// store. The active and in-flight roots are added first, then any
+    /// duplicates from the recents list are discarded.
+    pub(crate) fn project_switcher_paths(&self) -> Vec<PathBuf> {
+        let recent = self.storage.recent().recent_folders;
+        let mut paths = Vec::with_capacity(recent.len() + 2);
+        let mut seen = HashSet::with_capacity(recent.len() + 2);
+
+        for path in self.root.iter().chain(self.loading_root.iter()) {
+            if seen.insert(path.clone()) {
+                paths.push(path.clone());
+            }
+        }
+        for path in recent {
+            if seen.insert(path.clone()) {
+                paths.push(path);
+            }
+        }
+        paths
+    }
+
+    pub(crate) fn close_project_switcher(&mut self, cx: &mut Context<Self>) {
+        if !self.project_switcher_visible || self.project_switcher_closing {
+            return;
+        }
+
+        self.project_switcher_closing = true;
+        self.project_switcher_close_generation =
+            self.project_switcher_close_generation.wrapping_add(1);
+        let generation = self.project_switcher_close_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(PROJECT_SWITCHER_ANIMATION_DURATION)
+                .await;
+            let _ = this.update(cx, |workspace, cx| {
+                if workspace.project_switcher_close_generation == generation
+                    && workspace.project_switcher_closing
+                {
+                    workspace.project_switcher_visible = false;
+                    workspace.project_switcher_closing = false;
+                    workspace.project_switcher_selection = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn scroll_project_switcher_to(&self, path: &Path) {
+        if let Some(index) = self.project_switcher_item_index(path) {
+            self.project_switcher_scroll_handle.scroll_to_item(index);
+        }
+    }
+
+    fn project_switcher_item_index(&self, path: &Path) -> Option<usize> {
+        if self.root.as_deref() == Some(path) {
+            // The scrollable panel has a "CURRENT PROJECT" section title
+            // immediately before this row.
+            return Some(1);
+        }
+
+        let recent_paths: Vec<_> = self
+            .project_switcher_paths()
+            .into_iter()
+            .filter(|candidate| self.root.as_deref() != Some(candidate.as_path()))
+            .collect();
+        let recent_index = recent_paths
+            .iter()
+            .position(|candidate| candidate.as_path() == path)?;
+        // With a current project the list starts with its section title and
+        // row, followed by the recent-projects section title.
+        Some((if self.root.is_some() { 3 } else { 1 }) + recent_index)
+    }
+
+    pub(crate) fn move_project_switcher_selection(
+        &mut self,
+        delta: isize,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.project_switcher_visible {
+            return;
+        }
+        let paths = self.project_switcher_paths();
+        if paths.is_empty() {
+            self.project_switcher_selection = None;
+            cx.notify();
+            return;
+        }
+
+        let current = self
+            .project_switcher_selection
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| path == selected));
+        let next = current
+            .map(|index| (index as isize + delta).rem_euclid(paths.len() as isize) as usize)
+            .unwrap_or_else(|| if delta < 0 { paths.len() - 1 } else { 0 });
+        self.project_switcher_selection = Some(paths[next].clone());
+        self.scroll_project_switcher_to(&paths[next]);
+        cx.notify();
+    }
+
+    pub(crate) fn activate_project_switcher_selection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = self.project_switcher_selection.clone().or_else(|| {
+            self.project_switcher_paths().first().cloned()
+        });
+        if let Some(path) = path {
+            self.select_project_switcher_project(path, window, cx);
+        }
+    }
+
+    pub(crate) fn select_project_switcher_project(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_project_switcher(cx);
+        self.focus_active_editor_or_self(window, cx);
+        // Reuse the existing asynchronous workspace transition pipeline: it
+        // flushes dirty buffers, invalidates project-scoped workers, and
+        // restores the target root's lazy tab/session snapshot.
+        self.load_root(path, cx);
     }
 
     fn reveal_tree_path(&mut self, path: &Path, cx: &mut Context<Self>) {
@@ -5904,8 +6078,9 @@ impl Workspace {
     }
 
     pub(crate) fn close_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // A pending git confirmation is the topmost modal; Escape cancels it
-        // before it would close a picker underneath.
+        // Close in visual stacking order: destructive confirmation, command
+        // picker, project switcher, then let terminal/editor Escape handling
+        // continue untouched.
         if self.git_confirm.take().is_some() {
             self.focus_active_editor_or_self(window, cx);
             cx.notify();
@@ -5917,16 +6092,19 @@ impl Workspace {
             self.picker_confirm_pending = false;
             self.focus_active_editor_or_self(window, cx);
             cx.notify();
-        } else {
-            // Nothing of ours was open, so let Escape keep travelling. GPUI's
-            // action bubble phase stops propagation by default (see
-            // `App::propagate`), and this handler sits on the focused
-            // terminal's dispatch path — so without this, `on_key_down` never
-            // runs, no 0x1b reaches the PTY, and vim/htop/fzf modals can't be
-            // dismissed. Deliberately not propagated when a picker *was*
-            // closed, so that path keeps its existing behaviour.
-            cx.propagate();
+            return;
         }
+        if self.project_switcher_visible {
+            self.close_project_switcher(cx);
+            self.focus_active_editor_or_self(window, cx);
+            return;
+        }
+
+        // Nothing of ours was open, so let Escape keep travelling. GPUI's
+        // action bubble phase stops propagation by default (see
+        // `App::propagate`), and this handler sits on the focused terminal's
+        // dispatch path — without this, vim/htop/fzf never receive Escape.
+        cx.propagate();
     }
 
     pub(crate) fn picker_next(&mut self, cx: &mut Context<Self>) {
@@ -6042,6 +6220,7 @@ impl Workspace {
     ) {
         match cmd_id {
             "language.change_mode" => self.toggle_language_selector(window, cx),
+            "project.switcher" => self.toggle_project_switcher(window, cx),
             "file.new" => self.new_file(window, cx),
             "file.open" => self.open_file_dialog(window, cx),
             "file.open_folder" => self.open_folder_dialog(window, cx),

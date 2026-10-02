@@ -367,6 +367,15 @@ pub fn command_palette_items() -> Vec<PickerItem> {
             is_recent: false,
             score: 0,
         },
+        PickerItem {
+            id: "project.switcher".into(),
+            title: "Switch Project".into(),
+            subtitle: Some("Navigation".into()),
+            icon: Some("ui_icons/project-switcher_tint.svg".into()),
+            shortcut: Some("Ctrl+Shift+O"),
+            is_recent: false,
+            score: 0,
+        },
         // File
         PickerItem {
             id: "file.new".into(),
