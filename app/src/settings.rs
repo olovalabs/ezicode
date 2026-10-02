@@ -321,10 +321,12 @@ mod tests {
     /// under the same key, which is what makes a saved size survive a restart.
     #[test]
     fn ui_font_size_round_trips_through_its_zed_key() {
-        let mut settings = Settings::default();
-        assert_eq!(settings.ui_font_size, DEFAULT_UI_FONT_SIZE);
+        assert_eq!(Settings::default().ui_font_size, DEFAULT_UI_FONT_SIZE);
 
-        settings.ui_font_size = 21.5;
+        let settings = Settings {
+            ui_font_size: 21.5,
+            ..Settings::default()
+        };
         let json = serde_json::to_string(&settings).unwrap();
         assert!(
             json.contains(r#""ui_font_size":21.5"#),
@@ -367,8 +369,10 @@ mod tests {
         let fixture = crate::test_support::TempDir::new("ui-font-size-file");
         let path = fixture.path().join("settings.json");
 
-        let mut settings = Settings::default();
-        settings.ui_font_size = 21.5;
+        let settings = Settings {
+            ui_font_size: 21.5,
+            ..Settings::default()
+        };
         settings.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path).ui_font_size, 21.5);
 

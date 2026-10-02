@@ -118,11 +118,10 @@ mod tests {
     fn design_pixels_are_exact_at_the_base_size() {
         // The explorer's row, icon, text, indent and header heights.
         for design in [2.0, 6.0, 8.0, 12.0, 13.0, 16.0, 22.0, 24.0, 35.0] {
-            let resolved = rem(design).to_pixels(px(UI_FONT_BASE));
+            let got = px_of(rem(design).to_pixels(px(UI_FONT_BASE)));
             assert!(
-                (px_of(resolved) - design).abs() < 1e-3,
-                "{design}px should stay {design}px at the base size, got {}",
-                px_of(resolved)
+                (got - design).abs() < 1e-3,
+                "{design}px should stay {design}px at the base size, got {got}"
             );
         }
     }
