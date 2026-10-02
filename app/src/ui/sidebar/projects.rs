@@ -10,12 +10,13 @@ use gpui_component::{scroll::ScrollableElement as _, tooltip::Tooltip};
 
 use crate::fs_tree::display_name;
 use crate::theme::Colors;
-use crate::ui::common::section_strip;
+use crate::ui::{activity_bar::ACTIVITY_BAR_WIDTH, common::section_strip};
 use crate::workspace::Workspace;
 
-/// Paints the outside-click target and the sliding panel. Both are absolute
-/// children of the main workspace row, so showing the switcher never changes
-/// the editor/sidebar layout or causes a horizontal relayout.
+/// Paints the outside-click target and sliding panel above the workspace row
+/// without changing the editor/sidebar layout or causing a horizontal relayout.
+/// The panel viewport clips its slide at the activity rail so it emerges from
+/// behind the rail without painting over it.
 pub(crate) fn render_overlay(
     workspace: &Workspace,
     closing: bool,
@@ -28,7 +29,7 @@ pub(crate) fn render_overlay(
         .absolute()
         .top_0()
         .bottom_0()
-        .left(px(50.0))
+        .left(px(ACTIVITY_BAR_WIDTH))
         .right_0()
         .occlude()
         .on_click(cx.listener(|this, _, window, cx| {
@@ -38,6 +39,15 @@ pub(crate) fn render_overlay(
         }));
 
     let panel = render_panel(workspace, closing, panel_width, t, cx);
+    let panel_viewport = div()
+        .id("project-switcher-panel-viewport")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(px(ACTIVITY_BAR_WIDTH))
+        .right_0()
+        .overflow_hidden()
+        .child(panel);
 
     div()
         .id("project-switcher-overlay")
@@ -47,7 +57,7 @@ pub(crate) fn render_overlay(
         .left_0()
         .right_0()
         .child(backdrop)
-        .child(panel)
+        .child(panel_viewport)
         .into_any_element()
 }
 
@@ -218,9 +228,9 @@ fn render_panel(
                 .with_easing(ease_in_out),
             move |panel, delta| {
                 let left = if closing {
-                    px(50.0) - delta * px(panel_width)
+                    px(0.0) - delta * px(panel_width)
                 } else {
-                    px(50.0 - panel_width) + delta * px(panel_width)
+                    px(-panel_width) + delta * px(panel_width)
                 };
                 panel.left(left)
             },

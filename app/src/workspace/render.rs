@@ -96,9 +96,10 @@ impl Render for Workspace {
         let title = self.title();
         let project_switcher_visible = self.project_switcher_visible;
         let project_switcher_closing = self.project_switcher_closing;
-        let project_switcher_width = (f32::from(window.viewport_size().width) - 50.0)
-            .max(0.0)
-            .min(360.0);
+        let project_switcher_width =
+            (f32::from(window.viewport_size().width) - ui::activity_bar::ACTIVITY_BAR_WIDTH)
+                .max(0.0)
+                .min(360.0);
 
         let max_sidebar = f32::from(window.viewport_size().width - px(320.0)).max(220.0);
         let min_sidebar = if self.panel_resize.is_some() {

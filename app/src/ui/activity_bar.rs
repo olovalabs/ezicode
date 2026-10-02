@@ -6,6 +6,8 @@ use gpui_component::tooltip::Tooltip;
 
 use crate::workspace::{Activity, Workspace};
 
+pub(crate) const ACTIVITY_BAR_WIDTH: f32 = 50.0;
+
 pub(crate) fn render_activity_bar(
     activity: Activity,
     show_sidebar: bool,
@@ -16,7 +18,7 @@ pub(crate) fn render_activity_bar(
 ) -> impl IntoElement {
     div()
         .id("activity-bar")
-        .w(px(50.0))
+        .w(px(ACTIVITY_BAR_WIDTH))
         .h_full()
         .flex()
         .flex_col()
