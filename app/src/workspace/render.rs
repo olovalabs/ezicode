@@ -626,7 +626,9 @@ impl Render for Workspace {
                                             &t,
                                             cx,
                                         ),
-                                        None => ui::welcome::render_no_folder_panel(&t, cx),
+                                        None => {
+                                            ui::welcome::render_no_folder_panel(&t, self, cx)
+                                        }
                                     },
                                     Activity::Search => {
                                         ui::sidebar::search::render_search_panel(self, window, cx)

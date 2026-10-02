@@ -1137,7 +1137,7 @@ impl Workspace {
         self.file_index_task = None;
         self.picker_filter_cancel.cancel();
         self.picker_filter_task = None;
-        self.close_all_project_tabs(cx);
+        self.close_all_project_tabs();
         self.session = Cancellation::default();
         self.auto_save_generation = self.auto_save_generation.wrapping_add(1);
         self.auto_save_task = None;
@@ -1282,7 +1282,7 @@ impl Workspace {
 
     /// Close every open editor when leaving a project so the next folder
     /// starts clean. Unsaved buffers are flushed first.
-    fn close_all_project_tabs(&mut self, cx: &mut Context<Self>) {
+    fn close_all_project_tabs(&mut self) {
         for tab in &self.tabs {
             if let Some(p) = &tab.path {
                 if let Some(lang_id) = tab.language() {
@@ -5949,7 +5949,7 @@ impl Workspace {
         {
             self.filter_file_finder(cx);
         } else if let Some(picker) = &mut self.picker {
-            picker.filter(&picker.input.read(cx).value().to_string());
+            picker.filter(picker.input.read(cx).value().as_ref());
         }
         cx.notify();
     }

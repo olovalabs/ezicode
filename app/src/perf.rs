@@ -41,7 +41,7 @@ pub fn mark(label: &str) {
 /// RAII span. Reports elapsed time when the guard is dropped.
 ///
 /// `label` is `'static` on purpose: it is a fixed site name, not a formatted
-
+/// string, so building the span never allocates.
 pub struct Span {
     label: &'static str,
     start: Instant,

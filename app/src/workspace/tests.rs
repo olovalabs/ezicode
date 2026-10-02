@@ -17,11 +17,11 @@ impl Render for TestRoot {
     }
 }
 
-fn workspace_with_store<'a>(
-    cx: &'a mut TestAppContext,
+fn workspace_with_store(
+    cx: &mut TestAppContext,
     store: StateStore,
     ready: async_channel::Receiver<GlobalState>,
-) -> (Entity<Workspace>, &'a mut VisualTestContext) {
+) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.executor().allow_parking();
     cx.update(gpui_component::init);
     let (root, cx) = cx.add_window_view(|window, cx| {

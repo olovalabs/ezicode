@@ -75,8 +75,14 @@ fn welcome_button(
         .on_click(on_click)
 }
 
-pub(crate) fn render_no_folder_panel(t: &Colors, cx: &mut Context<Workspace>) -> gpui::AnyElement {
-    let global_state = cx.entity().read(cx).storage.recent();
+pub(crate) fn render_no_folder_panel(
+    t: &Colors,
+    workspace: &Workspace,
+    cx: &mut Context<Workspace>,
+) -> gpui::AnyElement {
+    // Read via the borrowed workspace: `cx.entity().read(cx)` would re-lease
+    // the Workspace while `Render::render` already holds it and panic.
+    let global_state = workspace.storage.recent();
     let recent_folders: Vec<_> = global_state.recent_folders.into_iter().collect();
 
     div()

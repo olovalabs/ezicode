@@ -143,7 +143,7 @@ impl ServerLaunch {
             self.root.as_deref(),
             self.events.clone(),
         )
-        .map(LaunchResult::Client)
+        .map(|client| LaunchResult::Client(Box::new(client)))
         .unwrap_or_else(|| LaunchResult::Failed(format!("failed to start {}", self.adapter.name)))
     }
 }
