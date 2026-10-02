@@ -10,7 +10,6 @@ use std::{
     collections::{BTreeSet, HashMap},
     ops::Range,
     sync::{Arc, LazyLock, Mutex},
-    usize,
 };
 use sum_tree::Bias;
 use tree_sitter::{

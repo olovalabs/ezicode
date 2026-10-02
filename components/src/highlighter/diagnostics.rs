@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     ops::{Deref, Range},
-    usize,
 };
 
 use gpui::{px, App, HighlightStyle, Hsla, SharedString, UnderlineStyle};
