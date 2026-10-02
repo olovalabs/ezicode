@@ -120,11 +120,7 @@ fn main() {
                 KeyBinding::new("ctrl-shift-o", ToggleProjectSwitcher, None),
                 KeyBinding::new("up", ProjectSwitcherPrev, Some("ProjectSwitcher")),
                 KeyBinding::new("down", ProjectSwitcherNext, Some("ProjectSwitcher")),
-                KeyBinding::new(
-                    "enter",
-                    ProjectSwitcherActivate,
-                    Some("ProjectSwitcher"),
-                ),
+                KeyBinding::new("enter", ProjectSwitcherActivate, Some("ProjectSwitcher")),
                 KeyBinding::new("ctrl-shift-e", ShowExplorer, None),
                 KeyBinding::new("ctrl-shift-f", ShowSearch, None),
                 KeyBinding::new("ctrl-shift-g", ShowGit, None),

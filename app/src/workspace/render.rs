@@ -64,9 +64,7 @@ impl Render for Workspace {
         // The search view owns real text inputs: while it is the visible panel,
         // focus is left alone, otherwise every render would yank focus out of
         // the query/replace boxes and make them untypeable.
-        if !self.project_switcher_visible
-            && self.project_switcher_focus_handle.is_focused(window)
-        {
+        if !self.project_switcher_visible && self.project_switcher_focus_handle.is_focused(window) {
             self.focus_active_editor_or_self(window, cx);
         }
         let search_panel_visible = self.show_sidebar && self.activity == Activity::Search;
@@ -96,10 +94,9 @@ impl Render for Workspace {
         let title = self.title();
         let project_switcher_visible = self.project_switcher_visible;
         let project_switcher_closing = self.project_switcher_closing;
-        let project_switcher_width =
-            (f32::from(window.viewport_size().width) - ui::activity_bar::ACTIVITY_BAR_WIDTH)
-                .max(0.0)
-                .min(360.0);
+        let project_switcher_width = (f32::from(window.viewport_size().width)
+            - ui::activity_bar::ACTIVITY_BAR_WIDTH)
+            .clamp(0.0, 360.0);
 
         let max_sidebar = f32::from(window.viewport_size().width - px(320.0)).max(220.0);
         let min_sidebar = if self.panel_resize.is_some() {

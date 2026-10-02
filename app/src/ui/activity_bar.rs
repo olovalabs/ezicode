@@ -242,9 +242,7 @@ fn project_switcher_icon(
                 style.text_color(rgba(t.text))
             }),
     )
-    .tooltip(|window, cx| {
-        Tooltip::new("Switch Project (Ctrl+Shift+O)").build(window, cx)
-    })
+    .tooltip(|window, cx| Tooltip::new("Switch Project (Ctrl+Shift+O)").build(window, cx))
     .on_click(cx.listener(|this, _, window, cx| {
         this.toggle_project_switcher(window, cx);
     }))

@@ -2093,11 +2093,7 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(crate) fn toggle_project_switcher(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn toggle_project_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.project_switcher_visible && !self.project_switcher_closing {
             self.close_project_switcher(cx);
             self.focus_active_editor_or_self(window, cx);
@@ -2196,11 +2192,7 @@ impl Workspace {
         Some((if self.root.is_some() { 3 } else { 1 }) + recent_index)
     }
 
-    pub(crate) fn move_project_switcher_selection(
-        &mut self,
-        delta: isize,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn move_project_switcher_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
         if !self.project_switcher_visible {
             return;
         }
@@ -2228,9 +2220,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let path = self.project_switcher_selection.clone().or_else(|| {
-            self.project_switcher_paths().first().cloned()
-        });
+        let path = self
+            .project_switcher_selection
+            .clone()
+            .or_else(|| self.project_switcher_paths().first().cloned());
         if let Some(path) = path {
             self.select_project_switcher_project(path, window, cx);
         }

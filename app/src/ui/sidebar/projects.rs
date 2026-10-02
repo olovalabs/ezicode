@@ -297,7 +297,9 @@ fn project_row(
     };
 
     div()
-        .id(SharedString::from(format!("project-switcher-row-{row_index}")))
+        .id(SharedString::from(format!(
+            "project-switcher-row-{row_index}"
+        )))
         .w_full()
         .h(px(50.0))
         .min_w(px(0.0))
@@ -355,11 +357,7 @@ fn project_row(
                 div()
                     .flex_none()
                     .text_size(px(10.0))
-                    .text_color(rgba(if opening {
-                        t.text_accent
-                    } else {
-                        t.text_muted
-                    }))
+                    .text_color(rgba(if opening { t.text_accent } else { t.text_muted }))
                     .child(SharedString::from(status)),
             )
         })

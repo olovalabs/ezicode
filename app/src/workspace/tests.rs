@@ -78,8 +78,10 @@ async fn project_switcher_uses_the_active_root_and_real_recent_folders(cx: &mut 
     cx.update(|window, cx| {
         workspace.update(cx, |workspace, cx| workspace.close_modal(window, cx));
     });
-    cx.condition(&workspace, |workspace, _| !workspace.project_switcher_visible)
-        .await;
+    cx.condition(&workspace, |workspace, _| {
+        !workspace.project_switcher_visible
+    })
+    .await;
 }
 
 #[gpui::test]
@@ -207,8 +209,10 @@ async fn switching_back_restores_tabs_cursor_and_saved_buffer_content(cx: &mut T
 
     let (workspace, cx) = workspace(cx, &fixture);
     cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.load_root(a.clone(), cx)));
-    cx.condition(&workspace, |workspace, _| workspace.root.as_ref() == Some(&a))
-        .await;
+    cx.condition(&workspace, |workspace, _| {
+        workspace.root.as_ref() == Some(&a)
+    })
+    .await;
 
     let edited = "first line\nsecond line\nthird line\nfourth line";
     cx.update(|window, cx| {
@@ -247,13 +251,17 @@ async fn switching_back_restores_tabs_cursor_and_saved_buffer_content(cx: &mut T
     });
 
     cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.load_root(b.clone(), cx)));
-    cx.condition(&workspace, |workspace, _| workspace.root.as_ref() == Some(&b))
-        .await;
+    cx.condition(&workspace, |workspace, _| {
+        workspace.root.as_ref() == Some(&b)
+    })
+    .await;
     assert_eq!(std::fs::read_to_string(&a_second).unwrap(), edited);
 
     cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.load_root(a.clone(), cx)));
-    cx.condition(&workspace, |workspace, _| workspace.root.as_ref() == Some(&a))
-        .await;
+    cx.condition(&workspace, |workspace, _| {
+        workspace.root.as_ref() == Some(&a)
+    })
+    .await;
     workspace.read_with(cx, |workspace, _| {
         assert_eq!(workspace.tabs.len(), 2);
         assert_eq!(workspace.active_tab, 1);
@@ -271,8 +279,10 @@ async fn switching_back_restores_tabs_cursor_and_saved_buffer_content(cx: &mut T
     cx.update(|window, cx| {
         workspace.update(cx, |workspace, cx| workspace.restore_active_tab(window, cx))
     });
-    cx.condition(&workspace, |workspace, _| workspace.tabs[1].editor.is_some())
-        .await;
+    cx.condition(&workspace, |workspace, _| {
+        workspace.tabs[1].editor.is_some()
+    })
+    .await;
     workspace.read_with(cx, |workspace, cx| {
         let editor = workspace.tabs[1].editor.as_ref().unwrap().read(cx);
         assert_eq!(editor.value().as_str(), edited);
