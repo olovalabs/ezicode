@@ -1,111 +1,55 @@
-
 <div align="center">
-<img width="1630" height="220" alt="ezicode" src="https://github.com/user-attachments/assets/2020bb4b-0cd8-484d-98c5-e32721be6053" />
 
-<img width="1448" height="1000" alt="Untitled Design (1)" src="https://github.com/user-attachments/assets/1f9ae29f-5742-4f81-872d-f350cc46c992" />
+<img width="800" alt="ezicode" src="https://github.com/user-attachments/assets/2020bb4b-0cd8-484d-98c5-e32721be6053" />
 
-**A blazingly fast, GPU-accelerated native code editor built with Rust, GPUI, and Tree-sitter.**
+# ezicode
 
-[![Rust](https://img.shields.io/badge/rust-2021%20edition-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
-[![GPUI](https://img.shields.io/badge/UI%20Framework-GPUI-blueviolet.svg?style=flat-square)](https://github.com/zed-industries/zed)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational.svg?style=flat-square)](https://github.com)
-[![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg?style=flat-square)](LICENSE)
+**GPU-accelerated, lightweight native code editor built with Rust and GPUI.**
 
-_Combining the raw speed and hardware-accelerated rendering of Zed with the friendly ergonomics and workflow of modern code editors._
-
-[Quick Start](#-quick-start) •
-[Features](#-key-features) •
-[Language Servers](#-language-servers--lsp) •
-[Keyboard Shortcuts](#-keyboard-shortcuts) •
-[Configuration](#-configuration)
+[![Language](https://img.shields.io/badge/Language-Rust-orange?style=flat-square)](https://www.rust-lang.org)
+[![Framework](https://img.shields.io/badge/Framework-GPUI-blueviolet?style=flat-square)](https://github.com/zed-industries/zed)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-informational?style=flat-square)](https://github.com/olovalabs/ezicode)
+[![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-blue?style=flat-square)](LICENSE)
 
 </div>
 
 ---
 
-## ⚡ Key Features
-
-### 🚀 Hardware-Accelerated Editor Core
-
-- **GPUI Rendering**: Butter-smooth 60+ FPS rendering driven directly by your GPU.
-- **Instant Cold Starts**: Starts up in milliseconds with near-zero idle resource consumption.
-- **Rope Buffer Architecture**: Effortlessly view and edit massive source files without UI freezes.
-- **Tree-sitter Syntax Highlighting**: Accurate, semantic, AST-based incremental highlighting.
-
-### 🖥️ Integrated GPU Terminal (`gpui-terminal`)
-
-- **Alacritty + PTY Engine**: Hardware-accelerated terminal emulation with full 24-bit RGB truecolor.
-- **Rich TUI Support**: Seamlessly run interactive console apps like `vim`, `nano`, `htop`, `lazygit`, and AI agents.
-- **Multi-Tab Sessions**: Launch and switch between multiple shell instances with process lifecycle tracking (running, exited, error status dots).
-- **Zed-Style Right Dock**: A second terminal panel that slides in from the right edge—toggled by the panel icon in the status bar's bottom-right corner, drag-resizable via its left edge, and running completely independent PTY sessions that never share state with the bottom panel.
-- **Auto-Detected Shells**: Automatically finds Git Bash, PowerShell, or `pwsh` on Windows, and `zsh`, `fish`, or `bash` on Unix systems.
-- **Zed-Style Navigation**: Dedicated shortcuts for splitting, cycling, quick-switching (`Alt+1..5`), and maximizing terminal views.
-- **Real Scrollback & Auto-Scroll**: 100 000 lines of configurable history, viewport pinned to the newest output, jump-to-bottom on keypress, and drag-past-the-edge auto-scrolling while selecting.
-- **Answered Terminal Queries**: Cursor position reports, device attributes, `CSI 14t`/`CSI 18t` text-area sizing and `OSC 4/10/11/12` colour queries are replied to inline, so full-screen TUIs never stall.
-- **Alacritty-Grade Selection**: Character, semantic (double-click), line (triple-click) and block (`Alt`-drag) selections that span the scrollback, with optional copy-on-select and bracketed paste.
-- **Mouse Reporting**: X10/SGR/UTF-8 encodings, motion and drag tracking, alternate-scroll, and `Shift` to bypass the application and select text anyway.
-- **Clickable Hyperlinks**: `OSC 8` links, URLs, and `path:line:column` targets underline on `Ctrl`/`Cmd` hover and open on click.
-- **Buffer Search & Vi Mode**: Regex or literal search with highlighted matches and next/previous cycling, plus a keyboard-driven vi mode (motions, visual/block/line selection, yank).
-- **Faithful Text Rendering**: Straight, double, dotted, dashed and curly underlines with custom underline colours, strikethrough, dim/bold/italic/inverse/hidden, wide glyphs, combining marks, and hand-rasterised box-drawing characters.
-- **Cursor & Focus Fidelity**: All DECSCUSR shapes, blink following the application's request, hollow cursor when unfocused, and focus reporting (DEC mode 1004).
-- **Live Window Title**: Terminal tabs follow the `OSC 0/2` title the shell or TUI sets.
-
-### 🔌 Zero-Config Language Server Protocol (LSP)
-
-- **Automatic Server Provisioning**: Node-based language servers install themselves silently on demand into a private sandboxed directory (`~/.local/share/ezicode/language-servers/`)—no global `npm install` required.
-- **Toolchain Discovery**: Auto-detects local system compilers and language servers installed on `PATH` (e.g., `rust-analyzer`, `gopls`, `clangd`, `basedpyright`).
-- **Rich LSP Features**: Real-time diagnostics (errors & warnings), code completion popovers, hover tooltips, go-to-definition (`F12`), and document formatting (`Shift+Alt+F`, plus optional format-on-save via `editor.formatOnSave`).
-
-### 🐙 Built-In Git & Interactive Diff Viewer
-
-- **Source Control Sidebar**: Fast workspace status detection (`git status --porcelain=v1 -z`) listing staged, unstaged, and untracked changes.
-- **One-Click Staging**: Stage, unstage, discard, and commit changes directly from the UI.
-- **Side-by-Side & Unified Diffs**: Full-featured split or unified diff editor with character-level intra-line highlights, synced scrolling, and additions/deletions statistics.
-
-### 📁 High-Performance Project Explorer
-
-- **Virtual Viewport (`uniform_list`)**: Virtualized rendering that scales to repositories with hundreds of thousands of files.
-- **Lazy Directory Loading**: Only reads directories on expansion; caches directory snapshots to avoid redundant disk I/O.
-- **Live Filesystem Watcher**: Instant UI updates when files are changed, created, or deleted externally (`notify`).
-- **Complete File Operations**: Inline creation of files and folders, inline rename (`F2`), safe drag-and-drop file moving with loop protection, copy/cut/paste/duplicate, and auto-reveal for active files.
-- **VS Code Sticky Scroll**: Parent folders of the rows you are looking at stay pinned to the top of the panel and slide out as their section ends, so context is never lost inside deeply nested trees.
-- **VS Code Tree Interactions**: Multi-selection (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-click, <kbd>Shift</kbd>-click, <kbd>Shift</kbd>+arrows), type-ahead jump, PageUp/PageDown, drag hover-to-expand with edge auto-scroll, indent guides with an active branch highlight, focus vs. selection styling, and a full context menu.
-
-### 🎨 Zed-Compatible Themes & Typography
-
-- **Exact Zed JSON Themes**: Ships with the **GitHub** family (9 themes, default **GitHub Dark**), covering both UI chrome tokens and 46 Tree-sitter syntax tokens.
-- **User Themes, No Recompile**: Drop any Zed-format theme JSON into `themes/` next to `settings.json` (e.g. `~/.config/ezicode/themes/`) — both full theme families and single-theme files load at startup, and a theme named like a built-in overrides it. See [`docs/sample-theme.json`](docs/sample-theme.json) for a complete, annotated example that also works in Zed itself.
-- **Curated Typography**: Pre-bundled with **IBM Plex Sans** (for UI) and **Lilex** (for the code buffer and terminal), automatically registered with GPUI at launch.
-- **Rich File Icons**: Zed's complete SVG icon theme mapping file extensions to high-fidelity icons.
+> **ezicode** is a fast native desktop code editor engineered for responsiveness, low latency, and minimal resource usage. It combines direct GPU rendering with Tree-sitter semantic parsing, an integrated terminal, and zero-configuration language tooling.
 
 ---
 
-## 🚀 Quick Start
+### About
 
-### Prerequisites
+ezicode replaces heavy web-based editor architectures with a lean, compiled native binary. Built using Rust and GPUI, it offers instant cold starts, high-frame-rate rendering, and low memory consumption while providing full modern editor workflows.
 
-- **Rust toolchain** (stable 1.80+ recommended): [rustup.rs](https://rustup.rs/)
-- **Git** (for source control features)
-- **Node.js & npm** (optional, enables automatic installation of web/JS language servers)
+---
 
-#### Linux System Dependencies
+### Core Architecture
 
-On Linux, GPUI requires X11/Wayland and font development libraries to link:
+| Component | Engine | Description |
+| :--- | :--- | :--- |
+| **Rendering** | GPUI | Direct GPU acceleration across Vulkan, DirectX, Metal, and Wayland/X11 |
+| **Buffer Store** | Rope | Non-blocking, low-memory handling for large files without UI freezes |
+| **Highlighter** | Tree-sitter | Fast, incremental AST-based syntax highlighting |
+| **Terminal** | Alacritty / PTY | GPU-accelerated terminal with 24-bit truecolor and multi-tab sessions |
+| **Intellisense** | LSP JSON-RPC | Automatic language server provisioning, diagnostics, and code formatting |
+| **Theme Engine** | Zed JSON | Native compatibility with Zed themes and typography tokens |
 
-- **Ubuntu / Debian**:
-  ```bash
-  sudo apt install -y libxkbcommon-x11-dev libxkbcommon-dev libfontconfig1-dev libfreetype6-dev libxcb1-dev
-  ```
-- **Fedora / RHEL**:
-  ```bash
-  sudo dnf install -y libxkbcommon-x11-devel libxkbcommon-devel fontconfig-devel freetype-devel libxcb-devel
-  ```
-- **Arch Linux**:
-  ```bash
-  sudo pacman -S libxkbcommon-x11 libxkbcommon fontconfig freetype2 libxcb
-  ```
+---
 
-### Running from Source
+### Key Capabilities
+
+* **Hardware-Accelerated UI**: 60+ FPS butter-smooth rendering driven directly by the GPU.
+* **Instant Startups**: Millisecond launch times with near-zero idle resource footprint.
+* **Zero-Config LSP**: On-demand sandboxed language server installation and automatic toolchain discovery on `PATH`.
+* **Integrated Terminal Dock**: Embedded bottom and side terminal panels with independent shell sessions.
+* **Native Git Integration**: Built-in status tracking, side-by-side and unified diff viewers, and stage management.
+* **Sticky Scroll Explorer**: Virtualized directory tree with sticky parent folder headers for deep navigation.
+
+---
+
+### Quick Start
 
 ```bash
 # Clone the repository
@@ -115,299 +59,14 @@ cd ezicode
 # Run in development mode
 cargo run -p ezicode
 
-# Or use the convenience scripts
-# On Linux / macOS:
-./run.sh dev
-
-# On Windows:
-run.cmd dev
-```
-
-### Building for Release
-
-```bash
-# Compile optimized release binary with LTO
+# Build release binary
 cargo build --release -p ezicode
-
-# The binary will be generated at target/release/ezicode (or ezicode.exe on Windows)
 ```
-
----
-
-## 📦 Releases
-
-Releases are built by a hand-written GitHub Actions workflow
-(`.github/workflows/release.yml`) that runs `cargo build --release` on each
-platform and uploads the result straight to the GitHub Release. **Each
-platform uploads independently** — there is no global publish step, so a
-queued runner (usually macOS) can never hold up Linux or Windows.
-
-### Cutting a release
-
-1. Bump `version` in `app/Cargo.toml` and commit.
-2. Tag that commit `v<version>` and push the tag: `git tag v0.1.0 && git push --follow-tags`
-
-Pushing the tag is the build trigger: it creates the release and starts every
-build job. The tag must match the `version` in `app/Cargo.toml` exactly — each
-job checks this first and fails fast otherwise.
-
-```bash
-sed -i 's/^version = ".*"/version = "0.1.0"/' app/Cargo.toml
-git commit -am "chore: release 0.1.0"
-git tag v0.1.0 && git push --follow-tags
-```
-
-Expect roughly 10–20 minutes per platform on a cold cache (the LTO release
-build of GPUI plus the tree-sitter grammars is the bulk of it); repeat builds
-are faster thanks to `rust-cache`. Linux and Windows go live as soon as their
-own job finishes — they never wait for macOS, whose runners can queue for a
-long time.
-
-### What gets built
-
-| Platform | Target | Artifacts |
-| --- | --- | --- |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.gz`, `.deb`, `.rpm`, Arch `.pkg.tar.zst`, AppImage |
-| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip`, standalone `.exe` |
-| macOS Apple Silicon | `aarch64-apple-darwin` | `.tar.gz` |
-
-Every file ships with a `.sha256` sidecar. GitHub attaches a source
-tarball/zip to each release automatically.
-
-### Installing
-
-Artifact names follow the version. For a prerelease such as `0.1.0-alpha.1`,
-Debian and RPM spell the pre-release with `~` and Arch with a dot, because
-`makepkg` and `rpmbuild` both reject a hyphen in a version field:
-
-```bash
-# Debian / Ubuntu          (ezicode_0.1.0~alpha.1_amd64.deb for a prerelease)
-sudo apt install ./ezicode_0.1.0_amd64.deb
-
-# Fedora / RHEL / openSUSE   (ezicode-0.1.0~alpha.1-1.x86_64.rpm)
-sudo dnf install ./ezicode-0.1.0-1.x86_64.rpm
-
-# Arch                       (ezicode-0.1.0.alpha.1-1-x86_64.pkg.tar.zst)
-sudo pacman -U ./ezicode-0.1.0-1-x86_64.pkg.tar.zst
-
-# Any distro, no package manager
-chmod +x ezicode-0.1.0-x86_64.AppImage && ./ezicode-0.1.0-x86_64.AppImage
-```
-
-### How the packaging is put together
-
-There is one workflow: **`.github/workflows/release.yml`**, hand written and
-safe to edit. It has four jobs: one `cargo build --release` per platform that
-uploads its archive straight to the release, plus a `linux-packages` job
-(which needs only the Linux build) that turns the Linux tarball into `.deb`,
-`.rpm`, Arch `.pkg.tar.zst` and AppImage and uploads those too.
-
-If you add a target, add a job. There is no `.msi` or `curl | sh` / PowerShell
-installer — those were cargo-dist-generated wrappers around the same binaries,
-and the release page serves that purpose directly.
-
-### Runtime dependencies
-
-The binary links `libc`, `libgcc_s`, `libm`, `libxcb`, `libxkbcommon` and
-`libxkbcommon-x11`, and `dlopen`s the Vulkan loader at runtime. The packages
-declare all of those, and you also need a working Vulkan driver — without one
-the window opens and renders nothing.
-
-The Linux binary is built on `ubuntu-22.04`, so its glibc is 2.35: the `.deb`
-only installs on Ubuntu 22.04+ and Debian 12+. To support older distributions,
-set `min-glibc-version` in `Cargo.toml` and build in a matching older container
-via `github-custom-runners`.
-
----
-
-## 🔌 Language Servers (LSP)
-
-`ezicode` features an automated language server manager modeled after Zed's architecture:
-
-| Language Server               | Handled Languages                                      | Installation Mode                        |
-| ----------------------------- | ------------------------------------------------------ | ---------------------------------------- |
-| `typescript-language-server`  | TypeScript (`.ts`, `.tsx`), JavaScript (`.js`, `.jsx`) | **Auto-installed** on first use via Node |
-| `vscode-css-language-server`  | CSS, SCSS, SASS                                        | **Auto-installed** on first use via Node |
-| `vscode-html-language-server` | HTML, HTM, XHTML                                       | **Auto-installed** on first use via Node |
-| `json-language-server`        | JSON, JSONC                                            | **Auto-installed** on first use via Node |
-| `yaml-language-server`        | YAML, YML                                              | **Auto-installed** on first use via Node |
-| `bash-language-server`        | Shell script (`.sh`, `.bash`, `.zsh`)                  | **Auto-installed** on first use via Node |
-| `dockerfile-language-server`  | Dockerfile, Containerfile                              | **Auto-installed** on first use via Node |
-| `rust-analyzer`               | Rust (`.rs`)                                           | Auto-discovered on `PATH`                |
-| `gopls`                       | Go (`.go`)                                             | Auto-discovered on `PATH`                |
-| `basedpyright` / `pyright`    | Python (`.py`, `.pyw`)                                 | Auto-discovered on `PATH`                |
-| `clangd`                      | C / C++ (`.c`, `.cpp`, `.h`, `.hpp`)                   | Auto-discovered on `PATH`                |
-| `zls`                         | Zig (`.zig`)                                           | Auto-discovered on `PATH`                |
-| `lua-language-server`         | Lua (`.lua`)                                           | Auto-discovered on `PATH`                |
-| `taplo`                       | TOML (`.toml`)                                         | Auto-discovered on `PATH`                |
-| `intelephense`                | PHP (`.php`)                                           | Auto-discovered on `PATH`                |
-| `ruby-lsp`                    | Ruby (`.rb`)                                           | Auto-discovered on `PATH`                |
-
-> [!NOTE]
-> When opening a file whose server is managed via Node (like TypeScript or CSS), `ezicode` installs the server into a private, isolated runtime directory. The status bar indicates `◌ installing…`, and once complete, diagnostics and completions attach automatically without restarting.
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-### General & Workspace
-
-| Shortcut                                          | Action                        |
-| ------------------------------------------------- | ----------------------------- |
-| <kbd>Ctrl</kbd> + <kbd>P</kbd>                    | Quick Open File (File Finder) |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> | Command Palette               |
-| <kbd>Ctrl</kbd> + <kbd>G</kbd>                    | Go to Line:Column             |
-| <kbd>Escape</kbd>                                 | Close Active Modal / Popup    |
-| <kbd>Ctrl</kbd> + <kbd>N</kbd>                    | New Untitled File             |
-| <kbd>Ctrl</kbd> + <kbd>O</kbd>                    | Open File                     |
-| <kbd>Ctrl</kbd> + <kbd>S</kbd>                    | Save Current Buffer           |
-| <kbd>Ctrl</kbd> + <kbd>,</kbd>                    | Open Settings                 |
-| <kbd>Ctrl</kbd> + <kbd>B</kbd>                    | Toggle Sidebar                |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd> | Focus Explorer                |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> | Focus Search                  |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd> | Focus Source Control          |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd> | Focus Extensions              |
-
-### Editor & Navigation
-
-| Shortcut                                            | Action                    |
-| --------------------------------------------------- | ------------------------- |
-| <kbd>Ctrl</kbd> + <kbd>W</kbd>                      | Close Active Tab          |
-| <kbd>Ctrl</kbd> + <kbd>Tab</kbd>                    | Next Tab                  |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> | Previous Tab              |
-| <kbd>F12</kbd>                                      | Go to Definition          |
-| <kbd>Shift</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd>    | Format Document (LSP)     |
-| <kbd>Ctrl</kbd> + <kbd>F</kbd>                      | Find in Buffer            |
-| <kbd>Ctrl</kbd> + <kbd>=</kbd> / <kbd>+</kbd>       | Increase Editor Font Size |
-| <kbd>Ctrl</kbd> + <kbd>-</kbd>                      | Decrease Editor Font Size |
-| <kbd>Ctrl</kbd> + <kbd>0</kbd>                      | Reset Font Size           |
-
-### Integrated Terminal
-
-| Shortcut                                                        | Action                       |
-| --------------------------------------------------------------- | ---------------------------- |
-| <kbd>Ctrl</kbd> + <kbd>`</kbd> / <kbd>Ctrl</kbd> + <kbd>J</kbd> | Toggle Terminal Panel        |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>`</kbd>               | New Terminal Session         |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>               | Close Active Terminal        |
-| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>K</kbd>               | Clear Terminal Buffer        |
-| <kbd>Alt</kbd> + <kbd>1</kbd> .. <kbd>5</kbd>                   | Jump to Terminal Tab 1 – 5   |
-| <kbd>Alt</kbd> + <kbd>→</kbd> / <kbd>←</kbd>                    | Next / Previous Terminal Tab |
-
-### File Explorer
-
-| Shortcut                                                     | Action                    |
-| ------------------------------------------------------------ | ------------------------- |
-| <kbd>↑</kbd> / <kbd>↓</kbd>                                  | Navigate File Tree Rows   |
-| <kbd>→</kbd> / <kbd>←</kbd>                                  | Expand / Collapse Folder  |
-| <kbd>Enter</kbd>                                             | Open File / Toggle Folder |
-| <kbd>F2</kbd>                                                | Rename File or Folder     |
-| <kbd>Delete</kbd>                                            | Delete File or Folder     |
-| <kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> | Copy / Cut / Paste File   |
-| <kbd>Ctrl</kbd> + <kbd>A</kbd>                               | Select All Rows           |
-| <kbd>Shift</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd>               | Extend Selection          |
-| <kbd>PageUp</kbd> / <kbd>PageDown</kbd>                      | Jump a Viewport           |
-| <kbd>Home</kbd> / <kbd>End</kbd>                             | First / Last Row          |
-| Type a Name                                                  | Jump to Matching Row      |
-| <kbd>Esc</kbd>                                               | Collapse Multi-Selection  |
-
----
-
-## ⚙️ Configuration
-
-`ezicode` stores its configuration in a standard JSON format located at:
-
-- **Windows**: `%APPDATA%\ezicode\settings.json`
-- **macOS**: `~/Library/Application Support/ezicode/settings.json`
-- **Linux**: `~/.config/ezicode/settings.json`
-
-### Example `settings.json`
-
-```json
-{
-  "editor.fontSize": 14.5,
-  "editor.fontFamily": "Lilex",
-  "editor.tabSize": 4,
-  "editor.autoSave": "afterDelay",
-  "editor.autoSaveDelay": 1000,
-  "editor.formatOnSave": "on",
-  "workbench.colorTheme": "GitHub Dark",
-  "terminal.fontSize": 13.5
-}
-```
-
-### Configurable Options
-
-- `editor.fontSize`: Font size in pixels for the code buffer (default: `14.5`).
-- `editor.fontFamily`: Custom monospace font family (falls back to bundled `Lilex`).
-- `editor.tabSize`: Number of spaces per tab indent (default: `4`). Also sent to language servers as the formatting tab size.
-- `editor.autoSave`: Auto-save behavior: `"off"`, `"afterDelay"`, or `"onFocusChange"`.
-- `editor.autoSaveDelay`: Debounce duration in milliseconds when `"afterDelay"` is chosen (default: `1000`).
-- `editor.formatOnSave`: Ask the buffer's language server to format the document before saving (`"off"` by default; `Shift+Alt+F` always formats on demand).
-- `workbench.colorTheme`: Active color theme (e.g. `"GitHub Dark"`, `"GitHub Light"`, `"GitHub Dark Dimmed"`, or the name of any theme you dropped into the themes directory).
-
-### Custom Themes
-
-Themes are Zed-format JSON files. The built-in GitHub family is embedded in the binary; your own themes load from the `themes/` subdirectory of the config directory (`~/.config/ezicode/themes/` on Linux, `%APPDATA%\ezicode\themes\` on Windows, `~/Library/Application Support/ezicode/themes/` on macOS — created on first run). Any theme family or single-theme file placed there appears in the Settings page and command palette after the next launch, and a theme with the same name as a built-in replaces it. A minimal theme only needs `background`, `editor.background` and `editor.foreground` — every other token falls back through a derivation chain to a light/dark base palette. The full architecture is documented in [`docs/architecture-themes-syntax-formatting.md`](docs/architecture-themes-syntax-formatting.md), and [`docs/sample-theme.json`](docs/sample-theme.json) is a complete example.
-
----
-
-## 📂 Project Architecture
-
-```text
-ezicode/
-├── app/                      # Main application crate
-│   ├── assets/               # Embedded fonts, themes, file icons & logos
-│   │   ├── file_icons/       # Zed SVG file icons
-│   │   ├── fonts/            # IBM Plex Sans & Lilex TTF font binaries
-│   │   ├── logo/             # ezicode branding & application icons
-│   │   ├── themes/           # Zed JSON theme definitions
-│   │   └── ui_icons/         # Activity bar & panel glyphs
-│   └── src/
-│       ├── actions.rs        # GPUI actions and command declarations
-│       ├── fs_tree.rs        # Virtualized file tree model & filesystem ops
-│       ├── git.rs            # Native Git porcelain parser and process runner
-│       ├── lang.rs           # Language detection & LSP server mapping
-│       ├── linux_desktop.rs  # Linux desktop entry, icon theme & _NET_WM_ICON
-│       ├── lsp/              # LSP JSON-RPC client, Node auto-installer & adapters
-│       ├── terminal/         # Integrated GPU terminal panel & process lifecycle
-│       ├── theme/            # Zed JSON theme loader & color token extraction
-│       ├── ui/               # UI components: tabs, status bar, diffs, settings
-│       └── workspace/        # Main workspace entity, state management & render loop
-├── components/               # Vendored and optimized GPUI components
-├── docs/                     # Architecture docs & the sample theme file
-├── gpui-terminal/            # Alacritty terminal emulator bindings for GPUI
-├── run.cmd                   # Windows developer helper script
-├── run.sh                    # Unix developer helper script
-└── Cargo.toml                # Root workspace configuration & compiler profiles
-```
-
----
-
-## 🛠️ Diagnostics & Troubleshooting
-
-- **Panic Logger**: On unexpected crashes, `ezicode` automatically generates detailed trace logs in your system temporary directory (`ezicode-panic.log`) instead of silently exiting.
-- **Linux Linker Errors (`unable to find library -lxkbcommon-x11`)**: If compilation fails at the linking stage with `cannot find -lxkbcommon-x11`, install the development package providing the shared library symlinks (`sudo apt install -y libxkbcommon-x11-dev`).
-- **Node LSP Debugging**: If language servers fail to download or start, verify that Node.js is accessible on your system PATH (`node -v`). Downloaded language servers are located in `~/.local/share/ezicode/language-servers`.
-- **Taskbar Icon Missing on Linux**: unlike Windows, Linux has no icon resource inside the executable — panels and compositors resolve the logo from a desktop entry and the hicolor icon theme instead. `ezicode` writes both for the current user on every launch (`~/.local/share/applications/ezicode.desktop` and `~/.local/share/icons/hicolor/<size>x<size>/apps/ezicode.png`), and also sets `_NET_WM_ICON` on the window for X11 panels that skip the desktop entry. Run `./run.sh install` to install them without starting the editor, and log out and back in if a panel caches icons aggressively. A distro package must ship `ezicode.desktop` and the hicolor PNGs too — see the template in the repository root.
-
----
-
-## 🤝 Contributing
-
-Pull requests are welcome. Before opening one, please make sure the code is formatted and passes the checks that CI runs on every PR:
-
-```bash
-cargo fmt --all           # required — CI fails on unformatted code
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-```
-
-All three commands operate on the workspace (the `app` crate). The vendored dependencies under `components/`, `components/gpui` and `gpui-terminal/` are upstream code that gets re-synced, so they are intentionally not workspace members and are not covered by these checks.
 
 ---
 
 <div align="center">
 
-Made with ❤️ by the **olovalabs** team.
+<sub>Maintained by **olovalabs**. Licensed under MIT and Apache-2.0.</sub>
 
 </div>
