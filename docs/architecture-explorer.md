@@ -139,6 +139,9 @@ on blank space.
   it needs no rebuild, because only the lengths change. Hairlines (indent
   guides, borders) and corner radii stay in px: a one pixel guide is one pixel
   at every size.
+* The Git sidebar measures its rows, labels, badges and icons the same way, so
+  the two panels that share the activity bar scale together instead of one
+  growing inside a row that stayed 22px.
 * Paste and Duplicate use VS Code's naming (`report copy.md`, then
   `report copy 2.md`).
 * Deleting moves focus to the next surviving row.

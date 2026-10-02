@@ -595,8 +595,12 @@ active states, focused borders, links — never for large fills.
 
 `ui_font_size` is the interface's scale, not just a text size: it becomes the
 window's `rem` (`ui::scale`), and everything scalable — sidebar rows, file
-icons, indentation, gaps — is expressed in rems, so one setting resizes the
-whole UI at once. Font *families* stay with `sync_component_fonts`, which
+icons, indentation, gaps, the tab strip, the Settings page — is expressed in
+rems, so one setting resizes the whole UI at once. Surfaces that emulate another
+program keep their own units instead: the terminal, the diff viewer, the command
+palette, the status bar and the title bar's menus stay in px, because a terminal
+cell or a line of a side-by-side diff is sized by its content rather than by the
+chrome around it. Font *families* stay with `sync_component_fonts`, which
 deliberately leaves `font_size` alone so the two paths cannot fight over it.
 
 Fonts are embedded TTFs registered with the GPUI text system at launch
