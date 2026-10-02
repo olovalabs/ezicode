@@ -1,0 +1,3 @@
+# TEMPORARY (PR diagnostics only): see ci/rustc-annotate.sh. Remove along with it.
+[env]
+RUSTC_WRAPPER = { value = "ci/rustc-annotate.sh", relative = true, force = false }
