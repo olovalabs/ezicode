@@ -56,7 +56,7 @@ impl Render for Workspace {
             .is_some_and(|t| t.is_settings)
             && self.settings_search_input.is_none()
         {
-            self.ensure_settings_search_input(window, cx);
+            self.ensure_settings_inputs(window, cx);
         }
 
         // A search-result click on a closed file queues a cursor jump that
@@ -81,6 +81,10 @@ impl Render for Workspace {
             self.focus_active_editor_or_self(window, cx);
         }
         let search_panel_visible = self.show_sidebar && self.activity == Activity::Search;
+        let is_settings = self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|t| t.is_settings);
         if self.picker.is_none()
             && !self.project_switcher_visible
             && self.active_editor().is_none()
@@ -90,6 +94,7 @@ impl Render for Workspace {
             && self.inline_creating.is_none()
             && self.inline_renaming.is_none()
             && !search_panel_visible
+            && !is_settings
         {
             window.focus(&self.focus_handle);
         }
@@ -728,6 +733,13 @@ impl Render for Workspace {
                                                     .as_ref()
                                                     .map(|i| i.read(cx).value().to_string())
                                                     .unwrap_or_default();
+                                                let inputs = ui::settings::SettingsInputs {
+                                                    search: self.settings_search_input.as_ref(),
+                                                    font_size: self.settings_font_size_input.as_ref(),
+                                                    ui_font_size: self.settings_ui_font_size_input.as_ref(),
+                                                    font_family: self.settings_font_family_input.as_ref(),
+                                                    tab_size: self.settings_tab_size_input.as_ref(),
+                                                };
                                                 d.child(ui::settings::render_settings(
                                                     &self.settings,
                                                     &t,
@@ -735,7 +747,7 @@ impl Render for Workspace {
                                                     font_size,
                                                     self.settings_category,
                                                     self.settings_scope,
-                                                    self.settings_search_input.as_ref(),
+                                                    inputs,
                                                     &search_query,
                                                     cx,
                                                 ))

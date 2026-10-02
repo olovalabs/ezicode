@@ -19,6 +19,16 @@ pub(crate) const SETTINGS_CATEGORIES: &[&str] = &[
     "Security",
     "Extensions",
 ];
+
+#[derive(Clone, Copy)]
+pub(crate) struct SettingsInputs<'a> {
+    pub search: Option<&'a Entity<InputState>>,
+    pub font_size: Option<&'a Entity<InputState>>,
+    pub ui_font_size: Option<&'a Entity<InputState>>,
+    pub font_family: Option<&'a Entity<InputState>>,
+    pub tab_size: Option<&'a Entity<InputState>>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_settings(
     settings: &Settings,
@@ -27,7 +37,7 @@ pub(crate) fn render_settings(
     font_size: f32,
     active_category: usize,
     active_scope: usize,
-    search_input: Option<&Entity<InputState>>,
+    inputs: SettingsInputs<'_>,
     search_query: &str,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -41,7 +51,7 @@ pub(crate) fn render_settings(
         .flex()
         .flex_col()
         .overflow_hidden()
-        .child(render_vscode_header(active_scope, search_input, t, cx))
+        .child(render_vscode_header(active_scope, inputs.search, t, cx))
         .child(
             div()
                 .flex_1()
@@ -57,6 +67,7 @@ pub(crate) fn render_settings(
                     active_theme_ix,
                     font_size,
                     active_category,
+                    inputs,
                     search_query,
                     cx,
                 )),
@@ -75,14 +86,14 @@ fn render_vscode_header(
     div()
         .w_full()
         .px(rem(24.0))
-        .pt(rem(14.0))
-        .pb(rem(10.0))
+        .pt(rem(12.0))
+        .pb(rem(8.0))
         .bg(rgba(t.editor_bg))
         .border_b_1()
         .border_color(rgba(t.border_variant))
         .flex()
         .flex_col()
-        .gap(rem(10.0))
+        .gap(rem(8.0))
         .child(
             // Top Search Bar
             div()
@@ -91,8 +102,9 @@ fn render_vscode_header(
                 .items_center()
                 .justify_between()
                 .gap(rem(16.0))
-                .child(
-                    div()
+                .child({
+                    let mut box_el = div()
+                        .id("settings-search-box-wrap")
                         .flex_1()
                         .max_w(rem(780.0))
                         .h(rem(32.0))
@@ -103,23 +115,33 @@ fn render_vscode_header(
                         .border_color(rgba(t.border_focused))
                         .flex()
                         .items_center()
-                        .gap(rem(8.0))
-                        .child(div().flex_1().min_w(px(0.0)).child(
-                            if let Some(input) = search_input {
-                                Input::new(input)
-                                    .text_size(rem(13.0))
-                                    .appearance(false)
-                                    .cleanable(true)
-                                    .into_any_element()
-                            } else {
-                                div()
-                                    .text_size(rem(13.0))
-                                    .text_color(rgba(t.text_muted))
-                                    .child("Search settings")
-                                    .into_any_element()
-                            },
-                        )),
-                )
+                        .gap(rem(8.0));
+
+                    if let Some(input) = search_input {
+                        let input_clone = input.clone();
+                        box_el = box_el
+                            .cursor_text()
+                            .on_click(cx.listener(move |_this, _, window, cx| {
+                                input_clone.update(cx, |state, cx| state.focus(window, cx));
+                            }))
+                            .child(
+                                div().flex_1().min_w(px(0.0)).child(
+                                    Input::new(input)
+                                        .text_size(rem(13.0))
+                                        .appearance(false)
+                                        .cleanable(true),
+                                ),
+                            );
+                    } else {
+                        box_el = box_el.child(
+                            div()
+                                .text_size(rem(13.0))
+                                .text_color(rgba(t.text_muted))
+                                .child("Search settings"),
+                        );
+                    }
+                    box_el
+                })
                 .child(
                     div()
                         .id("open-settings-json-btn")
@@ -208,22 +230,22 @@ fn render_vscode_header(
         )
 }
 
-/// Left Navigation Sidebar matching VS Code:
-/// - Category list: Commonly Used, Text Editor, Workbench, Window, Features, Application, Security, Extensions
+/// Simple clean Left Navigation Sidebar:
+/// - Plain category text without extra arrow icons
 fn render_category_sidebar(
     active_category: usize,
     t: &Colors,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     div()
-        .w(rem(200.0))
+        .w(rem(190.0))
         .flex_none()
         .h_full()
         .bg(rgba(t.editor_bg))
         .border_r_1()
         .border_color(rgba(t.border_variant))
         .py(rem(14.0))
-        .px(rem(10.0))
+        .px(rem(12.0))
         .flex()
         .flex_col()
         .gap(rem(2.0))
@@ -233,11 +255,10 @@ fn render_category_sidebar(
             div()
                 .id(SharedString::from(format!("cat-nav-{idx}")))
                 .h(rem(28.0))
-                .px(rem(8.0))
+                .px(rem(10.0))
                 .rounded(px(3.0))
                 .flex()
                 .items_center()
-                .gap(rem(6.0))
                 .cursor_pointer()
                 .when(is_selected, |d| {
                     d.bg(rgba(t.element_selected))
@@ -248,18 +269,6 @@ fn render_category_sidebar(
                     d.text_color(rgba(t.text_muted))
                         .hover(|s| s.bg(rgba(t.element_hover)).text_color(rgba(t.text)))
                 })
-                .child(
-                    div()
-                        .w(rem(12.0))
-                        .flex_none()
-                        .text_size(rem(11.0))
-                        .text_color(if is_selected {
-                            rgba(t.text)
-                        } else {
-                            rgba(t.text_muted)
-                        })
-                        .child(if idx == 0 { "" } else { "›" }),
-                )
                 .child(
                     div()
                         .text_size(rem(13.0))
@@ -274,13 +283,15 @@ fn render_category_sidebar(
 
 /// Right Content Area:
 /// - Category Header
-/// - Setting rows in exact VS Code style
+/// - Setting rows with real GPUI inputs matching VS Code
+#[allow(clippy::too_many_arguments)]
 fn render_settings_content(
     settings: &Settings,
     t: &Colors,
     active_theme_ix: usize,
     font_size: f32,
     active_category: usize,
+    inputs: SettingsInputs<'_>,
     search_query: &str,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
@@ -309,36 +320,6 @@ fn render_settings_content(
         .map(|th| th.name.as_str())
         .unwrap_or("GitHub Dark");
 
-    let content = div()
-        .id("settings-content-scroll")
-        .flex_1()
-        .w_full()
-        .min_h(px(0.0))
-        .h_full()
-        .overflow_y_scrollbar()
-        .px(rem(32.0))
-        .py(rem(20.0))
-        .child(
-            div()
-                .max_w(rem(780.0))
-                .flex()
-                .flex_col()
-                .gap(rem(16.0))
-                .child(
-                    div()
-                        .pb(rem(8.0))
-                        .border_b_1()
-                        .border_color(rgba(t.border_variant))
-                        .child(
-                            div()
-                                .text_size(rem(22.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgba(t.text))
-                                .child(header_title),
-                        ),
-                ),
-        );
-
     // Filter helper: checks if a setting matches category or query
     let should_show = |cats: &[usize], title: &str, desc: &str| -> bool {
         if has_query {
@@ -353,57 +334,104 @@ fn render_settings_content(
 
     let mut rows = div().flex().flex_col().gap(rem(4.0));
 
-    // 1. Editor: Font Size
+    // 1. Editor: Font Size (Real GPUI Input + Stepper buttons)
     if should_show(
         &[0, 1],
         "Editor: Font Size",
         "Controls the font size in pixels.",
     ) {
+        let input_ctrl: gpui::AnyElement = if let Some(input) = inputs.font_size {
+            vscode_gpui_input_box("box-editor-font-size", input, t, cx)
+        } else {
+            div()
+                .text_size(rem(13.0))
+                .text_color(rgba(t.text))
+                .child(format!("{font_size:.1}"))
+                .into_any_element()
+        };
+
         rows = rows.child(vscode_setting_row(
             "Editor: Font Size",
             None,
-            "Controls the font size in pixels.",
-            vscode_number_input(
-                "input-editor-font-size",
-                format!("{font_size:.1}"),
-                t,
-                cx.listener(|this, _, _, cx| this.decrease_font_size(cx)),
-                cx.listener(|this, _, _, cx| this.increase_font_size(cx)),
-                Some(cx.listener(|this, _, _, cx| this.reset_font_size(cx))),
-            ),
+            "Controls the font size in pixels. (Press Enter to apply or use - / +)",
+            div()
+                .flex()
+                .items_center()
+                .gap(rem(8.0))
+                .child(input_ctrl)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(rem(4.0))
+                        .child(btn_small(
+                            "-",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.decrease_font_size(cx);
+                                let fs = this.font_size;
+                                if let Some(i) = this.settings_font_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value(format!("{fs:.1}"), window, cx)
+                                    });
+                                }
+                            }),
+                        ))
+                        .child(btn_small(
+                            "+",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.increase_font_size(cx);
+                                let fs = this.font_size;
+                                if let Some(i) = this.settings_font_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value(format!("{fs:.1}"), window, cx)
+                                    });
+                                }
+                            }),
+                        ))
+                        .child(btn_small(
+                            "Reset",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.reset_font_size(cx);
+                                let fs = this.font_size;
+                                if let Some(i) = this.settings_font_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value(format!("{fs:.1}"), window, cx)
+                                    });
+                                }
+                            }),
+                        )),
+                ),
             (font_size - 14.5).abs() > 0.01,
             t,
         ));
     }
 
-    // 2. Editor: Font Family
+    // 2. Editor: Font Family (Real GPUI Input)
     if should_show(&[0, 1], "Editor: Font Family", "Controls the font family.") {
+        let input_ctrl: gpui::AnyElement = if let Some(input) = inputs.font_family {
+            vscode_gpui_input_box("box-editor-font-family", input, t, cx)
+        } else {
+            div()
+                .text_size(rem(13.0))
+                .text_color(rgba(t.text))
+                .child("Lilex")
+                .into_any_element()
+        };
+
         rows = rows.child(vscode_setting_row(
             "Editor: Font Family",
             None,
             "Controls the font family.",
-            div()
-                .w(rem(300.0))
-                .h(rem(28.0))
-                .px(rem(8.0))
-                .rounded(px(2.0))
-                .bg(rgba(t.element_bg))
-                .border_1()
-                .border_color(rgba(t.border))
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .text_size(rem(13.0))
-                        .text_color(rgba(t.text))
-                        .child("Lilex (bundled monospace)"),
-                ),
+            input_ctrl,
             false,
             t,
         ));
     }
 
-    // 3. Editor: Format On Save
+    // 3. Editor: Format On Save (VS Code Checkbox)
     if should_show(
         &[0, 1],
         "Editor: Format On Save",
@@ -434,7 +462,7 @@ fn render_settings_content(
         ));
     }
 
-    // 4. Files: Auto Save
+    // 4. Files: Auto Save (VS Code Dropdown select)
     if should_show(
         &[0, 5],
         "Files: Auto Save",
@@ -473,7 +501,7 @@ fn render_settings_content(
         ));
     }
 
-    // 5. Files: Auto Save Delay
+    // 5. Files: Auto Save Delay (Dropdown)
     if should_show(
         &[0, 5],
         "Files: Auto Save Delay",
@@ -506,37 +534,85 @@ fn render_settings_content(
         ));
     }
 
-    // 6. Editor: Tab Size
+    // 6. Editor: Tab Size (Real GPUI Input + Stepper)
     if should_show(
         &[0, 1],
         "Editor: Tab Size",
         "The number of spaces a tab is equal to in code files.",
     ) {
-        let tab_str = format!("{tab_size} spaces");
+        let input_ctrl: gpui::AnyElement = if let Some(input) = inputs.tab_size {
+            vscode_gpui_input_box("box-editor-tab-size", input, t, cx)
+        } else {
+            div()
+                .text_size(rem(13.0))
+                .text_color(rgba(t.text))
+                .child(format!("{tab_size}"))
+                .into_any_element()
+        };
+
         rows = rows.child(vscode_setting_row(
             "Editor: Tab Size",
             None,
-            "The number of spaces a tab is equal to in code files.",
-            vscode_dropdown(
-                "dropdown-tab-size",
-                tab_str,
-                t,
-                cx.listener(move |this, _, _, cx| {
-                    this.settings.editor_tab_size = match this.settings.editor_tab_size {
-                        2 => 4,
-                        4 => 8,
-                        _ => 2,
-                    };
-                    let _ = this.settings.save();
-                    cx.notify();
-                }),
-            ),
+            "The number of spaces a tab is equal to in code files. (Type number and press Enter)",
+            div()
+                .flex()
+                .items_center()
+                .gap(rem(8.0))
+                .child(input_ctrl)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(rem(4.0))
+                        .child(btn_small(
+                            "2",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.settings.editor_tab_size = 2;
+                                let _ = this.settings.save();
+                                if let Some(i) = this.settings_tab_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value("2".to_string(), window, cx)
+                                    });
+                                }
+                                cx.notify();
+                            }),
+                        ))
+                        .child(btn_small(
+                            "4",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.settings.editor_tab_size = 4;
+                                let _ = this.settings.save();
+                                if let Some(i) = this.settings_tab_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value("4".to_string(), window, cx)
+                                    });
+                                }
+                                cx.notify();
+                            }),
+                        ))
+                        .child(btn_small(
+                            "8",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.settings.editor_tab_size = 8;
+                                let _ = this.settings.save();
+                                if let Some(i) = this.settings_tab_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value("8".to_string(), window, cx)
+                                    });
+                                }
+                                cx.notify();
+                            }),
+                        )),
+                ),
             tab_size != 4,
             t,
         ));
     }
 
-    // 7. Workbench: Color Theme
+    // 7. Workbench: Color Theme (Dropdown select box + swatches)
     if should_show(
         &[0, 2],
         "Workbench: Color Theme",
@@ -545,7 +621,7 @@ fn render_settings_content(
         rows = rows.child(vscode_setting_row(
             "Workbench: Color Theme",
             None,
-            "Specifies the color theme used in the workbench.",
+            "Specifies the color theme used in the workbench. (Click dropdown to cycle or select chip)",
             div()
                 .flex()
                 .flex_col()
@@ -560,62 +636,118 @@ fn render_settings_content(
                         this.apply_theme(next_ix, window, cx);
                     }),
                 ))
-                .child(div().flex().flex_wrap().gap(rem(8.0)).children(
-                    themes.iter().enumerate().map(|(idx, th)| {
-                        let is_act = idx == active_theme_ix;
-                        let name = th.name.clone();
-                        div()
-                            .id(SharedString::from(format!("theme-chip-{idx}")))
-                            .px(rem(8.0))
-                            .py(rem(3.0))
-                            .rounded(px(3.0))
-                            .cursor_pointer()
-                            .border_1()
-                            .border_color(if is_act {
-                                rgba(t.border_focused)
-                            } else {
-                                rgba(t.border)
-                            })
-                            .bg(if is_act {
-                                rgba(t.element_selected)
-                            } else {
-                                rgba(t.element_bg)
-                            })
-                            .text_size(rem(11.5))
-                            .text_color(if is_act {
-                                rgba(t.text)
-                            } else {
-                                rgba(t.text_muted)
-                            })
-                            .child(SharedString::from(name))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.apply_theme(idx, window, cx);
-                            }))
-                    }),
-                )),
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(rem(6.0))
+                        .children(themes.iter().enumerate().map(|(idx, th)| {
+                            let is_act = idx == active_theme_ix;
+                            let name = th.name.clone();
+                            div()
+                                .id(SharedString::from(format!("theme-chip-{idx}")))
+                                .px(rem(8.0))
+                                .py(rem(3.0))
+                                .rounded(px(3.0))
+                                .cursor_pointer()
+                                .border_1()
+                                .border_color(if is_act {
+                                    rgba(t.border_focused)
+                                } else {
+                                    rgba(t.border)
+                                })
+                                .bg(if is_act {
+                                    rgba(t.element_selected)
+                                } else {
+                                    rgba(t.element_bg)
+                                })
+                                .text_size(rem(11.5))
+                                .text_color(if is_act {
+                                    rgba(t.text)
+                                } else {
+                                    rgba(t.text_muted)
+                                })
+                                .child(SharedString::from(name))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.apply_theme(idx, window, cx);
+                                }))
+                        })),
+                ),
             current_theme_name != "GitHub Dark",
             t,
         ));
     }
 
-    // 8. Window: UI Font Size / Zoom
+    // 8. Window: UI Font Size / Zoom (Real GPUI Input + Stepper buttons)
     if should_show(
         &[0, 2, 3],
         "Window: Zoom / UI Font Size",
         "Controls the UI font size in pixels (Zed ui_font_size: scales the whole interface).",
     ) {
+        let input_ctrl: gpui::AnyElement = if let Some(input) = inputs.ui_font_size {
+            vscode_gpui_input_box("box-window-ui-font-size", input, t, cx)
+        } else {
+            div()
+                .text_size(rem(13.0))
+                .text_color(rgba(t.text))
+                .child(format!("{ui_font_size:.1}"))
+                .into_any_element()
+        };
+
         rows = rows.child(vscode_setting_row(
             "Window: Zoom / UI Font Size",
             None,
             "Controls the UI font size in pixels (Zed ui_font_size: scales the whole interface).",
-            vscode_number_input(
-                "input-ui-font-size",
-                format!("{ui_font_size:.1} px"),
-                t,
-                cx.listener(|this, _, _, cx| this.decrease_ui_font_size(cx)),
-                cx.listener(|this, _, _, cx| this.increase_ui_font_size(cx)),
-                Some(cx.listener(|this, _, _, cx| this.reset_ui_font_size(cx))),
-            ),
+            div()
+                .flex()
+                .items_center()
+                .gap(rem(8.0))
+                .child(input_ctrl)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(rem(4.0))
+                        .child(btn_small(
+                            "-",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.decrease_ui_font_size(cx);
+                                let ufs = this.ui_font_size;
+                                if let Some(i) = this.settings_ui_font_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value(format!("{ufs:.1}"), window, cx)
+                                    });
+                                }
+                            }),
+                        ))
+                        .child(btn_small(
+                            "+",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.increase_ui_font_size(cx);
+                                let ufs = this.ui_font_size;
+                                if let Some(i) = this.settings_ui_font_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value(format!("{ufs:.1}"), window, cx)
+                                    });
+                                }
+                            }),
+                        ))
+                        .child(btn_small(
+                            "Reset",
+                            t,
+                            cx.listener(|this, _, window, cx| {
+                                this.reset_ui_font_size(cx);
+                                let ufs = this.ui_font_size;
+                                if let Some(i) = this.settings_ui_font_size_input.as_ref() {
+                                    i.update(cx, |state, cx| {
+                                        state.set_value(format!("{ufs:.1}"), window, cx)
+                                    });
+                                }
+                            }),
+                        )),
+                ),
             (ui_font_size - 14.0).abs() > 0.01,
             t,
         ));
@@ -755,7 +887,36 @@ fn render_settings_content(
         ));
     }
 
-    content.child(div().max_w(rem(780.0)).child(rows))
+    div()
+        .id("settings-content-scroll")
+        .flex_1()
+        .w_full()
+        .min_h(px(0.0))
+        .h_full()
+        .overflow_y_scrollbar()
+        .px(rem(32.0))
+        .py(rem(20.0))
+        .child(
+            div()
+                .max_w(rem(780.0))
+                .flex()
+                .flex_col()
+                .gap(rem(16.0))
+                .child(
+                    div()
+                        .pb(rem(8.0))
+                        .border_b_1()
+                        .border_color(rgba(t.border_variant))
+                        .child(
+                            div()
+                                .text_size(rem(22.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(rgba(t.text))
+                                .child(header_title),
+                        ),
+                )
+                .child(rows),
+        )
 }
 
 /// A setting row matching VS Code:
@@ -824,6 +985,39 @@ fn vscode_setting_row(
         .child(div().pt(rem(4.0)).child(control))
 }
 
+/// VS Code style GPUI Input box: dark box with real Input entity that user can click and type into
+fn vscode_gpui_input_box(
+    id: &'static str,
+    input_entity: &Entity<InputState>,
+    t: &Colors,
+    cx: &mut Context<Workspace>,
+) -> gpui::AnyElement {
+    let input_clone = input_entity.clone();
+    div()
+        .id(id)
+        .w(rem(260.0))
+        .h(rem(28.0))
+        .px(rem(8.0))
+        .rounded(px(2.0))
+        .bg(rgba(t.element_bg))
+        .border_1()
+        .border_color(rgba(t.border))
+        .hover(|s| s.border_color(rgba(t.border_focused)))
+        .flex()
+        .items_center()
+        .cursor_text()
+        .on_click(cx.listener(move |_this, _, window, cx| {
+            input_clone.update(cx, |state, cx| state.focus(window, cx));
+        }))
+        .child(
+            Input::new(input_entity)
+                .text_size(rem(13.0))
+                .appearance(false)
+                .cleanable(false),
+        )
+        .into_any_element()
+}
+
 /// VS Code style dropdown select box: dark box with chevron-down on right
 fn vscode_dropdown(
     id: &'static str,
@@ -859,51 +1053,6 @@ fn vscode_dropdown(
                 .text_color(rgba(t.icon_muted)),
         )
         .on_click(on_click)
-}
-
-/// VS Code style number/stepper input: dark box with value + [-] [+] [Reset] buttons
-fn vscode_number_input(
-    id: &'static str,
-    value: String,
-    t: &Colors,
-    on_dec: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-    on_inc: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-    on_reset: Option<impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static>,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .gap(rem(8.0))
-        .child(
-            div()
-                .id(id)
-                .w(rem(180.0))
-                .h(rem(28.0))
-                .px(rem(8.0))
-                .rounded(px(2.0))
-                .bg(rgba(t.element_bg))
-                .border_1()
-                .border_color(rgba(t.border))
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .text_size(rem(13.0))
-                        .text_color(rgba(t.text))
-                        .child(SharedString::from(value)),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(rem(4.0))
-                .child(btn_small("-", t, on_dec))
-                .child(btn_small("+", t, on_inc))
-                .when_some(on_reset, |parent, reset| {
-                    parent.child(btn_small("Reset", t, reset))
-                }),
-        )
 }
 
 /// VS Code style checkbox: square box with checkmark + label

@@ -380,6 +380,10 @@ pub(crate) struct Workspace {
     pub(crate) settings_category: usize,
     pub(crate) settings_scope: usize,
     pub(crate) settings_search_input: Option<Entity<InputState>>,
+    pub(crate) settings_font_size_input: Option<Entity<InputState>>,
+    pub(crate) settings_ui_font_size_input: Option<Entity<InputState>>,
+    pub(crate) settings_font_family_input: Option<Entity<InputState>>,
+    pub(crate) settings_tab_size_input: Option<Entity<InputState>>,
 
     pub(crate) auto_save_generation: usize,
     auto_save_task: Option<Task<()>>,
@@ -719,6 +723,10 @@ impl Workspace {
             settings_category: 0,
             settings_scope: 0,
             settings_search_input: None,
+            settings_font_size_input: None,
+            settings_ui_font_size_input: None,
+            settings_font_family_input: None,
+            settings_tab_size_input: None,
             picker: None,
             picker_confirm_pending: false,
             workspace_files_cache: None,
@@ -5335,11 +5343,7 @@ impl Workspace {
         }
         self.open_file(path, window, cx);
     }
-    pub(crate) fn ensure_settings_search_input(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn ensure_settings_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_search_input.is_none() {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
             cx.subscribe(
@@ -5350,6 +5354,68 @@ impl Workspace {
             )
             .detach();
             self.settings_search_input = Some(input);
+        }
+        if self.settings_font_size_input.is_none() {
+            let val = format!("{:.1}", self.settings.editor_font_size);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(val));
+            cx.subscribe(
+                &input,
+                |this, state, event: &gpui_component::input::InputEvent, cx| {
+                    if matches!(event, gpui_component::input::InputEvent::PressEnter { .. }) {
+                        let text = state.read(cx).value().to_string();
+                        if let Ok(v) = text.trim().parse::<f32>() {
+                            this.font_size = v.clamp(6.0, 72.0);
+                            this.settings.editor_font_size = this.font_size;
+                            let _ = this.settings.save();
+                            gpui_component::Theme::global_mut(cx).mono_font_size =
+                                gpui::px(this.font_size);
+                            cx.notify();
+                        }
+                    }
+                },
+            )
+            .detach();
+            self.settings_font_size_input = Some(input);
+        }
+        if self.settings_ui_font_size_input.is_none() {
+            let val = format!("{:.1}", self.settings.ui_font_size);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(val));
+            cx.subscribe(
+                &input,
+                |this, state, event: &gpui_component::input::InputEvent, cx| {
+                    if matches!(event, gpui_component::input::InputEvent::PressEnter { .. }) {
+                        let text = state.read(cx).value().to_string();
+                        if let Ok(v) = text.trim().parse::<f32>() {
+                            this.set_ui_font_size(v, cx);
+                        }
+                    }
+                },
+            )
+            .detach();
+            self.settings_ui_font_size_input = Some(input);
+        }
+        if self.settings_font_family_input.is_none() {
+            let input = cx.new(|cx| InputState::new(window, cx).default_value("Lilex"));
+            self.settings_font_family_input = Some(input);
+        }
+        if self.settings_tab_size_input.is_none() {
+            let val = format!("{}", self.settings.editor_tab_size);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(val));
+            cx.subscribe(
+                &input,
+                |this, state, event: &gpui_component::input::InputEvent, cx| {
+                    if matches!(event, gpui_component::input::InputEvent::PressEnter { .. }) {
+                        let text = state.read(cx).value().to_string();
+                        if let Ok(v) = text.trim().parse::<usize>() {
+                            this.settings.editor_tab_size = v.clamp(1, 16);
+                            let _ = this.settings.save();
+                            cx.notify();
+                        }
+                    }
+                },
+            )
+            .detach();
+            self.settings_tab_size_input = Some(input);
         }
     }
 
