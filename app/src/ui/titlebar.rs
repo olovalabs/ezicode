@@ -92,6 +92,10 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                                 m
                             })
                             .separator()
+                            .menu(
+                                "Switch Project… (Ctrl+Shift+O)",
+                                Box::new(ToggleProjectSwitcher),
+                            )
                             .menu("Toggle Primary Side Bar", Box::new(ToggleSidebar))
                             .menu("Toggle Terminal", Box::new(ToggleTerminal))
                             .menu("Toggle Right Terminal Panel", Box::new(ToggleTerminalRight))

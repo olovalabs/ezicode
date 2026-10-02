@@ -16,6 +16,10 @@ actions!(
         ShowGit,
         ShowExtensions,
         ToggleSidebar,
+        ToggleProjectSwitcher,
+        ProjectSwitcherNext,
+        ProjectSwitcherPrev,
+        ProjectSwitcherActivate,
         ToggleTerminal,
         NewTerminal,
         /// Toggle the Zed-style terminal panel docked to the right edge.

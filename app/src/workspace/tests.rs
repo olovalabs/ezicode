@@ -47,6 +47,42 @@ fn buffer(text: &str) -> Result<LoadedBuffer, String> {
 }
 
 #[gpui::test]
+async fn project_switcher_uses_the_active_root_and_real_recent_folders(cx: &mut TestAppContext) {
+    let fixture = TempDir::new("project-switcher-recent");
+    let first = fixture.directory("first-project");
+    let second = fixture.directory("second-project");
+    let (store, ready) = StateStore::for_directory(fixture.directory("config"));
+    store.add_recent_folder(first.clone());
+    store.add_recent_folder(second.clone());
+    cx.executor().allow_parking();
+    store.flush().recv().await.unwrap();
+
+    let (workspace, cx) = workspace_with_store(cx, store, ready);
+    cx.update(|window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.root = Some(first.clone());
+            assert_eq!(
+                workspace.project_switcher_paths(),
+                vec![first.clone(), second.clone()]
+            );
+
+            workspace.toggle_project_switcher(window, cx);
+            assert!(workspace.project_switcher_visible);
+            assert_eq!(workspace.project_switcher_selection, Some(first.clone()));
+            workspace.move_project_switcher_selection(1, cx);
+            assert_eq!(workspace.project_switcher_selection, Some(second.clone()));
+            workspace.move_project_switcher_selection(-1, cx);
+            assert_eq!(workspace.project_switcher_selection, Some(first.clone()));
+        });
+    });
+    cx.update(|window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.close_modal(window, cx));
+    });
+    cx.condition(&workspace, |workspace, _| !workspace.project_switcher_visible)
+        .await;
+}
+
+#[gpui::test]
 async fn first_folder_open_is_asynchronous_and_same_folder_is_a_no_op(cx: &mut TestAppContext) {
     let fixture = TempDir::new("first-folder");
     let root = fixture.directory("project");
@@ -158,6 +194,91 @@ async fn repeated_switches_cancel_outgoing_sessions_and_keep_scratch_buffers(
             assert!(workspace.workspace_files_cache.is_none());
         });
     }
+}
+
+#[gpui::test]
+async fn switching_back_restores_tabs_cursor_and_saved_buffer_content(cx: &mut TestAppContext) {
+    let fixture = TempDir::new("project-switch-round-trip");
+    let a = fixture.directory("a");
+    let b = fixture.directory("b");
+    let a_first = fixture.file("a/first.txt", "first file");
+    let a_second = fixture.file("a/second.txt", "original second file");
+    fixture.file("b/other.txt", "another project");
+
+    let (workspace, cx) = workspace(cx, &fixture);
+    cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.load_root(a.clone(), cx)));
+    cx.condition(&workspace, |workspace, _| workspace.root.as_ref() == Some(&a))
+        .await;
+
+    let edited = "first line\nsecond line\nthird line\nfourth line";
+    cx.update(|window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.finish_open_file(
+                a_first.clone(),
+                buffer("first file"),
+                true,
+                true,
+                window,
+                cx,
+            );
+            workspace.finish_open_file(
+                a_second.clone(),
+                buffer("original second file"),
+                true,
+                true,
+                window,
+                cx,
+            );
+            let editor = workspace.tabs[1].editor.as_ref().unwrap().clone();
+            editor.update(cx, |state, cx| {
+                state.set_value(edited, window, cx);
+                state.set_cursor_position(
+                    lsp_types::Position {
+                        line: 2,
+                        character: 3,
+                    },
+                    window,
+                    cx,
+                );
+            });
+            workspace.tabs[1].dirty = true;
+            workspace.sidebar_width = 355.0;
+        });
+    });
+
+    cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.load_root(b.clone(), cx)));
+    cx.condition(&workspace, |workspace, _| workspace.root.as_ref() == Some(&b))
+        .await;
+    assert_eq!(std::fs::read_to_string(&a_second).unwrap(), edited);
+
+    cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.load_root(a.clone(), cx)));
+    cx.condition(&workspace, |workspace, _| workspace.root.as_ref() == Some(&a))
+        .await;
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.tabs.len(), 2);
+        assert_eq!(workspace.active_tab, 1);
+        assert!(workspace.tabs.iter().all(|tab| tab.editor.is_none()));
+        assert_eq!(workspace.sidebar_width, 355.0);
+        assert_eq!(
+            workspace.pending_restore_tabs[1].cursor,
+            Some(crate::storage::CursorPosition {
+                line: 2,
+                character: 3,
+            })
+        );
+    });
+
+    cx.update(|window, cx| {
+        workspace.update(cx, |workspace, cx| workspace.restore_active_tab(window, cx))
+    });
+    cx.condition(&workspace, |workspace, _| workspace.tabs[1].editor.is_some())
+        .await;
+    workspace.read_with(cx, |workspace, cx| {
+        let editor = workspace.tabs[1].editor.as_ref().unwrap().read(cx);
+        assert_eq!(editor.value().as_str(), edited);
+        assert_eq!(editor.cursor_position().line, 2);
+        assert_eq!(editor.cursor_position().character, 3);
+    });
 }
 
 #[gpui::test]
