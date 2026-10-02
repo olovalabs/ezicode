@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::theme::Colors;
+use crate::ui::scale::rem;
 use crate::workspace::Workspace;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PickerKind {
     FileFinder,
@@ -858,7 +858,7 @@ pub fn render_picker(
         div()
             .px(px(12.0))
             .py(px(12.0))
-            .text_size(px(13.5))
+            .text_size(rem(13.5))
             .text_color(rgba(0x8b949eff))
             .child("Type a line number (and optional :column) and press Enter to jump.")
             .into_any_element()
@@ -879,7 +879,7 @@ pub fn render_picker(
             .py(px(16.0))
             .flex()
             .justify_center()
-            .text_size(px(13.5))
+            .text_size(rem(13.5))
             .text_color(rgba(0x8b949eff))
             .child(empty_text)
             .into_any_element()
@@ -887,7 +887,7 @@ pub fn render_picker(
         let mut list_col = div()
             .id("picker-results-list")
             .w_full()
-            .max_h(px(460.0))
+            .max_h(rem(460.0))
             .overflow_y_scroll()
             .flex()
             .flex_col()
@@ -916,8 +916,8 @@ pub fn render_picker(
             let mut row = div()
                 .id(SharedString::from(format!("picker-item-{ix}")))
                 .w_full()
-                .h(px(32.0))
-                .px(px(10.0))
+                .h(rem(32.0))
+                .px(rem(10.0))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -941,25 +941,25 @@ pub fn render_picker(
             if let Some(ic) = icon {
                 let icon_el = if ic.starts_with("file_icons/") {
                     img(SharedString::from(ic.to_string()))
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(rem(16.0))
+                        .h(rem(16.0))
                         .into_any_element()
                 } else if ic.starts_with("ui_icons/") {
                     svg()
                         .path(SharedString::from(ic.to_string()))
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(rem(16.0))
+                        .h(rem(16.0))
                         .text_color(rgba(0x8b949eff))
                         .into_any_element()
                 } else {
                     img(SharedString::from(ic.to_string()))
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(rem(16.0))
+                        .h(rem(16.0))
                         .into_any_element()
                 };
                 left = left.child(
                     div()
-                        .size(px(16.0))
+                        .size(rem(16.0))
                         .flex_none()
                         .flex()
                         .items_center()
@@ -975,7 +975,7 @@ pub fn render_picker(
                     .gap(px(8.0))
                     .child(
                         div()
-                            .text_size(px(13.5))
+                            .text_size(rem(13.5))
                             .font_weight(gpui::FontWeight::NORMAL)
                             .text_color(title_color)
                             .line_clamp(1)
@@ -984,7 +984,7 @@ pub fn render_picker(
                     .when_some(subtitle, |parent, sub| {
                         parent.child(
                             div()
-                                .text_size(px(12.5))
+                                .text_size(rem(12.5))
                                 .text_color(rgba(0x8b949eff))
                                 .line_clamp(1)
                                 .child(sub),
@@ -1003,8 +1003,8 @@ pub fn render_picker(
                         .child(
                             // Split editor icon [ | ]
                             div()
-                                .w(px(14.0))
-                                .h(px(12.0))
+                                .w(rem(14.0))
+                                .h(rem(12.0))
                                 .rounded(px(2.0))
                                 .border_1()
                                 .border_color(rgba(0x8b949eff))
@@ -1020,7 +1020,7 @@ pub fn render_picker(
                         .child(
                             // Close icon ✕
                             div()
-                                .text_size(px(12.0))
+                                .text_size(rem(12.0))
                                 .text_color(rgba(0x8b949eff))
                                 .cursor_pointer()
                                 .child("✕"),
@@ -1028,7 +1028,7 @@ pub fn render_picker(
                         .when(item.is_recent, |parent| {
                             parent.child(
                                 div()
-                                    .text_size(px(12.0))
+                                    .text_size(rem(12.0))
                                     .text_color(rgba(0x8b949eff))
                                     .child("recently opened"),
                             )
@@ -1048,7 +1048,7 @@ pub fn render_picker(
                         .bg(rgba(t.element_bg))
                         .border_1()
                         .border_color(rgba(t.border))
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(badge_color)
                         .font_family(crate::assets::MONO_FONT)
                         .child(sc),
@@ -1104,7 +1104,7 @@ pub fn render_picker(
                 .child(
                     div()
                         .w_full()
-                        .h(px(38.0))
+                        .h(rem(38.0))
                         .px(px(10.0))
                         .flex()
                         .items_center()
@@ -1113,9 +1113,9 @@ pub fn render_picker(
                         .border_1()
                         .border_color(rgba(0x388bfdff))
                         .child(
-                            div().flex_1().min_w(px(0.0)).text_size(px(13.5)).child(
+                            div().flex_1().min_w(px(0.0)).text_size(rem(13.5)).child(
                                 Input::new(&picker.input)
-                                    .text_size(px(13.5))
+                                    .text_size(rem(13.5))
                                     .appearance(false)
                                     .cleanable(false),
                             ),
