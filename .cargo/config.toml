@@ -1,3 +1,0 @@
-# TEMPORARY (PR diagnostics only): see ci/rustc-annotate.sh. Removed with it.
-[build]
-rustc-wrapper = "ci/rustc-annotate.sh"
