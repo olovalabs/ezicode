@@ -70,6 +70,7 @@ _Combining the raw speed and hardware-accelerated rendering of Zed with the frie
 - **Complete File Operations**: Inline creation of files and folders, inline rename (`F2`), safe drag-and-drop file moving with loop protection, copy/cut/paste/duplicate, and auto-reveal for active files.
 - **VS Code Sticky Scroll**: Parent folders of the rows you are looking at stay pinned to the top of the panel and slide out as their section ends, so context is never lost inside deeply nested trees.
 - **VS Code Tree Interactions**: Multi-selection (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-click, <kbd>Shift</kbd>-click, <kbd>Shift</kbd>+arrows), type-ahead jump, PageUp/PageDown, drag hover-to-expand with edge auto-scroll, indent guides with an active branch highlight, focus vs. selection styling, and a full context menu.
+- **Scales With the UI Font Size**: row height, file and folder icons, indentation and the gaps between them are measured in `rem`s, and `1rem` is `ui_font_size` — so growing the interface text grows the whole tree proportionally, with the nesting and the pinned headers still aligned.
 
 ### 🎨 Zed-Compatible Themes & Typography
 
@@ -324,6 +325,7 @@ via `github-custom-runners`.
 
 ```json
 {
+  "ui_font_size": 14,
   "editor.fontSize": 14.5,
   "editor.fontFamily": "Lilex",
   "editor.tabSize": 4,
@@ -337,7 +339,8 @@ via `github-custom-runners`.
 
 ### Configurable Options
 
-- `editor.fontSize`: Font size in pixels for the code buffer (default: `14.5`).
+- `ui_font_size`: Font size in pixels for the interface (default: `14`, clamped to `6`–`100`). Like Zed's setting of the same name it is also the size of `1rem`, so the file tree's rows, file and folder icons, indentation and gaps scale together instead of clipping, and "Increase / Decrease / Reset UI Font Size" in the command palette changes the size live. It is written back to this file, so the size you leave the app at is the size you get next launch.
+- `editor.fontSize`: Font size in pixels for the code buffer (default: `14.5`). Independent of `ui_font_size`, the way Zed's `buffer_font_size` is independent of its UI font size.
 - `editor.fontFamily`: Custom monospace font family (falls back to bundled `Lilex`).
 - `editor.tabSize`: Number of spaces per tab indent (default: `4`). Also sent to language servers as the formatting tab size.
 - `editor.autoSave`: Auto-save behavior: `"off"`, `"afterDelay"`, or `"onFocusChange"`.

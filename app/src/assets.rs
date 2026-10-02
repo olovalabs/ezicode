@@ -52,10 +52,16 @@ pub fn load_embedded_fonts(cx: &App) {
 }
 
 /// Point the widget library at Zed's fonts (called after every
+/// theme change, because applying a theme config rewrites them).
+///
+/// `font_size` is deliberately left alone: that field *is* the UI font size —
+/// `gpui_component` copies it into the window's rem size every frame — and
+/// `crate::ui::scale::apply_ui_font_size` owns it, from `ui_font_size` in
+/// settings.json. `mono_font_size` tracks the buffer instead, which is the same
+/// split Zed has between `ui_font_size` and `buffer_font_size`.
 pub fn sync_component_fonts(cx: &mut App) {
     let theme = gpui_component::Theme::global_mut(cx);
     theme.font_family = SANS_FONT.into();
     theme.mono_font_family = MONO_FONT.into();
-    theme.font_size = px(14.0);
     theme.mono_font_size = px(14.5);
 }

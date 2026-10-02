@@ -14,6 +14,11 @@ const TERMINAL_MAX_RESERVE: f32 = 60.0;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Layout runs after this returns, so `rem` lengths — every scalable
+        // metric in the sidebar, and the widget library's own — resolve against
+        // the UI font size the frame it changes, with no restart involved.
+        ui::scale::sync_window_rem_size(window, cx);
+
         if let Some(path) = self.pending_open.take() {
             self.open_file(path, window, cx);
         }

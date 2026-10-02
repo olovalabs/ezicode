@@ -590,8 +590,14 @@ active states, focused borders, links — never for large fills.
 | Code font | Zed Plex Mono | **Lilex** (bundled, 4 styles) |
 | UI font | Zed Plex Sans | **IBM Plex Sans** (bundled) |
 | Code size | ~15 px | `14.5` px default (`editor.fontSize`, Ctrl+=/- live zoom) |
-| UI size | 14 px | 14 px (`sync_component_fonts`) |
+| UI size | 16 px (`ui_font_size`) | `14` px default (`ui_font_size`, ±1 px live) |
 | Line height | 1.5 | GPUI default ~1.5 line_height |
+
+`ui_font_size` is the interface's scale, not just a text size: it becomes the
+window's `rem` (`ui::scale`), and everything scalable — sidebar rows, file
+icons, indentation, gaps — is expressed in rems, so one setting resizes the
+whole UI at once. Font *families* stay with `sync_component_fonts`, which
+deliberately leaves `font_size` alone so the two paths cannot fight over it.
 
 Fonts are embedded TTFs registered with the GPUI text system at launch
 (`assets::load_embedded_fonts`) — no system-font dependency, identical
