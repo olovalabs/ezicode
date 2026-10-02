@@ -40,7 +40,7 @@ pub(crate) fn render_settings(
                         .flex()
                         .flex_col()
                         .gap(px(28.0))
-                        .child(render_theme_section(settings, t, active_theme_ix, cx))
+                        .child(render_theme_section(t, active_theme_ix, cx))
                         .child(render_editor_section(settings, t, font_size, cx))
                         .child(render_terminal_section(t, cx))
                         .child(render_system_section(t)),
@@ -134,17 +134,11 @@ fn render_header(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement {
         )
 }
 
-/// Section 1: appearance — the color theme, and the size of the interface
-/// itself. Both live in this section because both are "how the workbench
-/// looks" rather than "how the buffer looks", and both are applied the instant
-/// they change.
 fn render_theme_section(
-    settings: &Settings,
     t: &Colors,
     active_theme_ix: usize,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let ui_font_size = settings.ui_font_size;
     let themes = theme::all();
     let current_theme = themes.get(active_theme_ix);
     let current_name = current_theme
@@ -173,14 +167,14 @@ fn render_theme_section(
                                 .text_size(px(16.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgba(t.text))
-                                .child(SharedString::from("🎨 Color Theme & UI Scale")),
+                                .child(SharedString::from("🎨 Color Theme")),
                         )
                         .child(
                             div()
                                 .text_size(px(12.5))
                                 .text_color(rgba(t.text_muted))
                                 .child(SharedString::from(
-                                    "Select the workbench color theme and the size of the interface. Both apply instantly.",
+                                    "Select the workbench color theme. Theme and syntax tokens apply instantly.",
                                 )),
                         ),
                 )
@@ -326,55 +320,6 @@ fn render_theme_section(
                         )
                 })),
         )
-        .child(setting_row(
-            "UI: Font Size",
-            "Scales the whole interface: text, file tree rows, icons, indents and spacing (Zed's ui_font_size)",
-            ui_font_size_control(ui_font_size, t, cx),
-            t,
-        ))
-}
-
-/// The `ui_font_size` stepper, shaped like the editor font size control: one
-/// pixel each way, the size in effect, and a reset to the design size.
-///
-/// The workspace clamps the requested size, so the arrows simply stop at either
-/// end. Each click writes `settings.json` and re-layouts the window: the
-/// interface grows as you click, and the size is still there after a restart.
-fn ui_font_size_control(
-    ui_font_size: f32,
-    t: &Colors,
-    cx: &mut Context<Workspace>,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .child(btn_action("-", Workspace::decrease_ui_font_size, t, cx))
-        .child(
-            div()
-                .min_w(px(55.0))
-                .text_center()
-                .text_size(px(13.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgba(t.text))
-                .child(SharedString::from(format!("{ui_font_size:.1} px"))),
-        )
-        .child(btn_action("+", Workspace::increase_ui_font_size, t, cx))
-        .child(btn_action("Reset (14.0px)", Workspace::reset_ui_font_size, t, cx))
-}
-
-/// A [`btn_small`] that runs one of the workspace's own commands.
-///
-/// The size steppers are the only controls that call straight back into the
-/// workspace rather than a `Settings` field, and all three of them need the same
-/// `cx.listener` wrapping; naming the command keeps each row one short line.
-fn btn_action(
-    label: &'static str,
-    run: fn(&mut Workspace, &mut Context<Workspace>),
-    t: &Colors,
-    cx: &mut Context<Workspace>,
-) -> impl IntoElement {
-    btn_small(label, t, cx.listener(move |this, _, _, cx| run(this, cx)))
 }
 
 fn color_swatch(color_hex: u32, _label: &'static str, t: &Colors) -> impl IntoElement {
