@@ -265,17 +265,12 @@ impl SyntaxColors {
 
         if style.is_some() {
             style
+        } else if let Some((parent, _)) = name.rsplit_once('.') {
+            // Zed walks capture parents: `function.method` → `function`,
+            // `string.special.symbol` → `string.special` → `string`.
+            self.style(parent)
         } else {
-
-            if name.contains(".") {
-                if let Some(prefix) = name.split(".").next() {
-                    return self.style(prefix);
-                }
-
-                None
-            } else {
-                None
-            }
+            None
         }
     }
 

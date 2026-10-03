@@ -63,5 +63,5 @@ pub fn sync_component_fonts(cx: &mut App) {
     let theme = gpui_component::Theme::global_mut(cx);
     theme.font_family = SANS_FONT.into();
     theme.mono_font_family = MONO_FONT.into();
-    theme.mono_font_size = px(14.5);
+    theme.mono_font_size = px(15.0);
 }

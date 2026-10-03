@@ -120,7 +120,7 @@ impl Language {
             "graphql" => Self::GraphQL,
             "html" => Self::Html,
             "java" => Self::Java,
-            "javascript" | "js" => Self::JavaScript,
+            "javascript" | "js" | "jsx" => Self::JavaScript,
             "jsdoc" => Self::JsDoc,
             "json" | "jsonc" => Self::Json,
             "make" | "makefile" => Self::Make,
@@ -153,7 +153,7 @@ impl Language {
             Self::MarkdownInline => vec![],
             Self::Html => vec!["javascript", "css"],
             Self::Rust => vec!["rust"],
-            Self::JavaScript | Self::TypeScript => vec![
+            Self::JavaScript | Self::TypeScript | Self::Tsx => vec![
                 "jsdoc",
                 "json",
                 "css",
@@ -329,7 +329,7 @@ impl Language {
             Self::Tsx => (
                 tree_sitter_typescript::LANGUAGE_TSX,
                 tree_sitter_typescript::HIGHLIGHTS_QUERY,
-                "",
+                include_str!("languages/javascript/injections.scm"),
                 tree_sitter_typescript::LOCALS_QUERY,
             ),
             Self::Diff => (
@@ -388,6 +388,7 @@ mod tests {
         assert_eq!(Language::Cpp.name(), "cpp");
         assert_eq!(Language::Sql.name(), "sql");
         assert_eq!(Language::JavaScript.name(), "javascript");
+        assert_eq!(Language::from_str("jsx"), Language::JavaScript);
         assert_eq!(Language::Zig.name(), "zig");
         assert_eq!(Language::CSharp.name(), "csharp");
         assert_eq!(Language::TypeScript.name(), "typescript");

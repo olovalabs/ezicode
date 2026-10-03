@@ -21,14 +21,16 @@ use lsp_types::{
     CompletionResponse, CompletionTriggerKind, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
     FormattingOptions, GotoDefinitionResponse, Hover, InitializeParams, InitializedParams,
-    Location, LocationLink, PublishDiagnosticsClientCapabilities, PublishDiagnosticsParams,
-    TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncClientCapabilities, Uri,
-    VersionedTextDocumentIdentifier,
+    Location, LocationLink, PositionEncodingKind, PublishDiagnosticsClientCapabilities,
+    PublishDiagnosticsParams, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
+    TextDocumentSyncClientCapabilities, Uri, VersionedTextDocumentIdentifier, WorkspaceEdit,
 };
 use serde_json::{json, Value};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+/// Zed's default LSP request timeout (`DEFAULT_LSP_REQUEST_TIMEOUT`).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug)]
 pub enum LspEvent {
@@ -58,6 +60,18 @@ pub enum LspEvent {
     ServerExited {
         server: String,
     },
+
+    ApplyEdit {
+        edit: WorkspaceEdit,
+    },
+}
+
+/// User overrides from Zed's `lsp.<name>` settings map.
+#[derive(Clone, Debug, Default)]
+pub struct UserLspConfig {
+    pub initialization_options: Option<Value>,
+    pub binary_path: Option<PathBuf>,
+    pub binary_args: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +102,7 @@ pub struct ServerLaunch {
     root: Option<PathBuf>,
     generation: u64,
     events: LspEventSender,
+    user: UserLspConfig,
 }
 
 pub enum LaunchResult {
@@ -104,47 +119,89 @@ impl ServerLaunch {
     pub fn run(&self) -> LaunchResult {
         let (program, args) = match self.adapter.source {
             super::adapter::Source::Native { binary } => {
-                let fallbacks: &[&str] = match binary {
-                    "basedpyright-langserver" => {
-                        &["pyright-langserver", "pyright", "pylsp", "ruff"]
-                    }
-                    "csharp-ls" => &["OmniSharp", "omnisharp"],
-                    "language_server.sh" => &["elixir-ls"],
-                    _ => &[],
-                };
-                let Some(program) = find_binary_with_fallbacks(binary, fallbacks) else {
-                    return LaunchResult::Failed(format!(
-                        "{binary} is not installed or not on PATH"
-                    ));
-                };
-                (
-                    program,
-                    self.adapter
-                        .args
-                        .iter()
-                        .map(|arg| arg.to_string())
-                        .collect(),
-                )
+                if let Some(path) = &self.user.binary_path {
+                    (
+                        path.clone(),
+                        self.user.binary_args.clone().unwrap_or_else(|| {
+                            self.adapter
+                                .args
+                                .iter()
+                                .map(|arg| arg.to_string())
+                                .collect()
+                        }),
+                    )
+                } else {
+                    let fallbacks: &[&str] = match binary {
+                        "basedpyright-langserver" => {
+                            &["pyright-langserver", "pyright", "pylsp", "ruff"]
+                        }
+                        "csharp-ls" => &["OmniSharp", "omnisharp"],
+                        "language_server.sh" => &["elixir-ls"],
+                        _ => &[],
+                    };
+                    let Some(program) = find_binary_with_fallbacks(binary, fallbacks) else {
+                        return LaunchResult::Failed(format!(
+                            "{binary} is not installed or not on PATH"
+                        ));
+                    };
+                    (
+                        program,
+                        self.adapter
+                            .args
+                            .iter()
+                            .map(|arg| arg.to_string())
+                            .collect(),
+                    )
+                }
             }
             super::adapter::Source::Npm { entry, .. } => {
-                match super::node::resolve_npm_server(self.adapter.name, entry, self.adapter.args) {
-                    super::node::Resolved::Ready { program, args } => (program, args),
-                    super::node::Resolved::Unavailable(reason) => {
-                        return LaunchResult::Failed(reason)
+                if let Some(path) = &self.user.binary_path {
+                    (
+                        path.clone(),
+                        self.user.binary_args.clone().unwrap_or_else(|| {
+                            self.adapter
+                                .args
+                                .iter()
+                                .map(|arg| arg.to_string())
+                                .collect()
+                        }),
+                    )
+                } else {
+                    match super::node::resolve_npm_server(
+                        self.adapter.name,
+                        entry,
+                        self.adapter.args,
+                    ) {
+                        super::node::Resolved::Ready { program, args } => (program, args),
+                        super::node::Resolved::Unavailable(reason) => {
+                            return LaunchResult::Failed(reason)
+                        }
+                        super::node::Resolved::NeedsInstall => return LaunchResult::NeedsInstall,
                     }
-                    super::node::Resolved::NeedsInstall => return LaunchResult::NeedsInstall,
                 }
             }
         };
-        LspClient::spawn(
+        match LspClient::spawn(
             self.adapter,
             program,
             args,
             self.root.as_deref(),
             self.events.clone(),
-        )
-        .map(|client| LaunchResult::Client(Box::new(client)))
-        .unwrap_or_else(|| LaunchResult::Failed(format!("failed to start {}", self.adapter.name)))
+            self.user.initialization_options.clone(),
+        ) {
+            Some(client) => {
+                if client.wait_until_initialized(INITIALIZE_TIMEOUT) {
+                    LaunchResult::Client(Box::new(client))
+                } else {
+                    client.stop();
+                    LaunchResult::Failed(format!(
+                        "{} did not finish initialize",
+                        self.adapter.name
+                    ))
+                }
+            }
+            None => LaunchResult::Failed(format!("failed to start {}", self.adapter.name)),
+        }
     }
 }
 
@@ -171,6 +228,7 @@ pub struct LspManager {
     generation: u64,
 
     crash_counts: HashMap<String, (usize, Instant)>,
+    user_lsp: HashMap<String, UserLspConfig>,
 }
 
 impl LspManager {
@@ -185,7 +243,12 @@ impl LspManager {
             event_tx,
             event_rx,
             crash_counts: HashMap::new(),
+            user_lsp: HashMap::new(),
         }
+    }
+
+    pub fn set_user_lsp(&mut self, user_lsp: HashMap<String, UserLspConfig>) {
+        self.user_lsp = user_lsp;
     }
 
     pub fn event_receiver(&self) -> async_channel::Receiver<ScopedLspEvent> {
@@ -245,6 +308,7 @@ impl LspManager {
         Some(ServerLaunch {
             adapter,
             root: self.root.clone(),
+            user: self.user_lsp.get(name).cloned().unwrap_or_default(),
             generation: self.generation,
             events: LspEventSender {
                 tx: self.event_tx.clone(),
@@ -499,6 +563,9 @@ pub struct LspClient {
 
     pending: Arc<Mutex<HashMap<i64, mpsc::Sender<Value>>>>,
     child: Arc<Mutex<Option<Child>>>,
+    watched_globs: Arc<Mutex<Vec<String>>>,
+    init_options: Option<Value>,
+    _watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 impl LspClient {
@@ -508,6 +575,7 @@ impl LspClient {
         args: Vec<String>,
         root_dir: Option<&Path>,
         event_tx: LspEventSender,
+        init_options: Option<Value>,
     ) -> Option<Self> {
         let mut cmd = Command::new(&program);
         cmd.args(&args);
@@ -573,6 +641,9 @@ impl LspClient {
         let pending: Arc<Mutex<HashMap<i64, mpsc::Sender<Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let child_arc = Arc::new(Mutex::new(Some(child)));
+        let watched_globs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>> =
+            Arc::new(Mutex::new(None));
 
         let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
 
@@ -591,10 +662,12 @@ impl LspClient {
             next_id: AtomicI64::new(100),
             pending: pending.clone(),
             child: child_arc,
+            watched_globs: watched_globs.clone(),
+            init_options,
+            _watcher: watcher_slot.clone(),
         };
 
-        client.send_initialize(root_dir);
-
+        // Writer first so initialize is not stuck in the outbound queue.
         {
             let is_alive_w = is_alive.clone();
             let stdin_for_write = stdin_arc.clone();
@@ -629,6 +702,8 @@ impl LspClient {
             });
         }
 
+        client.send_initialize(root_dir);
+
         let lang_str = adapter.name.to_string();
         let root_for_reader = root_dir.map(Path::to_path_buf);
         let is_alive_clone = is_alive.clone();
@@ -640,6 +715,8 @@ impl LspClient {
         let last_diag_r = last_diagnostics.clone();
         let caps_r = server_capabilities.clone();
         let pending_r = pending.clone();
+        let watched_r = watched_globs.clone();
+        let events_for_reader = event_tx.clone();
 
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
@@ -661,6 +738,8 @@ impl LspClient {
                                 m,
                                 msg.get("params"),
                                 &out_for_init,
+                                &watched_r,
+                                &events_for_reader,
                             );
                             continue;
                         }
@@ -747,6 +826,9 @@ impl LspClient {
                     Ok(None) => {
                         break;
                     }
+                    Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                        eprintln!("[LSP: {lang_str}] skipping malformed message: {e}");
+                    }
                     Err(e) => {
                         eprintln!("[LSP: {lang_str}] read error: {e}");
                         break;
@@ -760,6 +842,17 @@ impl LspClient {
             });
         });
 
+        if let Some(root) = root_dir {
+            if let Some(watcher) = start_file_watcher(
+                root.to_path_buf(),
+                watched_globs,
+                out_tx,
+                is_alive,
+            ) {
+                *watcher_slot.lock().unwrap() = Some(watcher);
+            }
+        }
+
         Some(client)
     }
 
@@ -769,6 +862,22 @@ impl LspClient {
 
     pub fn is_ready(&self) -> bool {
         *self.is_initialized.lock().unwrap() && *self.is_alive.lock().unwrap()
+    }
+
+    /// Block until `initialize` completes or the process dies. Zed's spawn
+    /// path does the same before the server is considered ready for didOpen.
+    pub fn wait_until_initialized(&self, timeout: Duration) -> bool {
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            if self.is_ready() {
+                return true;
+            }
+            if !self.is_alive() {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        self.is_ready()
     }
 
     pub fn capabilities(&self) -> Option<lsp_types::ServerCapabilities> {
@@ -787,14 +896,25 @@ impl LspClient {
     fn send_initialize(&self, root_dir: Option<&Path>) {
         let mut params = InitializeParams {
             process_id: Some(std::process::id()),
+            root_path: root_dir.map(|p| p.to_string_lossy().into_owned()),
             root_uri: root_dir.and_then(path_to_uri),
             capabilities: ClientCapabilities {
+                general: Some(lsp_types::GeneralClientCapabilities {
+                    position_encodings: Some(vec![PositionEncodingKind::UTF16]),
+                    ..Default::default()
+                }),
                 text_document: Some(TextDocumentClientCapabilities {
                     publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
                         related_information: Some(true),
                         version_support: Some(true),
                         code_description_support: Some(true),
                         data_support: Some(true),
+                        tag_support: Some(lsp_types::TagSupport {
+                            value_set: vec![
+                                lsp_types::DiagnosticTag::UNNECESSARY,
+                                lsp_types::DiagnosticTag::DEPRECATED,
+                            ],
+                        }),
                         ..Default::default()
                     }),
                     synchronization: Some(TextDocumentSyncClientCapabilities {
@@ -806,9 +926,25 @@ impl LspClient {
                     completion: Some(lsp_types::CompletionClientCapabilities {
                         completion_item: Some(lsp_types::CompletionItemCapability {
                             snippet_support: Some(true),
-                            documentation_format: Some(vec![lsp_types::MarkupKind::Markdown]),
+                            documentation_format: Some(vec![
+                                lsp_types::MarkupKind::Markdown,
+                                lsp_types::MarkupKind::PlainText,
+                            ]),
+                            deprecated_support: Some(true),
+                            insert_replace_support: Some(true),
+                            resolve_support: Some(
+                                lsp_types::CompletionItemCapabilityResolveSupport {
+                                    properties: vec![
+                                        "additionalTextEdits".into(),
+                                        "command".into(),
+                                        "documentation".into(),
+                                        "detail".into(),
+                                    ],
+                                },
+                            ),
                             ..Default::default()
                         }),
+                        context_support: Some(true),
                         ..Default::default()
                     }),
                     hover: Some(lsp_types::HoverClientCapabilities {
@@ -841,6 +977,14 @@ impl LspClient {
                                 ],
                             },
                         }),
+                        data_support: Some(true),
+                        resolve_support: Some(lsp_types::CodeActionCapabilityResolveSupport {
+                            properties: vec![
+                                "edit".into(),
+                                "command".into(),
+                                "isPreferred".into(),
+                            ],
+                        }),
                         ..Default::default()
                     }),
                     formatting: Some(lsp_types::DocumentFormattingClientCapabilities {
@@ -859,11 +1003,20 @@ impl LspClient {
                     did_change_watched_files: Some(
                         lsp_types::DidChangeWatchedFilesClientCapabilities {
                             dynamic_registration: Some(true),
-                            relative_pattern_support: Some(false),
+                            relative_pattern_support: Some(true),
                         },
                     ),
                     workspace_folders: Some(true),
                     apply_edit: Some(true),
+                    workspace_edit: Some(lsp_types::WorkspaceEditClientCapabilities {
+                        document_changes: Some(true),
+                        resource_operations: Some(vec![
+                            lsp_types::ResourceOperationKind::Create,
+                            lsp_types::ResourceOperationKind::Rename,
+                            lsp_types::ResourceOperationKind::Delete,
+                        ]),
+                        ..Default::default()
+                    }),
                     execute_command: Some(lsp_types::DynamicRegistrationClientCapabilities {
                         dynamic_registration: Some(true),
                     }),
@@ -899,7 +1052,10 @@ impl LspClient {
             }
         }
 
-        params.initialization_options = self.adapter.initialization_options(root_dir);
+        params.initialization_options = merge_init_options(
+            self.adapter.initialization_options(root_dir),
+            self.init_options.clone(),
+        );
 
         let init_req = json!({
             "jsonrpc": "2.0",
@@ -957,10 +1113,6 @@ impl LspClient {
     }
 
     pub fn did_change(&self, path: &Path, text: String) {
-        if !*self.is_initialized.lock().unwrap() {
-            return;
-        }
-
         self.pending_changes
             .lock()
             .unwrap()
@@ -968,9 +1120,6 @@ impl LspClient {
     }
 
     pub fn did_close(&self, path: &Path) {
-        let Some(uri) = path_to_uri(path) else {
-            return;
-        };
         self.versions.lock().unwrap().remove(path);
         self.synced_texts.lock().unwrap().remove(path);
         self.last_diagnostics.lock().unwrap().remove(path);
@@ -981,6 +1130,12 @@ impl LspClient {
             .unwrap()
             .retain(|(pending_path, _, _)| pending_path != path);
 
+        if !*self.is_initialized.lock().unwrap() {
+            return;
+        }
+        let Some(uri) = path_to_uri(path) else {
+            return;
+        };
         let params = DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri },
         };
@@ -1139,10 +1294,25 @@ impl LspClient {
     /// requests may still own Arcs, so relying on Drop alone leaks old servers
     /// across project transitions even when the manager forgets the client.
     pub fn stop(&self) {
+        if self.is_ready() {
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            self.send_payload(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "shutdown",
+                "params": null
+            }));
+            self.send_payload(&json!({
+                "jsonrpc": "2.0",
+                "method": "exit"
+            }));
+        }
         *self.is_alive.lock().unwrap() = false;
         self.pending.lock().unwrap().clear();
+        *self._watcher.lock().unwrap() = None;
         if let Some(mut child) = self.child.lock().unwrap().take() {
             thread::spawn(move || {
+                thread::sleep(Duration::from_millis(400));
                 #[cfg(unix)]
                 unsafe {
                     libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
@@ -1433,22 +1603,17 @@ impl CodeActionProvider for LspCodeActionProvider {
         let path = self.path.clone();
 
         if let Some(edit) = action.edit {
-            if let (Some(uri), Some(changes)) = (path_to_uri(&path), edit.changes) {
-                if let Some((_, text_edits)) =
-                    changes.iter().find(|(u, _)| u.as_str() == uri.as_str())
-                {
-                    let text_edits = text_edits.clone();
-                    let state = state.downgrade();
-                    window
-                        .spawn(cx, async move |cx| {
-                            if let Some(state) = state.upgrade() {
-                                let _ = state.update_in(cx, |state, window, cx| {
-                                    state.apply_lsp_edits(&text_edits, window, cx);
-                                });
-                            }
-                        })
-                        .detach();
-                }
+            if let Some(text_edits) = text_edits_for_path(&path, &edit) {
+                let state = state.downgrade();
+                window
+                    .spawn(cx, async move |cx| {
+                        if let Some(state) = state.upgrade() {
+                            let _ = state.update_in(cx, |state, window, cx| {
+                                state.apply_lsp_edits(&text_edits, window, cx);
+                            });
+                        }
+                    })
+                    .detach();
             }
         }
 
@@ -1463,6 +1628,52 @@ impl CodeActionProvider for LspCodeActionProvider {
         }
 
         Task::ready(Ok(()))
+    }
+}
+
+fn text_edits_for_path(path: &Path, edit: &WorkspaceEdit) -> Option<Vec<lsp_types::TextEdit>> {
+    let uri = path_to_uri(path)?;
+    if let Some(changes) = &edit.changes {
+        if let Some((_, text_edits)) = changes.iter().find(|(u, _)| u.as_str() == uri.as_str()) {
+            return Some(text_edits.clone());
+        }
+    }
+    match &edit.document_changes {
+        Some(lsp_types::DocumentChanges::Edits(edits)) => {
+            for document in edits {
+                if document.text_document.uri.as_str() == uri.as_str() {
+                    let text_edits = document
+                        .edits
+                        .iter()
+                        .map(|e| match e {
+                            lsp_types::OneOf::Left(edit) => edit.clone(),
+                            lsp_types::OneOf::Right(annotated) => annotated.text_edit.clone(),
+                        })
+                        .collect();
+                    return Some(text_edits);
+                }
+            }
+            None
+        }
+        Some(lsp_types::DocumentChanges::Operations(ops)) => {
+            for op in ops {
+                if let lsp_types::DocumentChangeOperation::Edit(document) = op {
+                    if document.text_document.uri.as_str() == uri.as_str() {
+                        let text_edits = document
+                            .edits
+                            .iter()
+                            .map(|e| match e {
+                                lsp_types::OneOf::Left(edit) => edit.clone(),
+                                lsp_types::OneOf::Right(annotated) => annotated.text_edit.clone(),
+                            })
+                            .collect();
+                        return Some(text_edits);
+                    }
+                }
+            }
+            None
+        }
+        None => None,
     }
 }
 
@@ -1730,14 +1941,19 @@ fn read_message<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Value>> {
     }
 
     let Some(length) = content_length else {
-        return Ok(None);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "LSP frame missing Content-Length",
+        ));
     };
 
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
 
-    let val = serde_json::from_slice(&body).ok();
-    Ok(val)
+    match serde_json::from_slice(&body) {
+        Ok(val) => Ok(Some(val)),
+        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+    }
 }
 
 fn handle_server_request(
@@ -1747,6 +1963,8 @@ fn handle_server_request(
     method: &str,
     params: Option<&Value>,
     out: &mpsc::Sender<Vec<u8>>,
+    watched: &Mutex<Vec<String>>,
+    events: &LspEventSender,
 ) {
     let result: Option<Value> = match method {
         "workspace/configuration" => {
@@ -1772,11 +1990,37 @@ fn handle_server_request(
             };
             Some(Value::Array(configs))
         }
-        // Acknowledge with a null result.
-        "client/registerCapability"
-        | "client/unregisterCapability"
-        | "window/workDoneProgress/create" => Some(Value::Null),
-        "workspace/applyEdit" => Some(json!({ "applied": false })),
+        "workspace/workspaceFolders" => {
+            let folders = root
+                .and_then(|root| {
+                    let uri = path_to_uri(root)?;
+                    Some(vec![json!({
+                        "uri": uri,
+                        "name": root.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    })])
+                })
+                .unwrap_or_default();
+            Some(Value::Array(folders))
+        }
+        "client/registerCapability" => {
+            register_capabilities(params, watched);
+            Some(Value::Null)
+        }
+        "client/unregisterCapability" | "window/workDoneProgress/create" => Some(Value::Null),
+        "workspace/applyEdit" => {
+            if let Some(edit) = params
+                .and_then(|p| p.get("edit"))
+                .cloned()
+                .and_then(|v| serde_json::from_value::<WorkspaceEdit>(v).ok())
+            {
+                let _ = events.try_send(LspEvent::ApplyEdit { edit });
+                Some(json!({ "applied": true }))
+            } else {
+                Some(json!({ "applied": false }))
+            }
+        }
         "workspace/semanticTokens/refresh"
         | "workspace/inlayHint/refresh"
         | "workspace/codeLens/refresh"
@@ -1833,6 +2077,121 @@ fn handle_incoming_message(
             }
         }
     }
+}
+
+fn merge_init_options(base: Option<Value>, user: Option<Value>) -> Option<Value> {
+    match (base, user) {
+        (Some(mut base), Some(user)) => {
+            merge_json(&mut base, &user);
+            Some(base)
+        }
+        (None, Some(user)) => Some(user),
+        (base, None) => base,
+    }
+}
+
+fn merge_json(base: &mut Value, overlay: &Value) {
+    match (base, overlay) {
+        (Value::Object(base), Value::Object(overlay)) => {
+            for (k, v) in overlay {
+                merge_json(base.entry(k.clone()).or_insert(Value::Null), v);
+            }
+        }
+        (slot, overlay) => *slot = overlay.clone(),
+    }
+}
+
+fn register_capabilities(params: Option<&Value>, watched: &Mutex<Vec<String>>) {
+    let Some(registrations) = params
+        .and_then(|p| p.get("registrations"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    let mut globs = watched.lock().unwrap();
+    for reg in registrations {
+        let method = reg.get("method").and_then(Value::as_str).unwrap_or("");
+        if method != "workspace/didChangeWatchedFiles" {
+            continue;
+        }
+        let Some(watchers) = reg
+            .get("registerOptions")
+            .and_then(|o| o.get("watchers"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for watcher in watchers {
+            match watcher.get("globPattern") {
+                Some(Value::String(s)) => globs.push(s.clone()),
+                Some(Value::Object(obj)) => {
+                    if let Some(pattern) = obj.get("pattern").and_then(Value::as_str) {
+                        globs.push(pattern.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn start_file_watcher(
+    root: PathBuf,
+    globs: Arc<Mutex<Vec<String>>>,
+    out: mpsc::Sender<Vec<u8>>,
+    is_alive: Arc<Mutex<bool>>,
+) -> Option<notify::RecommendedWatcher> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(move |res| {
+        let _ = tx.send(res);
+    })
+    .ok()?;
+    watcher
+        .watch(&root, notify::RecursiveMode::Recursive)
+        .ok()?;
+    thread::spawn(move || {
+        while *is_alive.lock().unwrap() {
+            match rx.recv_timeout(Duration::from_millis(400)) {
+                Ok(Ok(event)) => {
+                    let kind = match event.kind {
+                        notify::EventKind::Create(_) => 1,
+                        notify::EventKind::Modify(_) => 2,
+                        notify::EventKind::Remove(_) => 3,
+                        _ => continue,
+                    };
+                    let registered = globs.lock().unwrap().clone();
+                    if registered.is_empty() {
+                        continue;
+                    }
+                    let mut changes = Vec::new();
+                    for path in event.paths {
+                        if registered
+                            .iter()
+                            .any(|g| super::watch::path_matches_watch(Some(&root), g, &path))
+                        {
+                            if let Some(uri) = path_to_uri(&path) {
+                                changes.push(json!({ "uri": uri, "type": kind }));
+                            }
+                        }
+                    }
+                    if !changes.is_empty() {
+                        send_framed(
+                            &out,
+                            &json!({
+                                "jsonrpc": "2.0",
+                                "method": "workspace/didChangeWatchedFiles",
+                                "params": { "changes": changes }
+                            }),
+                        );
+                    }
+                }
+                Ok(Err(_)) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+    Some(watcher)
 }
 
 #[cfg(test)]
@@ -1899,6 +2258,7 @@ mod tests {
                     tx,
                     generation: Some(1),
                 },
+                None,
             )
             .unwrap(),
         );
@@ -1941,6 +2301,18 @@ mod tests {
         assert!(!is_completion_trigger_char(';'));
     }
 
+    fn request_ctx() -> (Mutex<Vec<String>>, LspEventSender, async_channel::Receiver<ScopedLspEvent>) {
+        let (tx, rx) = async_channel::unbounded();
+        (
+            Mutex::new(Vec::new()),
+            LspEventSender {
+                tx,
+                generation: None,
+            },
+            rx,
+        )
+    }
+
     /// Collect the framed messages a `handle_server_request` call produced.
     fn drain(rx: &mpsc::Receiver<Vec<u8>>) -> Vec<Value> {
         let mut out = Vec::new();
@@ -1963,6 +2335,7 @@ mod tests {
         let css = super::super::adapter::adapter_by_name("vscode-css-language-server").unwrap();
         let (tx, rx) = mpsc::channel();
 
+        let (watched, events, _) = request_ctx();
         handle_server_request(
             css,
             None,
@@ -1970,6 +2343,8 @@ mod tests {
             "workspace/configuration",
             Some(&json!({ "items": [{ "section": "css" }, { "section": "scss" }] })),
             &tx,
+            &watched,
+            &events,
         );
 
         let sent = drain(&rx);
@@ -1991,6 +2366,7 @@ mod tests {
         let ts = super::super::adapter::adapter_by_name("typescript-language-server").unwrap();
         let (tx, rx) = mpsc::channel();
 
+        let (watched, events, _) = request_ctx();
         handle_server_request(
             ts,
             None,
@@ -1998,12 +2374,79 @@ mod tests {
             "client/registerCapability",
             Some(&json!({ "registrations": [] })),
             &tx,
+            &watched,
+            &events,
         );
 
         let sent = drain(&rx);
         assert_eq!(sent[0]["id"], "req-abc");
         assert!(sent[0].get("error").is_none());
         assert!(sent[0]["result"].is_null());
+    }
+
+    #[test]
+    fn register_capability_records_file_watcher_globs() {
+        let ts = super::super::adapter::adapter_by_name("typescript-language-server").unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let (watched, events, _) = request_ctx();
+        handle_server_request(
+            ts,
+            None,
+            json!(1),
+            "client/registerCapability",
+            Some(&json!({
+                "registrations": [{
+                    "id": "w1",
+                    "method": "workspace/didChangeWatchedFiles",
+                    "registerOptions": {
+                        "watchers": [
+                            { "globPattern": "**/*.ts" },
+                            { "globPattern": { "baseUri": "file:///tmp", "pattern": "*.json" } }
+                        ]
+                    }
+                }]
+            })),
+            &tx,
+            &watched,
+            &events,
+        );
+        let globs = watched.lock().unwrap().clone();
+        assert!(globs.iter().any(|g| g == "**/*.ts"));
+        assert!(globs.iter().any(|g| g == "*.json"));
+    }
+
+    #[test]
+    fn apply_edit_is_forwarded_as_applied() {
+        let ts = super::super::adapter::adapter_by_name("typescript-language-server").unwrap();
+        let (tx, rx) = mpsc::channel();
+        let (watched, events, ev_rx) = request_ctx();
+        handle_server_request(
+            ts,
+            None,
+            json!(2),
+            "workspace/applyEdit",
+            Some(&json!({ "edit": { "changes": {} } })),
+            &tx,
+            &watched,
+            &events,
+        );
+        let sent = drain(&rx);
+        assert_eq!(sent[0]["result"]["applied"], true);
+        assert!(matches!(
+            ev_rx.try_recv().unwrap().event,
+            LspEvent::ApplyEdit { .. }
+        ));
+    }
+
+    #[test]
+    fn malformed_json_is_invalid_data_not_eof() {
+        let payload = b"not-json";
+        let framed = format!("Content-Length: {}\r\n\r\n", payload.len());
+        let mut bytes = framed.into_bytes();
+        bytes.extend_from_slice(payload);
+        let mut cursor = std::io::Cursor::new(bytes);
+        let err = read_message(&mut cursor).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
     /// Incremental sync: the edit must cover exactly the changed bytes and
@@ -2144,7 +2587,8 @@ mod tests {
     fn unknown_server_requests_get_method_not_found() {
         let ts = super::super::adapter::adapter_by_name("typescript-language-server").unwrap();
         let (tx, rx) = mpsc::channel();
-        handle_server_request(ts, None, json!(3), "some/unknownMethod", None, &tx);
+        let (watched, events, _) = request_ctx();
+        handle_server_request(ts, None, json!(3), "some/unknownMethod", None, &tx, &watched, &events);
         let sent = drain(&rx);
         assert_eq!(sent[0]["error"]["code"], -32601);
     }

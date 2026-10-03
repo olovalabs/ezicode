@@ -351,7 +351,7 @@ fn render_settings_content(
                             }),
                         )),
                 ),
-            (font_size - 14.5).abs() > 0.01,
+            (font_size - 15.0).abs() > 0.01,
             t,
         ));
     }

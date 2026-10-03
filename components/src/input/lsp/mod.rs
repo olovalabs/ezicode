@@ -117,7 +117,17 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        for edit in text_edits {
+        // Apply from the end of the buffer so earlier ranges stay valid —
+        // the same order Zed uses for WorkspaceEdit / formatting results.
+        let mut edits = text_edits.clone();
+        edits.sort_by(|a, b| {
+            b.range
+                .start
+                .line
+                .cmp(&a.range.start.line)
+                .then(b.range.start.character.cmp(&a.range.start.character))
+        });
+        for edit in &edits {
             let start = self.text.position_to_offset(&edit.range.start);
             let end = self.text.position_to_offset(&edit.range.end);
 

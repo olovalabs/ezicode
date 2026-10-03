@@ -23,7 +23,7 @@ use crate::fs_tree::{
 };
 use crate::git::{self, ChangeKind, GitChange, RepoStatus};
 use crate::lang;
-use crate::lsp::{LspEvent, LspManager};
+use crate::lsp::{LspEvent, LspManager, UserLspConfig};
 use crate::theme;
 use session::{DirectoryWatcher, PreparedWorkspace};
 
@@ -525,11 +525,12 @@ impl Workspace {
         let project_switcher_focus_handle = cx.focus_handle();
         let explorer_scroll_handle = UniformListScrollHandle::new();
 
-        let lsp_mgr = LspManager::new();
+        let mut lsp_mgr = LspManager::new();
+        lsp_mgr.set_user_lsp(user_lsp_from_settings(&crate::settings::Settings::load()));
         let rx = lsp_mgr.event_receiver();
         let lsp = Arc::new(Mutex::new(lsp_mgr));
 
-        cx.spawn({
+        cx.spawn_in(window, {
             let rx = rx.clone();
             async move |this, cx| {
                 while let Ok(message) = rx.recv().await {
@@ -596,6 +597,11 @@ impl Workspace {
                                     workspace.start_server_for_open_buffers(&server, cx);
                                     cx.notify();
                                 }
+                            });
+                        }
+                        LspEvent::ApplyEdit { edit } => {
+                            let _ = this.update_in(cx, |workspace, window, cx| {
+                                workspace.apply_workspace_edit(edit, window, cx);
                             });
                         }
                     }
@@ -2667,12 +2673,13 @@ impl Workspace {
         // writing to disk. Anything missing — no language, no server, no
         // formatting capability — falls through to a plain save, so Ctrl+S
         // is never blocked on a formatter.
-        let formatter =
-            if self.settings.editor_format_on_save == crate::settings::FormatOnSaveMode::On {
-                language.and_then(|lang| self.lsp.lock().unwrap().client_for(&lang))
-            } else {
-                None
-            };
+        let formatter = if self.settings.format_on_save_for(language.as_deref())
+            == crate::settings::FormatOnSaveMode::On
+        {
+            language.and_then(|lang| self.lsp.lock().unwrap().client_for(&lang))
+        } else {
+            None
+        };
         if let Some(client) = formatter {
             self.format_then_save(path, editor, client, window, cx);
             cx.notify();
@@ -2703,7 +2710,8 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let text = editor.read(cx).value().to_string();
-        let tab_size = self.settings.editor_tab_size as u32;
+        let lang = lang::language_for(&path);
+        let tab_size = self.settings.tab_size_for(lang) as u32;
         let display = display_name(&path);
         self.status = format!("Formatting {display}…");
         cx.notify();
@@ -4475,6 +4483,58 @@ impl Workspace {
         }
     }
 
+    fn apply_workspace_edit(
+        &mut self,
+        edit: lsp_types::WorkspaceEdit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut by_path: HashMap<PathBuf, Vec<lsp_types::TextEdit>> = HashMap::new();
+        if let Some(changes) = edit.changes {
+            for (uri, edits) in changes {
+                if let Some(path) = crate::lsp::client::uri_to_path(&uri) {
+                    by_path.entry(path).or_default().extend(edits);
+                }
+            }
+        }
+        if let Some(document_changes) = edit.document_changes {
+            let edits = match document_changes {
+                lsp_types::DocumentChanges::Edits(edits) => edits,
+                lsp_types::DocumentChanges::Operations(ops) => ops
+                    .into_iter()
+                    .filter_map(|op| match op {
+                        lsp_types::DocumentChangeOperation::Edit(edit) => Some(edit),
+                        _ => None,
+                    })
+                    .collect(),
+            };
+            for document in edits {
+                if let Some(path) = crate::lsp::client::uri_to_path(&document.text_document.uri) {
+                    let text_edits = document.edits.into_iter().map(|e| match e {
+                        lsp_types::OneOf::Left(edit) => edit,
+                        lsp_types::OneOf::Right(annotated) => annotated.text_edit,
+                    });
+                    by_path.entry(path).or_default().extend(text_edits);
+                }
+            }
+        }
+        for (path, edits) in by_path {
+            if let Some(index) = self.tabs.iter().position(|tab| {
+                tab.path
+                    .as_ref()
+                    .is_some_and(|p| crate::lsp::paths_match(p, &path))
+            }) {
+                if let Some(editor) = self.tabs[index].editor.clone() {
+                    editor.update(cx, |state, cx| {
+                        state.apply_lsp_edits(&edits, window, cx);
+                    });
+                    self.tabs[index].dirty = true;
+                }
+            }
+        }
+        cx.notify();
+    }
+
     pub(crate) fn navigate_diagnostic(
         &mut self,
         forward: bool,
@@ -5335,8 +5395,8 @@ impl Workspace {
             return;
         };
         let text = editor.read(cx).value().to_string();
-        // Honor `editor.tabSize` (see LspClient::format_document).
-        let tab_size = self.settings.editor_tab_size as u32;
+        // Honor Zed's `tab_size` / per-language override.
+        let tab_size = self.settings.tab_size_for(Some(&lang_id)) as u32;
 
         self.status = "Formatting…".into();
         cx.notify();
@@ -5517,6 +5577,10 @@ impl Workspace {
         // exactly as changing it on the Settings page does.
         self.ui_font_size = self.settings.ui_font_size;
         crate::ui::scale::apply_ui_font_size(self.ui_font_size, cx);
+        self.lsp
+            .lock()
+            .unwrap()
+            .set_user_lsp(user_lsp_from_settings(&self.settings));
         self.status = "Settings reloaded from settings.json".into();
         cx.notify();
     }
@@ -5779,7 +5843,7 @@ impl Workspace {
     }
 
     pub(crate) fn reset_font_size(&mut self, cx: &mut Context<Self>) {
-        self.font_size = 14.5;
+        self.font_size = crate::settings::Settings::default().editor_font_size;
         self.settings.editor_font_size = self.font_size;
         let _ = self.settings.save();
         gpui_component::Theme::global_mut(cx).mono_font_size = gpui::px(self.font_size);
@@ -6703,6 +6767,27 @@ impl Workspace {
 
         self.storage.save(state);
     }
+}
+
+fn user_lsp_from_settings(settings: &crate::settings::Settings) -> HashMap<String, UserLspConfig> {
+    settings
+        .lsp
+        .iter()
+        .map(|(name, cfg)| {
+            (
+                name.clone(),
+                UserLspConfig {
+                    initialization_options: cfg.initialization_options.clone(),
+                    binary_path: cfg
+                        .binary
+                        .as_ref()
+                        .and_then(|b| b.path.as_ref())
+                        .map(PathBuf::from),
+                    binary_args: cfg.binary.as_ref().and_then(|b| b.arguments.clone()),
+                },
+            )
+        })
+        .collect()
 }
 
 impl Drop for Workspace {

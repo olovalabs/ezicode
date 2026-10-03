@@ -263,20 +263,17 @@ impl RopeExt for Rope {
     }
 
     fn position_to_offset(&self, pos: &Position) -> usize {
+        // LSP positions are UTF-16 code units (Zed advertises utf-16 and so do we).
         let line = self.slice_line(pos.line as usize);
         self.line_start_offset(pos.line as usize)
-            + line
-                .chars()
-                .take(pos.character as usize)
-                .map(|c| c.len_utf8())
-                .sum::<usize>()
+            + line.utf16_to_byte_idx(pos.character as usize)
     }
 
     fn offset_to_position(&self, offset: usize) -> Position {
         let point = self.offset_to_point(offset);
         let line = self.slice_line(point.row);
-        let offset = line.utf16_to_byte_idx(line.byte_to_utf16_idx(point.column));
-        let character = line.slice(..offset).chars().count();
+        let col_bytes = point.column.min(line.len());
+        let character = line.byte_to_utf16_idx(col_bytes);
         Position::new(point.row as u32, character as u32)
     }
 
@@ -479,9 +476,11 @@ mod tests {
     #[test]
     fn test_line_column() {
         let rope = Rope::from("a 中文🎉 test\nRope");
+        // "a 中" is 3 UTF-16 units (BMP). 🎉 is 2 UTF-16 units, so
+        // "a 中文🎉" is 6, matching the LSP / Zed encoding.
         assert_eq!(rope.position_to_offset(&Position::new(0, 3)), "a 中".len());
         assert_eq!(
-            rope.position_to_offset(&Position::new(0, 5)),
+            rope.position_to_offset(&Position::new(0, 6)),
             "a 中文🎉".len()
         );
         assert_eq!(
@@ -495,7 +494,11 @@ mod tests {
         );
         assert_eq!(
             rope.offset_to_position("a 中文🎉".len()),
-            Position::new(0, 5)
+            Position::new(0, 6)
+        );
+        assert_eq!(
+            rope.position_to_offset(&rope.offset_to_position("a 中文🎉".len())),
+            "a 中文🎉".len()
         );
     }
 

@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum AutoSaveMode {
     #[serde(
         alias = "off",
@@ -15,7 +16,6 @@ pub enum AutoSaveMode {
     Off,
     #[serde(
         alias = "afterDelay",
-        alias = "after_delay",
         alias = "on",
         alias = "ON",
         alias = "true",
@@ -26,7 +26,6 @@ pub enum AutoSaveMode {
     AfterDelay,
     #[serde(
         alias = "onFocusChange",
-        alias = "on_focus_change",
         alias = "focusChange",
         alias = "focus"
     )]
@@ -110,7 +109,8 @@ pub fn clamp_ui_font_size(size: f32) -> f32 {
 }
 
 fn default_font_size() -> f32 {
-    14.5
+    // Zed's `buffer_font_size` default.
+    15.0
 }
 
 fn default_ui_font_size() -> f32 {
@@ -140,9 +140,47 @@ fn default_tab_size() -> usize {
     4
 }
 
+/// Per-language overrides — Zed's `languages` map. Keys are language names
+/// (`"Rust"`, `"TypeScript"`) or our language ids (`"rust"`, `"typescript"`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LanguageSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_size: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_on_save: Option<FormatOnSaveMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language_servers: Option<Vec<String>>,
+}
+
+/// Binary override for one language server — Zed's `lsp.<name>.binary`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LspBinarySettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<Vec<String>>,
+}
+
+/// Per-server LSP config — Zed's `lsp` map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LspServerSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initialization_options: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary: Option<LspBinarySettings>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(rename = "editor.fontSize", default = "default_font_size")]
+    /// Zed's `buffer_font_size`. The VS Code `editor.fontSize` key is still
+    /// accepted so existing settings.json files keep working.
+    #[serde(
+        rename = "buffer_font_size",
+        alias = "editor.fontSize",
+        default = "default_font_size"
+    )]
     pub editor_font_size: f32,
 
     /// The size of every text in the interface — Zed's `ui_font_size`.
@@ -156,27 +194,77 @@ pub struct Settings {
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: f32,
 
-    #[serde(rename = "workbench.colorTheme", default = "default_theme")]
+    /// Zed's `theme` (string or `{ mode, light, dark }`). `workbench.colorTheme`
+    /// is still accepted.
+    #[serde(
+        rename = "theme",
+        alias = "workbench.colorTheme",
+        default = "default_theme",
+        deserialize_with = "deserialize_theme_name"
+    )]
     pub workbench_color_theme: String,
 
-    #[serde(rename = "editor.autoSave", default = "default_auto_save")]
+    #[serde(
+        rename = "autosave",
+        alias = "editor.autoSave",
+        default = "default_auto_save"
+    )]
     pub editor_auto_save: AutoSaveMode,
 
-    #[serde(rename = "editor.autoSaveDelay", default = "default_auto_save_delay")]
+    #[serde(
+        rename = "autosave_delay_ms",
+        alias = "editor.autoSaveDelay",
+        default = "default_auto_save_delay"
+    )]
     pub editor_auto_save_delay: u64,
 
-    #[serde(rename = "editor.tabSize", default = "default_tab_size")]
+    #[serde(
+        rename = "tab_size",
+        alias = "editor.tabSize",
+        default = "default_tab_size"
+    )]
     pub editor_tab_size: usize,
 
-    #[serde(rename = "editor.formatOnSave", default = "default_format_on_save")]
+    #[serde(
+        rename = "format_on_save",
+        alias = "editor.formatOnSave",
+        default = "default_format_on_save"
+    )]
     pub editor_format_on_save: FormatOnSaveMode,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub languages: HashMap<String, LanguageSettings>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub lsp: HashMap<String, LspServerSettings>,
 
     #[serde(
         rename = "terminal.integrated.shell",
+        alias = "terminal_integrated_shell",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub terminal_integrated_shell: Option<String>,
+}
+
+fn deserialize_theme_name<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    match value {
+        serde_json::Value::String(s) => Ok(s),
+        serde_json::Value::Object(map) => {
+            let mode = map.get("mode").and_then(|v| v.as_str()).unwrap_or("dark");
+            let preferred = if mode == "light" { "light" } else { "dark" };
+            Ok(map
+                .get(preferred)
+                .or_else(|| map.get("dark"))
+                .or_else(|| map.get("light"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("GitHub Dark")
+                .to_string())
+        }
+        serde_json::Value::Null => Ok(default_theme()),
+        other => Err(serde::de::Error::custom(format!("invalid theme: {other}"))),
+    }
 }
 
 impl Default for Settings {
@@ -189,8 +277,38 @@ impl Default for Settings {
             editor_auto_save_delay: default_auto_save_delay(),
             editor_tab_size: default_tab_size(),
             editor_format_on_save: default_format_on_save(),
+            languages: HashMap::new(),
+            lsp: HashMap::new(),
             terminal_integrated_shell: None,
         }
+    }
+}
+
+impl Settings {
+    /// Tab size for `lang`, falling through Zed's `languages.<Name>.tab_size`
+    /// onto the global `tab_size`.
+    pub fn tab_size_for(&self, lang: Option<&str>) -> usize {
+        let Some(lang) = lang else {
+            return self.editor_tab_size;
+        };
+        let display = crate::lang::language_name(lang);
+        self.languages
+            .get(display)
+            .and_then(|l| l.tab_size)
+            .or_else(|| self.languages.get(lang).and_then(|l| l.tab_size))
+            .unwrap_or(self.editor_tab_size)
+    }
+
+    pub fn format_on_save_for(&self, lang: Option<&str>) -> FormatOnSaveMode {
+        let Some(lang) = lang else {
+            return self.editor_format_on_save;
+        };
+        let display = crate::lang::language_name(lang);
+        self.languages
+            .get(display)
+            .and_then(|l| l.format_on_save)
+            .or_else(|| self.languages.get(lang).and_then(|l| l.format_on_save))
+            .unwrap_or(self.editor_format_on_save)
     }
 }
 
@@ -390,5 +508,55 @@ mod tests {
         );
         let repaired = std::fs::read_to_string(&path).unwrap();
         assert!(repaired.contains("\"ui_font_size\""), "{repaired}");
+    }
+
+    #[test]
+    fn zed_keys_round_trip_and_vscode_aliases_still_load() {
+        let zed = r#"{
+            "buffer_font_size": 15,
+            "theme": "GitHub Dark",
+            "autosave": "off",
+            "tab_size": 4,
+            "format_on_save": "on",
+            "lsp": {
+                "rust-analyzer": {
+                    "initialization_options": { "checkOnSave": true }
+                }
+            },
+            "languages": { "Rust": { "tab_size": 4 } }
+        }"#;
+        let settings: Settings = serde_json::from_str(zed).unwrap();
+        assert_eq!(settings.editor_font_size, 15.0);
+        assert_eq!(settings.workbench_color_theme, "GitHub Dark");
+        assert_eq!(settings.editor_auto_save, AutoSaveMode::Off);
+        assert_eq!(settings.editor_tab_size, 4);
+        assert_eq!(settings.editor_format_on_save, FormatOnSaveMode::On);
+        assert!(settings.lsp.contains_key("rust-analyzer"));
+        assert_eq!(settings.tab_size_for(Some("rust")), 4);
+
+        let vscode = r#"{
+            "editor.fontSize": 18,
+            "workbench.colorTheme": "GitHub Light",
+            "editor.autoSave": "afterDelay",
+            "editor.tabSize": 2,
+            "editor.formatOnSave": "off"
+        }"#;
+        let settings: Settings = serde_json::from_str(vscode).unwrap();
+        assert_eq!(settings.editor_font_size, 18.0);
+        assert_eq!(settings.workbench_color_theme, "GitHub Light");
+        assert_eq!(settings.editor_auto_save, AutoSaveMode::AfterDelay);
+        assert_eq!(settings.editor_tab_size, 2);
+
+        let object_theme =
+            r#"{ "theme": { "mode": "dark", "dark": "One Dark", "light": "One Light" } }"#;
+        let settings: Settings = serde_json::from_str(object_theme).unwrap();
+        assert_eq!(settings.workbench_color_theme, "One Dark");
+
+        let json = serde_json::to_string(&Settings::default()).unwrap();
+        assert!(json.contains("\"buffer_font_size\""), "{json}");
+        assert!(json.contains("\"theme\""), "{json}");
+        assert!(json.contains("\"tab_size\""), "{json}");
+        assert!(json.contains("\"format_on_save\""), "{json}");
+        assert!(!json.contains("\"editor.fontSize\""), "{json}");
     }
 }
