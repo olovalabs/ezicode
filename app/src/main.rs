@@ -141,6 +141,8 @@ fn main() {
                 KeyBinding::new("ctrl-_", DecreaseFontSize, None),
                 KeyBinding::new("ctrl-0", ResetFontSize, None),
                 KeyBinding::new("ctrl-alt-c", CopyDiagnostic, None),
+                KeyBinding::new("f8", NextDiagnostic, None),
+                KeyBinding::new("shift-f8", PrevDiagnostic, None),
                 KeyBinding::new("shift-alt-f", FormatDocument, Some("Workspace")),
             ]);
 

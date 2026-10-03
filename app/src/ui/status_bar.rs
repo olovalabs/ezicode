@@ -61,6 +61,8 @@ pub(crate) fn render_status_bar(
                 .flex()
                 .items_center()
                 .gap(rem(10.0))
+                .min_w_0()
+                .overflow_hidden()
                 .when_some(git_branch, |bar, branch| {
                     bar.child(
                         div()
@@ -107,50 +109,66 @@ pub(crate) fn render_status_bar(
                     )
                 })
                 .when_some(diagnostic_counts, |bar, (errors, warnings)| {
-                    if errors > 0 || warnings > 0 {
-                        bar.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(rem(6.0))
-                                .when(errors > 0, |parent| {
-                                    parent.child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(rem(2.0))
-                                            .text_color(rgba(t.vc_deleted))
-                                            .child("ⓧ")
-                                            .child(SharedString::from(errors.to_string())),
-                                    )
-                                })
-                                .when(warnings > 0, |parent| {
-                                    parent.child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(rem(2.0))
-                                            .text_color(rgba(t.vc_modified))
-                                            .child("▲")
-                                            .child(SharedString::from(warnings.to_string())),
-                                    )
-                                }),
-                        )
-                    } else {
-                        bar
-                    }
+                    bar.child(
+                        div()
+                            .id("status-diagnostics-btn")
+                            .flex()
+                            .items_center()
+                            .gap(rem(6.0))
+                            .px(rem(4.0))
+                            .py(rem(1.0))
+                            .rounded(px(3.0))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgba(t.ghost_hover)))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(crate::actions::NextDiagnostic),
+                                    cx,
+                                );
+                            })
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(rem(2.5))
+                                    .text_color(rgba(if errors > 0 {
+                                        t.vc_deleted
+                                    } else {
+                                        t.text_muted
+                                    }))
+                                    .child("ⓧ")
+                                    .child(SharedString::from(errors.to_string())),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(rem(2.5))
+                                    .text_color(rgba(if warnings > 0 {
+                                        t.vc_modified
+                                    } else {
+                                        t.text_muted
+                                    }))
+                                    .child("▲")
+                                    .child(SharedString::from(warnings.to_string())),
+                            ),
+                    )
                 })
-                .child(
-                    div()
-                        .text_color(rgba(t.text_muted))
-                        .child(SharedString::from(status.to_string())),
-                ),
+                .when(!status.is_empty(), |bar| {
+                    bar.child(
+                        div()
+                            .text_color(rgba(t.text_muted))
+                            .truncate()
+                            .child(SharedString::from(status.to_string())),
+                    )
+                }),
         )
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap(rem(12.0))
+                .flex_shrink_0()
                 .when_some(cursor_pos, |bar, (line, col)| {
                     bar.child(
                         div()

@@ -289,19 +289,40 @@ impl Render for Workspace {
             (pos.line + 1, pos.character + 1)
         });
 
-        let diagnostic_counts = open.as_ref().and_then(|path| {
-            self.diagnostics_by_path.get(path).map(|diags| {
-                let errors = diags
-                    .iter()
-                    .filter(|d| d.severity == Some(lsp_types::DiagnosticSeverity::ERROR))
-                    .count();
-                let warnings = diags
-                    .iter()
-                    .filter(|d| d.severity == Some(lsp_types::DiagnosticSeverity::WARNING))
-                    .count();
-                (errors, warnings)
-            })
-        });
+        let diagnostic_counts = if let Some(path) = open.as_ref() {
+            let (errors, warnings) = self
+                .diagnostics_by_path
+                .iter()
+                .find(|(p, _)| crate::lsp::paths_match(p, path))
+                .map(|(_, diags)| {
+                    let errors = diags
+                        .iter()
+                        .filter(|d| d.severity == Some(lsp_types::DiagnosticSeverity::ERROR))
+                        .count();
+                    let warnings = diags
+                        .iter()
+                        .filter(|d| d.severity == Some(lsp_types::DiagnosticSeverity::WARNING))
+                        .count();
+                    (errors, warnings)
+                })
+                .unwrap_or((0, 0));
+            Some((errors, warnings))
+        } else if !self.diagnostics_by_path.is_empty() || self.git.is_some() || !self.tabs.is_empty() {
+            let mut total_errors = 0;
+            let mut total_warnings = 0;
+            for diags in self.diagnostics_by_path.values() {
+                for d in diags.iter() {
+                    match d.severity {
+                        Some(lsp_types::DiagnosticSeverity::ERROR) => total_errors += 1,
+                        Some(lsp_types::DiagnosticSeverity::WARNING) => total_warnings += 1,
+                        _ => {}
+                    }
+                }
+            }
+            Some((total_errors, total_warnings))
+        } else {
+            None
+        };
 
         let lsp_indicator = {
             let lsp = self.lsp.lock().unwrap();
@@ -516,6 +537,12 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &CopyDiagnostic, _, cx| {
                 this.copy_active_diagnostic(cx);
+            }))
+            .on_action(cx.listener(|this, _: &NextDiagnostic, window, cx| {
+                this.navigate_diagnostic(true, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PrevDiagnostic, window, cx| {
+                this.navigate_diagnostic(false, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FormatDocument, window, cx| {
                 this.format_document(window, cx);

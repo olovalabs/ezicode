@@ -37,6 +37,8 @@ actions!(
         DecreaseFontSize,
         ResetFontSize,
         CopyDiagnostic,
+        NextDiagnostic,
+        PrevDiagnostic,
         FormatDocument,
         GitRefresh,
         GitStageAll,

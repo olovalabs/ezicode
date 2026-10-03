@@ -47,6 +47,7 @@ impl InputState {
         self.update_preferred_column();
         self.hide_context_menu(cx);
         self.clear_inline_completion(cx);
+        self.diagnostic_popover = None;
         cx.notify()
     }
 

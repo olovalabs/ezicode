@@ -292,7 +292,7 @@ pub struct InputState {
     pub(super) placeholder: SharedString,
 
     /// Popover
-    diagnostic_popover: Option<Entity<DiagnosticPopover>>,
+    pub(super) diagnostic_popover: Option<Entity<DiagnosticPopover>>,
     /// Completion/CodeAction context menu
     pub(super) context_menu: Option<ContextMenu>,
     pub(super) mouse_context_menu: Entity<MouseContextMenu>,
@@ -500,6 +500,29 @@ impl InputState {
     #[inline]
     pub fn diagnostics_mut(&mut self) -> Option<&mut DiagnosticSet> {
         self.mode.diagnostics_mut()
+    }
+
+    pub fn show_diagnostic_at_cursor(&mut self, cx: &mut Context<Self>) {
+        if self.mode.is_code_editor() {
+            let offset = self.cursor();
+            if let Some(diagnostic) = self
+                .mode
+                .diagnostics()
+                .and_then(|set| set.for_offset(offset))
+            {
+                if let Some(diagnostic_popover) = self.diagnostic_popover.as_ref() {
+                    if diagnostic_popover.read(cx).diagnostic.range == diagnostic.range {
+                        diagnostic_popover.update(cx, |this, cx| {
+                            this.show(cx);
+                        });
+                        return;
+                    }
+                }
+
+                self.diagnostic_popover = Some(DiagnosticPopover::new(diagnostic, cx.entity(), cx));
+                cx.notify();
+            }
+        }
     }
 
     pub fn set_placeholder(

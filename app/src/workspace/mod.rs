@@ -4451,10 +4451,8 @@ impl Workspace {
             .insert(path.to_path_buf(), Arc::clone(&shared));
 
         let mut updated = false;
-        let mut active_msg = None;
-        let active_tab_idx = self.active_tab;
 
-        for (idx, tab) in self.tabs.iter_mut().enumerate() {
+        for tab in self.tabs.iter_mut() {
             if let Some(tab_path) = &tab.path {
                 if crate::lsp::paths_match(tab_path, path) {
                     if let Some(editor) = &tab.editor {
@@ -4465,11 +4463,6 @@ impl Workspace {
                                     diag_set.push(d.clone());
                                 }
                                 updated = true;
-                                if idx == active_tab_idx {
-                                    if let Some(first) = shared.first() {
-                                        active_msg = Some(first.message.clone());
-                                    }
-                                }
                             }
                         });
                     }
@@ -4477,11 +4470,91 @@ impl Workspace {
             }
         }
 
-        if let Some(msg) = active_msg {
-            self.status = format!("Problem: {} (Ctrl+Alt+C to copy)", msg);
+        if updated {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn navigate_diagnostic(
+        &mut self,
+        forward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // First check active tab
+        if let Some(tab) = self.tabs.get(self.active_tab) {
+            if let (Some(path), Some(editor)) = (tab.path.clone(), tab.editor.clone()) {
+                let diags = self
+                    .diagnostics_by_path
+                    .iter()
+                    .find(|(p, _)| crate::lsp::paths_match(p, &path))
+                    .map(|(_, d)| d.clone());
+
+                if let Some(diags) = diags {
+                    if !diags.is_empty() {
+                        let mut sorted: Vec<_> = diags.iter().collect();
+                        sorted.sort_by(|a, b| {
+                            a.range
+                                .start
+                                .line
+                                .cmp(&b.range.start.line)
+                                .then_with(|| a.range.start.character.cmp(&b.range.start.character))
+                        });
+
+                        let current_pos = editor.read(cx).cursor_position();
+                        let target = if forward {
+                            sorted
+                                .iter()
+                                .find(|d| {
+                                    d.range.start.line > current_pos.line
+                                        || (d.range.start.line == current_pos.line
+                                            && d.range.start.character > current_pos.character)
+                                })
+                                .copied()
+                                .unwrap_or(sorted[0])
+                        } else {
+                            sorted
+                                .iter()
+                                .rev()
+                                .find(|d| {
+                                    d.range.start.line < current_pos.line
+                                        || (d.range.start.line == current_pos.line
+                                            && d.range.start.character < current_pos.character)
+                                })
+                                .copied()
+                                .unwrap_or(*sorted.last().unwrap())
+                        };
+
+                        let pos = target.range.start;
+                        editor.update(cx, |this, cx| {
+                            this.set_cursor_position(pos, window, cx);
+                            this.show_diagnostic_at_cursor(cx);
+                        });
+                        cx.notify();
+                        return;
+                    }
+                }
+            }
         }
 
-        if updated {
+        // If active tab has no diagnostics, look for any other file with diagnostics
+        let other_file = self
+            .diagnostics_by_path
+            .iter()
+            .find(|(_, diags)| !diags.is_empty())
+            .map(|(p, d)| (p.clone(), d.clone()));
+
+        if let Some((path, diags)) = other_file {
+            self.open_file(path, window, cx);
+            if let Some(editor) = self.active_editor() {
+                if let Some(first) = diags.first() {
+                    let pos = first.range.start;
+                    editor.update(cx, |this, cx| {
+                        this.set_cursor_position(pos, window, cx);
+                        this.show_diagnostic_at_cursor(cx);
+                    });
+                }
+            }
             cx.notify();
         }
     }
@@ -4499,7 +4572,7 @@ impl Workspace {
                             .collect::<Vec<_>>()
                             .join("\n");
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(msg));
-                        self.status = format!("Copied: {}", diags[0].message);
+                        self.status = "Copied diagnostic to clipboard".into();
                         cx.notify();
                         return;
                     }
@@ -6412,6 +6485,8 @@ impl Workspace {
             "ui.font_size_increase" => self.increase_ui_font_size(cx),
             "ui.font_size_decrease" => self.decrease_ui_font_size(cx),
             "ui.font_size_reset" => self.reset_ui_font_size(cx),
+            "editor.next_diagnostic" => self.navigate_diagnostic(true, window, cx),
+            "editor.prev_diagnostic" => self.navigate_diagnostic(false, window, cx),
             "editor.copy_diagnostic" => self.copy_active_diagnostic(cx),
             "git.refresh" => self.git_refresh(cx),
             "git.stage_all" => self.git_stage_all(cx),
