@@ -14,6 +14,11 @@ const TERMINAL_MAX_RESERVE: f32 = 60.0;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Layout runs after this returns, so `rem` lengths — every scalable
+        // metric in the sidebar, and the widget library's own — resolve against
+        // the UI font size the frame it changes, with no restart involved.
+        ui::scale::sync_window_rem_size(window, cx);
+
         if let Some(path) = self.pending_open.take() {
             self.open_file(path, window, cx);
         }
@@ -45,6 +50,14 @@ impl Render for Workspace {
         {
             self.ensure_search_inputs(window, cx);
         }
+        if self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|t| t.is_settings)
+            && self.settings_search_input.is_none()
+        {
+            self.ensure_settings_inputs(window, cx);
+        }
 
         // A search-result click on a closed file queues a cursor jump that
         // can only run once the async open has landed its tab.
@@ -68,6 +81,10 @@ impl Render for Workspace {
             self.focus_active_editor_or_self(window, cx);
         }
         let search_panel_visible = self.show_sidebar && self.activity == Activity::Search;
+        let is_settings = self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|t| t.is_settings);
         if self.picker.is_none()
             && !self.project_switcher_visible
             && self.active_editor().is_none()
@@ -77,6 +94,7 @@ impl Render for Workspace {
             && self.inline_creating.is_none()
             && self.inline_renaming.is_none()
             && !search_panel_visible
+            && !is_settings
         {
             window.focus(&self.focus_handle);
         }
@@ -710,11 +728,26 @@ impl Render for Workspace {
                                         })
                                         .when(!welcome, |d| {
                                             if is_settings {
+                                                let search_query = self
+                                                    .settings_search_input
+                                                    .as_ref()
+                                                    .map(|i| i.read(cx).value().to_string())
+                                                    .unwrap_or_default();
+                                                let inputs = ui::settings::SettingsInputs {
+                                                    search: self.settings_search_input.as_ref(),
+                                                    font_size: self.settings_font_size_input.as_ref(),
+                                                    ui_font_size: self.settings_ui_font_size_input.as_ref(),
+                                                    font_family: self.settings_font_family_input.as_ref(),
+                                                    tab_size: self.settings_tab_size_input.as_ref(),
+                                                };
                                                 d.child(ui::settings::render_settings(
                                                     &self.settings,
                                                     &t,
                                                     theme_ix,
                                                     font_size,
+                                                    self.settings_category,
+                                                    inputs,
+                                                    &search_query,
                                                     cx,
                                                 ))
                                             } else if let Some(diff) = active_diff {

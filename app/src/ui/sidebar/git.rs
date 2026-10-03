@@ -23,8 +23,12 @@ use crate::file_icons;
 use crate::git::{ChangeKind, GitChange, RepoStatus};
 use crate::theme::Colors;
 use crate::ui::common::icon_img;
+use crate::ui::scale::rem;
 use crate::workspace::{GitConfirm, GitSection, Workspace};
 
+/// Design pixels: the height of a change row at the design UI font size. Like
+/// the explorer's rows it is scaled through `rem`, so the two sidebar panels
+/// grow and shrink together when `ui_font_size` changes.
 const ROW_HEIGHT: f32 = 26.0;
 
 fn kind_color(kind: ChangeKind, t: &Colors) -> u32 {
@@ -147,9 +151,9 @@ pub(crate) fn render_git_panel(
             if repo.changes.is_empty() {
                 body = body.child(
                     div()
-                        .px(px(20.0))
-                        .py(px(10.0))
-                        .text_size(px(12.5))
+                        .px(rem(20.0))
+                        .py(rem(10.0))
+                        .text_size(rem(12.5))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from("No changes — working tree clean")),
                 );
@@ -289,14 +293,14 @@ pub(crate) fn render_git_panel(
 
 fn header(t: &Colors, _window: &mut Window, _cx: &mut Context<Workspace>) -> impl IntoElement {
     div()
-        .h(px(36.0))
-        .px(px(12.0))
+        .h(rem(36.0))
+        .px(rem(12.0))
         .flex()
         .items_center()
         .justify_between()
         .child(
             div()
-                .text_size(px(12.0))
+                .text_size(rem(12.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from("Source Control")),
@@ -304,7 +308,7 @@ fn header(t: &Colors, _window: &mut Window, _cx: &mut Context<Workspace>) -> imp
         .child(
             div()
                 .id("git-header-more")
-                .size(px(26.0))
+                .size(rem(26.0))
                 .rounded(px(4.0))
                 .flex()
                 .items_center()
@@ -314,8 +318,8 @@ fn header(t: &Colors, _window: &mut Window, _cx: &mut Context<Workspace>) -> imp
                 .child(
                     svg()
                         .path("ui_icons/ellipsis_tint.svg")
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(rem(16.0))
+                        .h(rem(16.0))
                         .text_color(rgba(t.icon_muted)),
                 )
                 .context_menu(|menu, _window, _cx| {
@@ -358,8 +362,8 @@ fn branch_row(
     };
 
     let mut row = div()
-        .h(px(30.0))
-        .px(px(12.0))
+        .h(rem(30.0))
+        .px(rem(12.0))
         .flex()
         .flex_row()
         .items_center()
@@ -371,7 +375,7 @@ fn branch_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(6.0))
+        .gap(rem(6.0))
         .min_w(px(0.0))
         .child(
             div()
@@ -379,9 +383,9 @@ fn branch_row(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(5.0))
-                .px(px(4.0))
-                .py(px(2.0))
+                .gap(rem(5.0))
+                .px(rem(4.0))
+                .py(rem(2.0))
                 .rounded(px(3.0))
                 .cursor_pointer()
                 .hover(|s| s.bg(rgba(t.ghost_hover)))
@@ -394,8 +398,8 @@ fn branch_row(
                 .child(
                     svg()
                         .path("ui_icons/git_branch.svg")
-                        .w(px(13.0))
-                        .h(px(13.0))
+                        .w(rem(13.0))
+                        .h(rem(13.0))
                         .text_color(rgba(t.text)),
                 )
                 .child(
@@ -404,7 +408,7 @@ fn branch_row(
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
-                        .text_size(px(12.5))
+                        .text_size(rem(12.5))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(t.text))
                         .child(SharedString::from(branch_label)),
@@ -414,7 +418,7 @@ fn branch_row(
     if repo.ahead > 0 || repo.behind > 0 {
         left = left.child(
             div()
-                .text_size(px(11.5))
+                .text_size(rem(11.5))
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from(format!(
                     "↑{} ↓{}",
@@ -430,8 +434,8 @@ fn branch_row(
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.0))
-            .text_size(px(11.5))
+            .gap(rem(4.0))
+            .text_size(rem(11.5))
             .text_color(rgba(t.text_accent))
             .child(SharedString::from(format!("{op}…")))
             .into_any_element()
@@ -440,7 +444,7 @@ fn branch_row(
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(2.0))
+            .gap(rem(2.0))
             .child(
                 row_icon_btn(
                     SharedString::from("git-fetch-btn"),
@@ -505,14 +509,14 @@ fn section_header(
         t.text
     };
 
-    let mut right = div().flex().flex_row().items_center().gap(px(4.0));
+    let mut right = div().flex().flex_row().items_center().gap(rem(4.0));
     if !actions.is_empty() {
         right = right.child(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(2.0))
+                .gap(rem(2.0))
                 .invisible()
                 .group_hover(id, |s| s.visible())
                 .children(actions),
@@ -525,8 +529,8 @@ fn section_header(
     div()
         .id(id)
         .group(id)
-        .h(px(26.0))
-        .px(px(8.0))
+        .h(rem(26.0))
+        .px(rem(8.0))
         .flex()
         .flex_row()
         .items_center()
@@ -538,25 +542,25 @@ fn section_header(
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(4.0))
+                .gap(rem(4.0))
                 .child(
                     div()
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(rem(16.0))
+                        .h(rem(16.0))
                         .flex()
                         .items_center()
                         .justify_center()
                         .child(
                             svg()
                                 .path(chevron)
-                                .w(px(12.0))
-                                .h(px(12.0))
+                                .w(rem(12.0))
+                                .h(rem(12.0))
                                 .text_color(rgba(t.icon_muted)),
                         ),
                 )
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(label_color))
                         .child(SharedString::from(label)),
@@ -578,7 +582,7 @@ fn section_action(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
-        .size(px(22.0))
+        .size(rem(22.0))
         .rounded(px(3.0))
         .flex()
         .items_center()
@@ -589,8 +593,8 @@ fn section_action(
         .child(
             svg()
                 .path(icon_path)
-                .w(px(14.0))
-                .h(px(14.0))
+                .w(rem(14.0))
+                .h(rem(14.0))
                 .text_color(rgba(t.icon_muted)),
         )
         .on_click(cx.listener(move |_this, _, window, cx| {
@@ -602,14 +606,14 @@ fn section_action(
 fn badge(count: usize, t: &Colors) -> impl IntoElement {
     div()
         .min_w(px(18.0))
-        .h(px(18.0))
-        .px(px(5.0))
+        .h(rem(18.0))
+        .px(rem(5.0))
         .rounded_full()
         .bg(rgba(t.text_accent))
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(11.5))
+        .text_size(rem(11.5))
         .font_weight(FontWeight::BOLD)
         .text_color(rgba(t.background))
         .child(SharedString::from(count.to_string()))
@@ -626,8 +630,8 @@ fn commit_box(
 
     let input_field = match input {
         Some(input) => div()
-            .h(px(34.0))
-            .px(px(8.0))
+            .h(rem(34.0))
+            .px(rem(8.0))
             .flex()
             .flex_row()
             .items_center()
@@ -638,14 +642,14 @@ fn commit_box(
             .child(
                 Input::new(input)
                     .xsmall()
-                    .text_size(px(13.0))
+                    .text_size(rem(13.0))
                     .appearance(false)
                     .bordered(false),
             )
             .into_any_element(),
         None => div()
-            .h(px(34.0))
-            .px(px(8.0))
+            .h(rem(34.0))
+            .px(rem(8.0))
             .flex()
             .flex_row()
             .items_center()
@@ -655,7 +659,7 @@ fn commit_box(
             .rounded(px(3.0))
             .child(
                 div()
-                    .text_size(px(12.5))
+                    .text_size(rem(12.5))
                     .text_color(rgba(t.text_muted))
                     .child(SharedString::from(placeholder_text)),
             )
@@ -663,7 +667,7 @@ fn commit_box(
     };
 
     let commit_split_btn = div()
-        .h(px(32.0))
+        .h(rem(32.0))
         .rounded(px(3.0))
         .bg(rgba(0x0078d4ff))
         .flex()
@@ -680,7 +684,7 @@ fn commit_box(
                 .justify_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(rgba(0x0086e6ff)))
-                .text_size(px(13.0))
+                .text_size(rem(13.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(0xffffffff))
                 .tooltip(|window, cx| {
@@ -692,12 +696,12 @@ fn commit_box(
                         .flex()
                         .flex_row()
                         .items_center()
-                        .gap(px(5.0))
+                        .gap(rem(5.0))
                         .child(
                             svg()
                                 .path("ui_icons/check_tint.svg")
-                                .w(px(16.0))
-                                .h(px(16.0))
+                                .w(rem(16.0))
+                                .h(rem(16.0))
                                 .text_color(rgba(0xffffffff)),
                         )
                         .child(SharedString::from("Commit")),
@@ -706,7 +710,7 @@ fn commit_box(
                     this.git_commit(window, cx);
                 })),
         )
-        .child(div().w(px(1.0)).h(px(20.0)).bg(rgba(0xffffff33)))
+        .child(div().w(px(1.0)).h(rem(20.0)).bg(rgba(0xffffff33)))
         .child(
             Button::new("git-commit-dropdown-btn")
                 .ghost()
@@ -720,12 +724,12 @@ fn commit_box(
         );
 
     div()
-        .px(px(12.0))
-        .pt(px(2.0))
-        .pb(px(8.0))
+        .px(rem(12.0))
+        .pt(rem(2.0))
+        .pb(rem(8.0))
         .flex()
         .flex_col()
-        .gap(px(8.0))
+        .gap(rem(8.0))
         .child(input_field)
         .child(commit_split_btn)
 }
@@ -781,13 +785,13 @@ fn change_row(
         .id((ElementId::from(id_prefix), change.rel.clone()))
         .group("git-row")
         .w_full()
-        .h(px(ROW_HEIGHT))
-        .pl(px(20.0))
-        .pr(px(12.0))
+        .h(rem(ROW_HEIGHT))
+        .pl(rem(20.0))
+        .pr(rem(12.0))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(6.0))
+        .gap(rem(6.0))
         .cursor_pointer()
         .hover(|s| s.bg(rgba(t.ghost_hover)))
         .on_click(cx.listener({
@@ -803,8 +807,9 @@ fn change_row(
             }
         }));
 
-    // Official file type icon.
-    row = row.child(icon_img(file_icon_path, 18.0));
+    // Official file type icon, the same size relative to the row as in the file
+    // tree, because both are expressed in design pixels.
+    row = row.child(icon_img(file_icon_path, rem(18.0)));
 
     // File name, folder subpath, rename source.
     row = row.child(
@@ -814,14 +819,14 @@ fn change_row(
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(6.0))
+            .gap(rem(6.0))
             .child(
                 div()
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .text_size(px(13.5))
+                    .text_size(rem(13.5))
                     .text_color(rgba(if is_conflict { t.vc_deleted } else { t.text }))
                     .child(SharedString::from(name)),
             )
@@ -829,7 +834,7 @@ fn change_row(
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(parent)),
                 )
@@ -838,7 +843,7 @@ fn change_row(
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(12.0))
+                        .text_size(rem(12.0))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(format!("← {old}"))),
                 )
@@ -856,7 +861,7 @@ fn change_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(2.0))
+        .gap(rem(2.0))
         .invisible()
         .group_hover("git-row", |s| s.visible());
 
@@ -940,12 +945,12 @@ fn change_row(
     // Status letter on the far right (M, U, A, D, R, !).
     row = row.child(
         div()
-            .w(px(14.0))
+            .w(rem(14.0))
             .flex_none()
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(11.5))
+            .text_size(rem(11.5))
             .font_weight(FontWeight::BOLD)
             .text_color(rgba(color))
             .child(SharedString::from(letter)),
@@ -1026,7 +1031,7 @@ fn row_icon_btn(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
-        .size(px(22.0))
+        .size(rem(22.0))
         .rounded(px(3.0))
         .flex_none()
         .flex()
@@ -1038,8 +1043,8 @@ fn row_icon_btn(
         .child(
             svg()
                 .path(icon_path)
-                .w(px(14.0))
-                .h(px(14.0))
+                .w(rem(14.0))
+                .h(rem(14.0))
                 .text_color(rgba(t.icon_muted)),
         )
 }
@@ -1051,10 +1056,10 @@ fn empty_state(message: &str, t: &Colors) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .px(px(20.0))
+        .px(rem(20.0))
         .child(
             div()
-                .text_size(px(13.0))
+                .text_size(rem(13.0))
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from(message.to_string())),
         )
@@ -1069,11 +1074,11 @@ fn init_repo_state(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement 
         .flex_col()
         .items_center()
         .justify_center()
-        .gap(px(12.0))
-        .px(px(20.0))
+        .gap(rem(12.0))
+        .px(rem(20.0))
         .child(
             div()
-                .text_size(px(13.0))
+                .text_size(rem(13.0))
                 .text_color(rgba(t.text_muted))
                 .child(SharedString::from(
                     "This folder is not a Git repository yet.",
@@ -1082,8 +1087,8 @@ fn init_repo_state(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement 
         .child(
             div()
                 .id("git-init-btn")
-                .h(px(30.0))
-                .px(px(14.0))
+                .h(rem(30.0))
+                .px(rem(14.0))
                 .rounded(px(4.0))
                 .bg(rgba(0x0078d4ff))
                 .flex()
@@ -1091,7 +1096,7 @@ fn init_repo_state(t: &Colors, cx: &mut Context<Workspace>) -> impl IntoElement 
                 .justify_center()
                 .cursor_pointer()
                 .hover(|s| s.bg(rgba(0x0086e6ff)))
-                .text_size(px(12.5))
+                .text_size(rem(12.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(0xffffffff))
                 .child(SharedString::from("Initialize Repository"))
@@ -1128,7 +1133,7 @@ pub(crate) fn render_git_confirm(
         .child(
             div()
                 .id("git-confirm-card")
-                .w(px(440.0))
+                .w(rem(440.0))
                 .bg(rgba(t.panel))
                 .rounded(px(8.0))
                 .border_1()
@@ -1138,20 +1143,20 @@ pub(crate) fn render_git_confirm(
                 .p(px(16.0))
                 .flex()
                 .flex_col()
-                .gap(px(10.0))
+                .gap(rem(10.0))
                 .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                     cx.stop_propagation();
                 })
                 .child(
                     div()
-                        .text_size(px(14.0))
+                        .text_size(rem(14.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(t.text))
                         .child(SharedString::from(confirm.title.clone())),
                 )
                 .child(
                     div()
-                        .text_size(px(12.5))
+                        .text_size(rem(12.5))
                         .text_color(rgba(t.text_muted))
                         .child(SharedString::from(confirm.detail.clone())),
                 )
@@ -1160,13 +1165,13 @@ pub(crate) fn render_git_confirm(
                         .flex()
                         .flex_row()
                         .justify_end()
-                        .gap(px(8.0))
-                        .pt(px(6.0))
+                        .gap(rem(8.0))
+                        .pt(rem(6.0))
                         .child(
                             div()
                                 .id("git-confirm-cancel")
-                                .h(px(28.0))
-                                .px(px(12.0))
+                                .h(rem(28.0))
+                                .px(rem(12.0))
                                 .rounded(px(4.0))
                                 .bg(rgba(t.element_bg))
                                 .border_1()
@@ -1175,7 +1180,7 @@ pub(crate) fn render_git_confirm(
                                 .items_center()
                                 .cursor_pointer()
                                 .hover(|s| s.bg(rgba(t.element_hover)))
-                                .text_size(px(12.5))
+                                .text_size(rem(12.5))
                                 .text_color(rgba(t.text))
                                 .child(SharedString::from("Cancel"))
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1185,15 +1190,15 @@ pub(crate) fn render_git_confirm(
                         .child(
                             div()
                                 .id("git-confirm-accept")
-                                .h(px(28.0))
-                                .px(px(12.0))
+                                .h(rem(28.0))
+                                .px(rem(12.0))
                                 .rounded(px(4.0))
                                 .bg(rgba(t.vc_deleted))
                                 .flex()
                                 .items_center()
                                 .cursor_pointer()
                                 .hover(|s| s.opacity(0.9))
-                                .text_size(px(12.5))
+                                .text_size(rem(12.5))
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(rgba(0xffffffff))
                                 .child(SharedString::from(confirm.confirm_label.clone()))

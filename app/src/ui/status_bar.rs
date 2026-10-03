@@ -1,6 +1,7 @@
 use gpui::{div, prelude::*, px, rgba, svg, FontWeight, IntoElement, SharedString};
 
 use crate::theme::Colors;
+use crate::ui::scale::rem;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LspIndicator {
@@ -44,31 +45,31 @@ pub(crate) fn render_status_bar(
     let lang_display = lang.map(crate::lang::language_name).unwrap_or("Plain Text");
 
     div()
-        .h(px(26.0))
+        .h(rem(26.0))
         .w_full()
         .flex()
         .items_center()
         .justify_between()
-        .px(px(10.0))
+        .px(rem(10.0))
         .bg(rgba(t.status_bar))
         .border_t_1()
         .border_color(rgba(t.border_variant))
-        .text_size(px(12.0))
+        .text_size(rem(12.0))
         .text_color(rgba(t.text))
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap(px(10.0))
+                .gap(rem(10.0))
                 .when_some(git_branch, |bar, branch| {
                     bar.child(
                         div()
                             .id("status-git-branch")
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
-                            .px(px(4.0))
-                            .py(px(1.0))
+                            .gap(rem(4.0))
+                            .px(rem(4.0))
+                            .py(rem(1.0))
                             .rounded(px(3.0))
                             .cursor_pointer()
                             .hover(|s| s.bg(rgba(t.ghost_hover)))
@@ -81,15 +82,15 @@ pub(crate) fn render_status_bar(
                             .child(
                                 svg()
                                     .path("ui_icons/git_branch.svg")
-                                    .w(px(13.0))
-                                    .h(px(13.0))
+                                    .w(rem(13.0))
+                                    .h(rem(13.0))
                                     .text_color(rgba(t.text)),
                             )
                             .child(SharedString::from(branch.to_string()))
                             .when_some(git_sync, |parent, (ahead, behind)| {
                                 parent.child(
                                     div()
-                                        .text_size(px(10.5))
+                                        .text_size(rem(10.5))
                                         .text_color(rgba(t.text_muted))
                                         .child(SharedString::from(format!("↑{ahead} ↓{behind}"))),
                                 )
@@ -97,7 +98,7 @@ pub(crate) fn render_status_bar(
                             .when(git_changes > 0, |parent| {
                                 parent.child(
                                     div()
-                                        .text_size(px(10.5))
+                                        .text_size(rem(10.5))
                                         .font_weight(FontWeight::BOLD)
                                         .text_color(rgba(t.vc_modified))
                                         .child(SharedString::from(git_changes.to_string())),
@@ -111,13 +112,13 @@ pub(crate) fn render_status_bar(
                             div()
                                 .flex()
                                 .items_center()
-                                .gap(px(6.0))
+                                .gap(rem(6.0))
                                 .when(errors > 0, |parent| {
                                     parent.child(
                                         div()
                                             .flex()
                                             .items_center()
-                                            .gap(px(2.0))
+                                            .gap(rem(2.0))
                                             .text_color(rgba(t.vc_deleted))
                                             .child("ⓧ")
                                             .child(SharedString::from(errors.to_string())),
@@ -128,7 +129,7 @@ pub(crate) fn render_status_bar(
                                         div()
                                             .flex()
                                             .items_center()
-                                            .gap(px(2.0))
+                                            .gap(rem(2.0))
                                             .text_color(rgba(t.vc_modified))
                                             .child("▲")
                                             .child(SharedString::from(warnings.to_string())),
@@ -149,13 +150,13 @@ pub(crate) fn render_status_bar(
             div()
                 .flex()
                 .items_center()
-                .gap(px(12.0))
+                .gap(rem(12.0))
                 .when_some(cursor_pos, |bar, (line, col)| {
                     bar.child(
                         div()
                             .id("status-cursor-pos")
-                            .px(px(4.0))
-                            .py(px(1.0))
+                            .px(rem(4.0))
+                            .py(rem(1.0))
                             .rounded(px(3.0))
                             .cursor_pointer()
                             .hover(|s| s.bg(rgba(t.ghost_hover)))
@@ -174,9 +175,9 @@ pub(crate) fn render_status_bar(
                         .id("status-language-selector-btn")
                         .flex()
                         .items_center()
-                        .gap(px(5.0))
-                        .px(px(6.0))
-                        .py(px(2.0))
+                        .gap(rem(5.0))
+                        .px(rem(6.0))
+                        .py(rem(2.0))
                         .rounded(px(4.0))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgba(t.ghost_hover)))
@@ -188,7 +189,7 @@ pub(crate) fn render_status_bar(
                         })
                         .child(
                             div()
-                                .text_size(px(10.5))
+                                .text_size(rem(10.5))
                                 .text_color(rgba(dot_color))
                                 .child(SharedString::from(dot)),
                         )
@@ -200,7 +201,7 @@ pub(crate) fn render_status_bar(
                         .when(lsp.server.is_some(), |parent| {
                             parent.child(
                                 div()
-                                    .text_size(px(11.0))
+                                    .text_size(rem(11.0))
                                     .text_color(rgba(t.text_muted))
                                     .child(SharedString::from(format!("({lsp_label})"))),
                             )
@@ -209,8 +210,8 @@ pub(crate) fn render_status_bar(
                 .child(
                     div()
                         .id("status-theme-btn")
-                        .px(px(4.0))
-                        .py(px(1.0))
+                        .px(rem(4.0))
+                        .py(rem(1.0))
                         .rounded(px(3.0))
                         .cursor_pointer()
                         .hover(|s| s.bg(rgba(t.ghost_hover)))
@@ -230,8 +231,8 @@ pub(crate) fn render_status_bar(
                         .justify_center()
                         .cursor_pointer()
                         .rounded(px(3.0))
-                        .px(px(2.0))
-                        .py(px(1.0))
+                        .px(rem(2.0))
+                        .py(rem(1.0))
                         .hover(|s| s.bg(rgba(t.ghost_hover)))
                         .on_click(|_, window, cx| {
                             window.dispatch_action(Box::new(crate::actions::OpenSettings), cx);
@@ -239,8 +240,8 @@ pub(crate) fn render_status_bar(
                         .child(
                             svg()
                                 .path("ui_icons/settings-gear_tint.svg")
-                                .w(px(13.0))
-                                .h(px(13.0))
+                                .w(rem(13.0))
+                                .h(rem(13.0))
                                 .text_color(rgba(t.text)),
                         ),
                 )
@@ -256,8 +257,8 @@ pub(crate) fn render_status_bar(
                         .justify_center()
                         .cursor_pointer()
                         .rounded(px(3.0))
-                        .px(px(2.0))
-                        .py(px(1.0))
+                        .px(rem(2.0))
+                        .py(rem(1.0))
                         .hover(|s| s.bg(rgba(t.ghost_hover)))
                         .on_click(|_, window, cx| {
                             window
@@ -266,8 +267,8 @@ pub(crate) fn render_status_bar(
                         .child(
                             svg()
                                 .path("ui_icons/terminal_panel_right.svg")
-                                .w(px(14.0))
-                                .h(px(14.0))
+                                .w(rem(14.0))
+                                .h(rem(14.0))
                                 .text_color(rgba(if right_terminal_open {
                                     t.text
                                 } else {

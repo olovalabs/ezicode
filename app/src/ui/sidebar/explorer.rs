@@ -37,15 +37,28 @@ use crate::fs_tree::{ancestor_chain, sticky_layout, subtree_end, VisibleTreeRow}
 use crate::git::ChangeKind;
 use crate::theme::Colors;
 use crate::ui::common::icon_img;
+use crate::ui::scale::{rem, ui_px};
 use crate::workspace::{CreatingKind, ExplorerDrag, InlineCreating, InlineRenaming, Workspace};
 
+/// The tree's geometry, in *design* pixels: how much each one occupies at the
+/// design UI font size. Every one of them goes through `rem`, which is what
+/// makes the file tree scale with `ui_font_size` — text, icons, indentation and
+/// row heights all move by the same factor, so nested rows stay aligned on the
+/// columns their guides mark. Zed's project panel scales the same way; there,
+/// the whole interface is written in rems from the start.
+///
 /// VS Code's `workbench.tree.indent`.
 const INDENT_STEP: f32 = 8.0;
 const BASE_PAD: f32 = 8.0;
 /// VS Code's list row height.
-pub(crate) const ROW_HEIGHT: f32 = 22.0;
+pub(crate) const ROW_HEIGHT: f32 = 24.0;
 const ICON_SIZE: f32 = 16.0;
-const TEXT_SIZE: f32 = 13.0;
+const TEXT_SIZE: f32 = 14.0;
+/// The disclosure triangle's glyph, and the gaps that space a row's leading
+/// elements. The box the triangle sits in is the same square as a file icon.
+const CHEVRON_SIZE: f32 = 12.0;
+const CHEVRON_GAP: f32 = 2.0;
+const ICON_GAP: f32 = 6.0;
 /// `workbench.tree.stickyScrollMaxItemCount`.
 pub(crate) const STICKY_MAX_ROWS: usize = 7;
 /// How close to an edge a drag has to get before the list scrolls itself.
@@ -142,8 +155,8 @@ fn root_header(view: &ExplorerView<'_>, t: &Colors, cx: &mut Context<Workspace>)
 
     div()
         .id("exp-root-header")
-        .h(px(35.0))
-        .px(px(8.0))
+        .h(rem(35.0))
+        .px(rem(8.0))
         .flex()
         .flex_row()
         .items_center()
@@ -199,11 +212,11 @@ fn root_header(view: &ExplorerView<'_>, t: &Colors, cx: &mut Context<Workspace>)
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(4.0))
+                .gap(rem(4.0))
                 .child(
                     div()
-                        .w(px(16.0))
-                        .h(px(16.0))
+                        .w(rem(ICON_SIZE))
+                        .h(rem(ICON_SIZE))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -211,18 +224,18 @@ fn root_header(view: &ExplorerView<'_>, t: &Colors, cx: &mut Context<Workspace>)
                         .child(
                             svg()
                                 .path(root_chevron)
-                                .w(px(12.0))
-                                .h(px(12.0))
+                                .w(rem(CHEVRON_SIZE))
+                                .h(rem(CHEVRON_SIZE))
                                 .text_color(rgba(t.icon_muted)),
                         ),
                 )
-                .child(icon_img(root_folder_icon, ICON_SIZE))
+                .child(icon_img(root_folder_icon, rem(ICON_SIZE)))
                 .child(
                     div()
                         .min_w(px(0.0))
                         .overflow_hidden()
                         .text_ellipsis()
-                        .text_size(px(13.0))
+                        .text_size(rem(TEXT_SIZE))
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgba(t.text))
                         .child(view.folder.clone()),
@@ -422,8 +435,9 @@ fn tree_body(view: ExplorerView<'_>, t: &Colors, cx: &mut Context<Workspace>) ->
         // Dragging near the top or bottom edge scrolls the list, so an item
         // can be dropped outside the current viewport.
         .on_drag_move(cx.listener(
-            move |_this, event: &DragMoveEvent<ExplorerDrag>, window, _cx| {
-                if auto_scroll_during_drag(&scroll_for_drag, event.bounds, event.event.position) {
+            move |_this, event: &DragMoveEvent<ExplorerDrag>, window, cx| {
+                let (bounds, position) = (event.bounds, event.event.position);
+                if auto_scroll_during_drag(&scroll_for_drag, bounds, position, cx) {
                     window.refresh();
                 }
             },
@@ -450,20 +464,27 @@ fn tree_body(view: ExplorerView<'_>, t: &Colors, cx: &mut Context<Workspace>) ->
 }
 
 /// Scroll the tree while a drag hovers near one of its edges.
+///
+/// The edge margin and the step are design pixels: when `ui_font_size` grows
+/// the rows with it, one tick still has to move exactly one row, and the strip
+/// that triggers it stays the same proportion of the panel.
 fn auto_scroll_during_drag(
     scroll_handle: &UniformListScrollHandle,
     bounds: Bounds<Pixels>,
     position: Point<Pixels>,
+    cx: &App,
 ) -> bool {
     if !bounds.contains(&position) {
         return false;
     }
     let from_top = f32::from(position.y - bounds.origin.y);
     let from_bottom = f32::from(bounds.origin.y + bounds.size.height - position.y);
-    let delta = if from_top < DRAG_SCROLL_MARGIN {
-        ROW_HEIGHT
-    } else if from_bottom < DRAG_SCROLL_MARGIN {
-        -ROW_HEIGHT
+    let margin = f32::from(ui_px(DRAG_SCROLL_MARGIN, cx));
+    let row = f32::from(ui_px(ROW_HEIGHT, cx));
+    let delta = if from_top < margin {
+        row
+    } else if from_bottom < margin {
+        -row
     } else {
         return false;
     };
@@ -684,12 +705,12 @@ fn sticky_row(
     div()
         .id(("sticky-row", index))
         .w_full()
-        .h(px(ROW_HEIGHT))
+        .h(rem(ROW_HEIGHT))
         .flex()
         .flex_row()
         .items_center()
-        .pl(px(pad))
-        .pr(px(8.0))
+        .pl(rem(pad))
+        .pr(rem(8.0))
         .cursor_pointer()
         // Opaque, so the rows scrolling underneath stay hidden, with a hairline
         // under the innermost header to separate the stack from the tree.
@@ -727,8 +748,8 @@ fn sticky_row(
         .child(
             div()
                 .id(("sticky-chevron", index))
-                .w(px(16.0))
-                .h(px(16.0))
+                .w(rem(ICON_SIZE))
+                .h(rem(ICON_SIZE))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -740,21 +761,21 @@ fn sticky_row(
                 .child(
                     svg()
                         .path(chevron)
-                        .w(px(12.0))
-                        .h(px(12.0))
+                        .w(rem(CHEVRON_SIZE))
+                        .h(rem(CHEVRON_SIZE))
                         .text_color(rgba(t.icon_muted)),
                 ),
         )
-        .child(div().w(px(2.0)).flex_none())
-        .child(icon_img(icon_path, ICON_SIZE))
-        .child(div().w(px(6.0)).flex_none())
+        .child(div().w(rem(CHEVRON_GAP)).flex_none())
+        .child(icon_img(icon_path, rem(ICON_SIZE)))
+        .child(div().w(rem(ICON_GAP)).flex_none())
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .text_ellipsis()
-                .text_size(px(TEXT_SIZE))
+                .text_size(rem(TEXT_SIZE))
                 .text_color(rgba(t.text))
                 .child(SharedString::from(name)),
         )
@@ -771,7 +792,7 @@ fn header_action_button(
 ) -> impl IntoElement {
     div()
         .id(id)
-        .size(px(24.0))
+        .size(rem(24.0))
         .flex()
         .items_center()
         .justify_center()
@@ -782,8 +803,8 @@ fn header_action_button(
         .child(
             svg()
                 .path(icon_path)
-                .w(px(16.0))
-                .h(px(16.0))
+                .w(rem(ICON_SIZE))
+                .h(rem(ICON_SIZE))
                 .text_color(rgba(t.icon_muted)),
         )
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -810,7 +831,7 @@ fn indent_guides(
         row = row.child(
             div()
                 .absolute()
-                .left(px(guide_x))
+                .left(rem(guide_x))
                 .top(px(0.0))
                 .bottom(px(0.0))
                 .w(px(1.0))
@@ -831,7 +852,7 @@ fn inline_create_row(
     let mut row = div()
         .id("inline-create-row")
         .w_full()
-        .h(px(ROW_HEIGHT))
+        .h(rem(ROW_HEIGHT))
         .relative()
         .flex()
         .flex_row()
@@ -866,27 +887,27 @@ fn inline_create_row(
         .flex()
         .flex_row()
         .items_center()
-        .pl(px(pad))
-        .pr(px(10.0))
-        .child(div().w(px(16.0)).h(px(16.0)).flex_none())
-        .child(div().w(px(2.0)).flex_none())
-        .child(icon_img(icon, ICON_SIZE))
-        .child(div().w(px(6.0)).flex_none())
+        .pl(rem(pad))
+        .pr(rem(10.0))
+        .child(div().w(rem(ICON_SIZE)).h(rem(ICON_SIZE)).flex_none())
+        .child(div().w(rem(CHEVRON_GAP)).flex_none())
+        .child(icon_img(icon, rem(ICON_SIZE)))
+        .child(div().w(rem(ICON_GAP)).flex_none())
         .child(
             div()
                 .flex_1()
-                .h(px(20.0))
+                .h(rem(20.0))
                 .flex()
                 .items_center()
                 .bg(rgba(t.background))
                 .border_1()
                 .border_color(rgba(t.border_focused))
                 .rounded(px(3.0))
-                .px(px(2.0))
+                .px(rem(2.0))
                 .child(
                     Input::new(&creating.input)
                         .xsmall()
-                        .text_size(px(TEXT_SIZE))
+                        .text_size(rem(TEXT_SIZE))
                         .appearance(false)
                         .bordered(false),
                 ),
@@ -916,8 +937,8 @@ fn inline_rename_row(
             "ui_icons/chevron-right_tint.svg"
         };
         div()
-            .w(px(16.0))
-            .h(px(16.0))
+            .w(rem(ICON_SIZE))
+            .h(rem(ICON_SIZE))
             .flex()
             .items_center()
             .justify_center()
@@ -925,18 +946,18 @@ fn inline_rename_row(
             .child(
                 svg()
                     .path(path)
-                    .w(px(12.0))
-                    .h(px(12.0))
+                    .w(rem(CHEVRON_SIZE))
+                    .h(rem(CHEVRON_SIZE))
                     .text_color(rgba(t.icon_muted)),
             )
     } else {
-        div().w(px(16.0)).h(px(16.0)).flex_none()
+        div().w(rem(ICON_SIZE)).h(rem(ICON_SIZE)).flex_none()
     };
 
     let mut row = div()
         .id(("tree-row-rename", idx))
         .w_full()
-        .h(px(ROW_HEIGHT))
+        .h(rem(ROW_HEIGHT))
         .relative()
         .flex()
         .flex_row()
@@ -957,27 +978,27 @@ fn inline_rename_row(
             .flex()
             .flex_row()
             .items_center()
-            .pl(px(pad))
-            .pr(px(8.0))
+            .pl(rem(pad))
+            .pr(rem(8.0))
             .child(chev)
-            .child(div().w(px(2.0)).flex_none())
-            .child(icon_img(icon_path, ICON_SIZE))
-            .child(div().w(px(6.0)).flex_none())
+            .child(div().w(rem(CHEVRON_GAP)).flex_none())
+            .child(icon_img(icon_path, rem(ICON_SIZE)))
+            .child(div().w(rem(ICON_GAP)).flex_none())
             .child(
                 div()
                     .flex_1()
-                    .h(px(20.0))
+                    .h(rem(20.0))
                     .flex()
                     .items_center()
                     .bg(rgba(t.background))
                     .border_1()
                     .border_color(rgba(t.border_focused))
                     .rounded(px(3.0))
-                    .px(px(2.0))
+                    .px(rem(2.0))
                     .child(
                         Input::new(&renaming.input)
                             .xsmall()
-                            .text_size(px(TEXT_SIZE))
+                            .text_size(rem(TEXT_SIZE))
                             .appearance(false)
                             .bordered(false),
                     ),
@@ -1020,7 +1041,7 @@ fn tree_row(
     let mut row = div()
         .id(("tree-row", idx))
         .w_full()
-        .h(px(ROW_HEIGHT))
+        .h(rem(ROW_HEIGHT))
         .relative()
         .flex()
         .flex_row()
@@ -1076,8 +1097,8 @@ fn tree_row(
             "ui_icons/chevron-right_tint.svg"
         };
         div()
-            .w(px(16.0))
-            .h(px(16.0))
+            .w(rem(ICON_SIZE))
+            .h(rem(ICON_SIZE))
             .flex()
             .items_center()
             .justify_center()
@@ -1085,12 +1106,12 @@ fn tree_row(
             .child(
                 svg()
                     .path(chev_path)
-                    .w(px(12.0))
-                    .h(px(12.0))
+                    .w(rem(CHEVRON_SIZE))
+                    .h(rem(CHEVRON_SIZE))
                     .text_color(rgba(t.icon_muted)),
             )
     } else {
-        div().w(px(16.0)).h(px(16.0)).flex_none()
+        div().w(rem(ICON_SIZE)).h(rem(ICON_SIZE)).flex_none()
     };
 
     let content = div()
@@ -1099,19 +1120,19 @@ fn tree_row(
         .flex()
         .flex_row()
         .items_center()
-        .pl(px(pad))
-        .pr(px(8.0))
+        .pl(rem(pad))
+        .pr(rem(8.0))
         .child(chevron_element)
-        .child(div().w(px(2.0)).flex_none())
-        .child(icon_img(icon_path, ICON_SIZE))
-        .child(div().w(px(6.0)).flex_none())
+        .child(div().w(rem(CHEVRON_GAP)).flex_none())
+        .child(icon_img(icon_path, rem(ICON_SIZE)))
+        .child(div().w(rem(ICON_GAP)).flex_none())
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .text_ellipsis()
-                .text_size(px(TEXT_SIZE))
+                .text_size(rem(TEXT_SIZE))
                 .text_color(rgba(text_color))
                 .child(SharedString::from(name)),
         )
@@ -1120,8 +1141,8 @@ fn tree_row(
             d.child(
                 div()
                     .flex_none()
-                    .pl(px(4.0))
-                    .text_size(px(11.0))
+                    .pl(rem(4.0))
+                    .text_size(rem(11.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgba(git_kind_color(kind, &t)))
                     .child(SharedString::from(kind.letter())),
@@ -1283,16 +1304,16 @@ impl Render for ExplorerDrag {
             .flex()
             .flex_row()
             .items_center()
-            .px(px(8.0))
-            .py(px(4.0))
+            .px(rem(8.0))
+            .py(rem(4.0))
             .rounded(px(4.0))
             .bg(rgba(0x252526f0))
             .border_1()
             .border_color(rgba(0x454545ff))
-            .text_size(px(TEXT_SIZE))
+            .text_size(rem(TEXT_SIZE))
             .text_color(rgba(0xccccccff))
-            .child(icon_img(icon_path, ICON_SIZE))
-            .child(div().w(px(6.0)).flex_none())
+            .child(icon_img(icon_path, rem(ICON_SIZE)))
+            .child(div().w(rem(ICON_GAP)).flex_none())
             .child(SharedString::from(label))
     }
 }

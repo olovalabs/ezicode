@@ -46,6 +46,7 @@ ezicode replaces heavy web-based editor architectures with a lean, compiled nati
 * **Integrated Terminal Dock**: Embedded bottom and side terminal panels with independent shell sessions.
 * **Native Git Integration**: Built-in status tracking, side-by-side and unified diff viewers, and stage management.
 * **Sticky Scroll Explorer**: Virtualized directory tree with sticky parent folder headers for deep navigation.
+* **UI Font Scaling**: A single `ui_font_size` setting scales interface text, file tree rows, icons and indentation together.
 
 ---
 

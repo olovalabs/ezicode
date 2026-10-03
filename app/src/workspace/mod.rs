@@ -263,6 +263,12 @@ pub(crate) struct Workspace {
     pub(crate) theme_ix: usize,
     /// Editor buffer font size in pixels (supports Ctrl++/Ctrl-- zoom like Zed)
     pub(crate) font_size: f32,
+    /// The UI's font size — Zed's `ui_font_size`. The size of UI text, and with
+    /// it the size of a `rem`, which is what sidebar rows, file icons, indents
+    /// and gaps are measured in, so this one number scales the interface.
+    /// Mirrored from `settings.ui_font_size` (which is what persists) the way
+    /// `font_size` mirrors `settings.editor_font_size`.
+    pub(crate) ui_font_size: f32,
     /// Language Server Protocol client manager
     pub(crate) lsp: Arc<Mutex<LspManager>>,
     /// Active diagnostics received from language servers, shared with the
@@ -371,6 +377,12 @@ pub(crate) struct Workspace {
     pub(crate) git_commit_pending: bool,
 
     pub(crate) settings: crate::settings::Settings,
+    pub(crate) settings_category: usize,
+    pub(crate) settings_search_input: Option<Entity<InputState>>,
+    pub(crate) settings_font_size_input: Option<Entity<InputState>>,
+    pub(crate) settings_ui_font_size_input: Option<Entity<InputState>>,
+    pub(crate) settings_font_family_input: Option<Entity<InputState>>,
+    pub(crate) settings_tab_size_input: Option<Entity<InputState>>,
 
     pub(crate) auto_save_generation: usize,
     auto_save_task: Option<Task<()>>,
@@ -612,6 +624,9 @@ impl Workspace {
             .position(|t| t.name == settings.workbench_color_theme)
             .unwrap_or_else(theme::default_index);
         let font_size = settings.editor_font_size;
+        // Clamped while reading the file, so what the UI is handed here is
+        // already a size the layout can survive.
+        let ui_font_size = settings.ui_font_size;
 
         let workspace = Self {
             root: None,
@@ -654,6 +669,7 @@ impl Workspace {
             terminal_maximized: false,
             theme_ix,
             font_size,
+            ui_font_size,
             settings,
             auto_save_generation: 0,
             auto_save_task: None,
@@ -703,6 +719,12 @@ impl Workspace {
             git_confirm: None,
             git_commit_input: None,
             git_commit_pending: false,
+            settings_category: 0,
+            settings_search_input: None,
+            settings_font_size_input: None,
+            settings_ui_font_size_input: None,
+            settings_font_family_input: None,
+            settings_tab_size_input: None,
             picker: None,
             picker_confirm_pending: false,
             workspace_files_cache: None,
@@ -731,6 +753,11 @@ impl Workspace {
             pending_search_jump: None,
             pending_restore_tabs: Vec::new(),
         };
+
+        // Publish the saved UI font size before the first frame, the way Zed
+        // sets its UI font up while building the workspace. The window's rem
+        // size follows it from `render` (see `ui::scale`).
+        crate::ui::scale::apply_ui_font_size(workspace.ui_font_size, cx);
 
         cx.spawn(async move |this, cx| {
             if let Ok(global) = storage_ready.recv().await {
@@ -979,6 +1006,10 @@ impl Workspace {
         gpui_component::Theme::global_mut(cx).highlight_theme = Arc::new(th.highlight_theme());
 
         crate::assets::sync_component_fonts(cx);
+        // Applying a theme rewrites the widget theme's font metrics, and its
+        // font size *is* the UI font size, so re-assert the user's setting
+        // afterwards — switching themes must not resize the interface.
+        crate::ui::scale::apply_ui_font_size(self.ui_font_size, cx);
 
         let palette = &th.terminal_palette;
         for tab in self
@@ -3397,7 +3428,7 @@ impl Workspace {
         }
 
         let current_ix = current.unwrap_or(0);
-        let page = self.explorer_page_size();
+        let page = self.explorer_page_size(cx);
 
         match key {
             "arrowdown" | "down" => {
@@ -3471,7 +3502,7 @@ impl Workspace {
     }
 
     /// Roughly how many rows fit in the panel; used by PageUp/PageDown.
-    fn explorer_page_size(&self) -> usize {
+    fn explorer_page_size(&self, cx: &App) -> usize {
         let viewport = self
             .explorer_scroll_handle
             .0
@@ -3479,7 +3510,10 @@ impl Workspace {
             .last_item_size
             .map(|size| f32::from(size.item.height))
             .unwrap_or(0.0);
-        let row_height = crate::ui::sidebar::explorer::ROW_HEIGHT;
+        // A row is `ROW_HEIGHT` at the design size and rem-scaled from there,
+        // so a page stays a page at any `ui_font_size`.
+        let scale = crate::ui::scale::ui_scale(cx);
+        let row_height = crate::ui::sidebar::explorer::ROW_HEIGHT * scale;
         if viewport > row_height {
             ((viewport / row_height).floor() as usize)
                 .saturating_sub(1)
@@ -5307,6 +5341,86 @@ impl Workspace {
         }
         self.open_file(path, window, cx);
     }
+    pub(crate) fn ensure_settings_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_search_input.is_none() {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
+            cx.subscribe(
+                &input,
+                |_this, _state, _event: &gpui_component::input::InputEvent, cx| {
+                    cx.notify();
+                },
+            )
+            .detach();
+            self.settings_search_input = Some(input);
+        }
+        if self.settings_font_size_input.is_none() {
+            let val = format!("{:.1}", self.settings.editor_font_size);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(val));
+            cx.subscribe(
+                &input,
+                |this, state, event: &gpui_component::input::InputEvent, cx| {
+                    if matches!(event, gpui_component::input::InputEvent::PressEnter { .. }) {
+                        let text = state.read(cx).value().to_string();
+                        if let Ok(v) = text.trim().parse::<f32>() {
+                            this.font_size = v.clamp(6.0, 72.0);
+                            this.settings.editor_font_size = this.font_size;
+                            let _ = this.settings.save();
+                            gpui_component::Theme::global_mut(cx).mono_font_size =
+                                gpui::px(this.font_size);
+                            cx.notify();
+                        }
+                    }
+                },
+            )
+            .detach();
+            self.settings_font_size_input = Some(input);
+        }
+        if self.settings_ui_font_size_input.is_none() {
+            let val = format!("{:.1}", self.settings.ui_font_size);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(val));
+            cx.subscribe(
+                &input,
+                |this, state, event: &gpui_component::input::InputEvent, cx| {
+                    if matches!(event, gpui_component::input::InputEvent::PressEnter { .. }) {
+                        let text = state.read(cx).value().to_string();
+                        if let Ok(v) = text.trim().parse::<f32>() {
+                            this.set_ui_font_size(v, cx);
+                        }
+                    }
+                },
+            )
+            .detach();
+            self.settings_ui_font_size_input = Some(input);
+        }
+        if self.settings_font_family_input.is_none() {
+            let input = cx.new(|cx| InputState::new(window, cx).default_value("Lilex"));
+            self.settings_font_family_input = Some(input);
+        }
+        if self.settings_tab_size_input.is_none() {
+            let val = format!("{}", self.settings.editor_tab_size);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(val));
+            cx.subscribe(
+                &input,
+                |this, state, event: &gpui_component::input::InputEvent, cx| {
+                    if matches!(event, gpui_component::input::InputEvent::PressEnter { .. }) {
+                        let text = state.read(cx).value().to_string();
+                        if let Ok(v) = text.trim().parse::<usize>() {
+                            this.settings.editor_tab_size = v.clamp(1, 16);
+                            let _ = this.settings.save();
+                            cx.notify();
+                        }
+                    }
+                },
+            )
+            .detach();
+            self.settings_tab_size_input = Some(input);
+        }
+    }
+
+    pub(crate) fn set_settings_category(&mut self, cat: usize, cx: &mut Context<Self>) {
+        self.settings_category = cat;
+        cx.notify();
+    }
 
     pub(crate) fn reload_settings(&mut self, cx: &mut Context<Self>) {
         self.settings = crate::settings::Settings::load();
@@ -5325,6 +5439,11 @@ impl Workspace {
         }
         self.font_size = self.settings.editor_font_size;
         gpui_component::Theme::global_mut(cx).mono_font_size = gpui::px(self.font_size);
+        // `ui_font_size` is the other half of that pair: editing it in
+        // settings.json rescales the whole interface live, with no restart,
+        // exactly as changing it on the Settings page does.
+        self.ui_font_size = self.settings.ui_font_size;
+        crate::ui::scale::apply_ui_font_size(self.ui_font_size, cx);
         self.status = "Settings reloaded from settings.json".into();
         cx.notify();
     }
@@ -5593,6 +5712,42 @@ impl Workspace {
         gpui_component::Theme::global_mut(cx).mono_font_size = gpui::px(self.font_size);
         self.status = format!("Editor font size reset: {:.1}px", self.font_size);
         cx.notify();
+    }
+
+    /// Zed's `ui_font_size`: the size of the interface's text, which is also
+    /// the size of a `rem` — so file tree rows, their icons, their indentation
+    /// and the gaps between them all scale from this one number.
+    ///
+    /// The request is clamped into the supported range (a `+` pressed at the
+    /// top of it is a no-op rather than a redraw), written to `settings.json` so
+    /// the size comes back next launch, and applied to the live windows, so it
+    /// takes effect immediately.
+    pub(crate) fn set_ui_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let size = crate::settings::clamp_ui_font_size(size);
+        if self.ui_font_size == size {
+            return;
+        }
+        self.ui_font_size = size;
+        self.settings.ui_font_size = size;
+        let _ = self.settings.save();
+        crate::ui::scale::apply_ui_font_size(size, cx);
+        self.status = format!("UI font size: {size:.1}px");
+        cx.notify();
+    }
+
+    /// One pixel up, the step Zed's `zed::IncreaseUiFontSize` uses.
+    pub(crate) fn increase_ui_font_size(&mut self, cx: &mut Context<Self>) {
+        self.set_ui_font_size(self.ui_font_size + 1.0, cx);
+    }
+
+    /// One pixel down, the step Zed's `zed::DecreaseUiFontSize` uses.
+    pub(crate) fn decrease_ui_font_size(&mut self, cx: &mut Context<Self>) {
+        self.set_ui_font_size(self.ui_font_size - 1.0, cx);
+    }
+
+    /// Back to the size the interface was designed at.
+    pub(crate) fn reset_ui_font_size(&mut self, cx: &mut Context<Self>) {
+        self.set_ui_font_size(crate::settings::DEFAULT_UI_FONT_SIZE, cx);
     }
 
     pub(crate) fn quit(&mut self, cx: &mut Context<Self>) {
@@ -6254,6 +6409,9 @@ impl Workspace {
             "editor.font_increase" => self.increase_font_size(cx),
             "editor.font_decrease" => self.decrease_font_size(cx),
             "editor.font_reset" => self.reset_font_size(cx),
+            "ui.font_size_increase" => self.increase_ui_font_size(cx),
+            "ui.font_size_decrease" => self.decrease_ui_font_size(cx),
+            "ui.font_size_reset" => self.reset_ui_font_size(cx),
             "editor.copy_diagnostic" => self.copy_active_diagnostic(cx),
             "git.refresh" => self.git_refresh(cx),
             "git.stage_all" => self.git_stage_all(cx),

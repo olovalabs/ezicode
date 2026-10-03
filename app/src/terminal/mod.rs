@@ -547,7 +547,7 @@ impl Render for TerminalTabDrag {
             .border_color(rgba(0x394049ff))
             .text_size(px(12.0))
             .text_color(rgba(TAB_ACTIVE_TEXT))
-            .child(crate::ui::common::icon_img(self.icon, 15.0))
+            .child(crate::ui::common::icon_img(self.icon, px(15.0)))
             .child(div().w(px(6.0)).flex_none())
             .child(self.label.clone())
     }
@@ -927,7 +927,7 @@ fn render_terminal_tab(
     tab = tab.child(
         div()
             .flex_shrink_0()
-            .child(crate::ui::common::icon_img(icon_path, 15.0)),
+            .child(crate::ui::common::icon_img(icon_path, px(15.0))),
     );
 
     if is_read_only {

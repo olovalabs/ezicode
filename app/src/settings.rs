@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +34,7 @@ pub enum AutoSaveMode {
 }
 
 impl AutoSaveMode {
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             AutoSaveMode::Off => "A dirty file is never automatically saved (Ctrl+S to save).",
@@ -67,6 +68,7 @@ pub enum FormatOnSaveMode {
 }
 
 impl FormatOnSaveMode {
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             FormatOnSaveMode::Off => {
@@ -77,8 +79,42 @@ impl FormatOnSaveMode {
     }
 }
 
+/// The size the interface was designed at, in pixels.
+///
+/// `ui_font_size` starts here, and every scalable metric in the UI is a
+/// fraction of it (see [`crate::ui::scale`]), so leaving the setting at its
+/// default reproduces the original layout exactly.
+pub const DEFAULT_UI_FONT_SIZE: f32 = 14.0;
+
+/// Smallest `ui_font_size` accepted. The lower bound keeps the interface
+/// usable; the pair is the same clamp Zed applies to font sizes
+/// (`clamp_font_size` in `zed/crates/theme_settings`).
+pub const MIN_UI_FONT_SIZE: f32 = 6.0;
+
+/// Largest `ui_font_size` accepted, and the guard that stops a hand-edited
+/// `settings.json` from asking for a 400px interface.
+pub const MAX_UI_FONT_SIZE: f32 = 100.0;
+
+/// Clamp a requested UI font size into [`MIN_UI_FONT_SIZE`]..=[`MAX_UI_FONT_SIZE`].
+///
+/// Out-of-range values are clamped rather than rejected, so editing the number
+/// by hand can never wedge the UI. A non-finite value (a `NaN` typed into the
+/// JSON, say) falls back to the default instead of poisoning every length it
+/// would otherwise be multiplied by.
+pub fn clamp_ui_font_size(size: f32) -> f32 {
+    if size.is_finite() {
+        size.clamp(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
+    } else {
+        DEFAULT_UI_FONT_SIZE
+    }
+}
+
 fn default_font_size() -> f32 {
     14.5
+}
+
+fn default_ui_font_size() -> f32 {
+    DEFAULT_UI_FONT_SIZE
 }
 
 fn default_theme() -> String {
@@ -109,6 +145,17 @@ pub struct Settings {
     #[serde(rename = "editor.fontSize", default = "default_font_size")]
     pub editor_font_size: f32,
 
+    /// The size of every text in the interface — Zed's `ui_font_size`.
+    ///
+    /// It is also the size of `1rem`, the unit the sidebar's rows, icons,
+    /// indents and gaps are expressed in, so changing it scales the whole
+    /// interface the way zooming a web page does instead of only the editor.
+    /// The key is intentionally spelled like Zed's (`ui_font_size`, not a
+    /// `workbench.*`/`editor.*` pair) because, unlike the other settings here,
+    /// it is not an editor or a workbench option: it is the UI's scale.
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: f32,
+
     #[serde(rename = "workbench.colorTheme", default = "default_theme")]
     pub workbench_color_theme: String,
 
@@ -136,6 +183,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             editor_font_size: default_font_size(),
+            ui_font_size: default_ui_font_size(),
             workbench_color_theme: default_theme(),
             editor_auto_save: default_auto_save(),
             editor_auto_save_delay: default_auto_save_delay(),
@@ -227,26 +275,120 @@ pub fn settings_file_path() -> PathBuf {
 impl Settings {
     /// Loads settings from `settings.json` on disk, creating a default file if none exists.
     pub fn load() -> Self {
-        let path = settings_file_path();
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(settings) = serde_json::from_str::<Settings>(&content) {
+        Self::load_from(&settings_file_path())
+    }
+
+    /// `load` with the file spelled out, so a caller that is not the workbench —
+    /// a test, or a second settings file — reads a path of its own instead of
+    /// the one in the config directory.
+    pub fn load_from(path: &Path) -> Self {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(mut settings) = serde_json::from_str::<Settings>(&content) {
+                // Values a user typed into the JSON by hand are clamped on the
+                // way in (the same place Zed clamps them), so one bad number
+                // can neither shrink the UI into unreadability nor blow it up.
+                settings.ui_font_size = clamp_ui_font_size(settings.ui_font_size);
                 return settings;
             }
         }
 
         let defaults = Settings::default();
-        let _ = defaults.save();
+        let _ = defaults.save_to(path);
         defaults
     }
 
     /// Saves the current settings to `settings.json` with pretty JSON formatting.
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let dir = config_dir();
-        std::fs::create_dir_all(&dir)?;
-        let path = settings_file_path();
+        self.save_to(&settings_file_path())
+    }
+
+    /// `save` with the file spelled out; its directory is created when missing
+    /// (`create_dir_all` accepts the empty parent of a bare file name).
+    pub fn save_to(&self, path: &Path) -> Result<(), std::io::Error> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(path, json.as_bytes())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The setting is spelled the way Zed spells it, and it is written back out
+    /// under the same key, which is what makes a saved size survive a restart.
+    #[test]
+    fn ui_font_size_round_trips_through_its_zed_key() {
+        assert_eq!(Settings::default().ui_font_size, DEFAULT_UI_FONT_SIZE);
+
+        let settings = Settings {
+            ui_font_size: 21.5,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(
+            json.contains(r#""ui_font_size":21.5"#),
+            "saved settings must use Zed's key, got {json}"
+        );
+
+        let restored: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.ui_font_size, 21.5);
+    }
+
+    /// Existing `settings.json` files have no `ui_font_size`; they keep the
+    /// look they had before the setting existed rather than jumping to a new
+    /// size on upgrade.
+    #[test]
+    fn a_missing_ui_font_size_falls_back_to_the_design_size() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.ui_font_size, DEFAULT_UI_FONT_SIZE);
+        // The design size is also the rem base, so this is the one value at
+        // which no metric in the UI moves.
+        assert_eq!(settings.ui_font_size, crate::ui::scale::UI_FONT_BASE);
+    }
+
+    #[test]
+    fn ui_font_size_is_clamped_instead_of_rejected() {
+        assert_eq!(clamp_ui_font_size(0.0), MIN_UI_FONT_SIZE);
+        assert_eq!(clamp_ui_font_size(6.0), MIN_UI_FONT_SIZE);
+        assert_eq!(clamp_ui_font_size(42.0), 42.0);
+        assert_eq!(clamp_ui_font_size(100.0), MAX_UI_FONT_SIZE);
+        assert_eq!(clamp_ui_font_size(1e9), MAX_UI_FONT_SIZE);
+        // A non-finite size would multiply into every length in the interface.
+        assert_eq!(clamp_ui_font_size(f32::NAN), DEFAULT_UI_FONT_SIZE);
+        assert_eq!(clamp_ui_font_size(f32::INFINITY), DEFAULT_UI_FONT_SIZE);
+    }
+
+    /// The restart story: what is written to the file is what the next load
+    /// reads back, and a size edited by hand is repaired while reading — so no
+    /// code path has to remember to validate it again.
+    #[test]
+    fn a_saved_size_is_what_the_next_load_reads() {
+        let fixture = crate::test_support::TempDir::new("ui-font-size-file");
+        let path = fixture.path().join("settings.json");
+
+        let settings = Settings {
+            ui_font_size: 21.5,
+            ..Settings::default()
+        };
+        settings.save_to(&path).unwrap();
+        assert_eq!(Settings::load_from(&path).ui_font_size, 21.5);
+
+        std::fs::write(&path, r#"{ "ui_font_size": 900 }"#).unwrap();
+        assert_eq!(Settings::load_from(&path).ui_font_size, MAX_UI_FONT_SIZE);
+
+        // Unparseable JSON must not wedge the UI either: the defaults come
+        // back, and the good file is written over the broken one.
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(
+            Settings::load_from(&path).ui_font_size,
+            DEFAULT_UI_FONT_SIZE
+        );
+        let repaired = std::fs::read_to_string(&path).unwrap();
+        assert!(repaired.contains("\"ui_font_size\""), "{repaired}");
     }
 }

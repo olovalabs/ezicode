@@ -105,7 +105,8 @@ leaving a stale highlight behind — no bookkeeping needed at those call sites.
 ### Keyboard
 
 Arrows (with VS Code's "left collapses, then walks to the parent" rule),
-Home/End, PageUp/PageDown sized from the real viewport, Enter (open and pin),
+Home/End, PageUp/PageDown sized from the real viewport and the scaled row
+height, Enter (open and pin),
 Space (open as preview), F2, Delete, `*` to expand a subtree, and type-ahead:
 typing letters jumps to the next matching row, repeating one letter cycles
 through matches, and the buffer expires after a pause.
@@ -129,8 +130,18 @@ on blank space.
 
 ### Small details that matter
 
-* Rows are 22px with 8px indents, 13px labels and indent guides; the guide of
+* Rows are 24px with 8px indents, 14px labels and indent guides; the guide of
   the focused row's branch is highlighted.
+* Those are *design* pixels: each one goes through `ui::scale::rem`, where 1 rem
+  is `ui_font_size` (14px by default). Raising the UI font size therefore grows
+  labels, file icons, chevrons, row height, gaps and the indent step together,
+  so the tree reads as zoomed rather than as text clipped inside a row that
+  stayed put. It needs no rebuild, because only the lengths change. Hairlines
+  (indent guides, borders) and corner radii stay in px: a one pixel guide is
+  one pixel at every size.
+* The Git sidebar measures its rows, labels, badges and icons the same way, so
+  the two panels that share the activity bar scale together instead of one
+  growing inside rows that stayed put.
 * Paste and Duplicate use VS Code's naming (`report copy.md`, then
   `report copy 2.md`).
 * Deleting moves focus to the next surviving row.

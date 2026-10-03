@@ -4,6 +4,7 @@ pub mod breadcrumbs;
 pub mod common;
 pub mod diff;
 pub mod picker;
+pub mod scale;
 pub mod settings;
 pub mod sidebar;
 pub mod status_bar;

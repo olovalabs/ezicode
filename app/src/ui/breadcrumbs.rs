@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use crate::theme::Colors;
+use crate::ui::scale::rem;
 use crate::workspace::Workspace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,8 +279,8 @@ pub fn render_breadcrumbs(
     let mut bar = div()
         .id("breadcrumbs-bar")
         .w_full()
-        .h(px(24.0))
-        .px(px(10.0))
+        .h(rem(24.0))
+        .px(rem(10.0))
         .flex()
         .flex_row()
         .items_center()
@@ -303,11 +304,11 @@ pub fn render_breadcrumbs(
 
         let mut item_el = div()
             .id(SharedString::from(format!("breadcrumb-{ix}")))
-            .h(px(20.0))
-            .px(px(4.0))
+            .h(rem(20.0))
+            .px(rem(4.0))
             .flex()
             .items_center()
-            .gap(px(5.0))
+            .gap(rem(5.0))
             .rounded(px(3.0))
             .cursor_pointer()
             .hover(|s| s.bg(rgba(t.element_hover)))
@@ -323,12 +324,12 @@ pub fn render_breadcrumbs(
         if let Some(ic) = icon {
             item_el = item_el.child(
                 div()
-                    .size(px(14.0))
+                    .size(rem(14.0))
                     .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(img(SharedString::from(ic)).size(px(14.0))),
+                    .child(img(SharedString::from(ic)).size(rem(14.0))),
             );
         } else if kind == BreadcrumbKind::Symbol {
             // [abc] style symbol badge matching the VS Code reference screenshot
@@ -350,7 +351,7 @@ pub fn render_breadcrumbs(
 
         item_el = item_el.child(
             div()
-                .text_size(px(12.0))
+                .text_size(rem(12.0))
                 .text_color(text_color)
                 .whitespace_nowrap()
                 .child(label),
@@ -363,7 +364,7 @@ pub fn render_breadcrumbs(
             bar = bar.child(
                 div()
                     .px(px(3.0))
-                    .text_size(px(11.0))
+                    .text_size(rem(11.0))
                     .text_color(rgba(0x6e7681ff))
                     .flex_none()
                     .child("›"),

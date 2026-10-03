@@ -9,6 +9,7 @@ use gpui_component::{
 use crate::actions::*;
 use crate::theme::{self, Colors};
 use crate::ui::app_icon;
+use crate::ui::scale::rem;
 
 pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl IntoElement {
     TitleBar::new()
@@ -21,7 +22,7 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                 .flex()
                 .flex_row()
                 .items_center()
-                .text_size(px(13.5))
+                .text_size(rem(13.5))
                 .child(
                     div()
                         .flex()
@@ -120,7 +121,7 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_size(px(13.0))
+                        .text_size(rem(13.0))
                         .text_color(rgba(t.text))
                         .child(SharedString::from(title.to_string())),
                 ),
