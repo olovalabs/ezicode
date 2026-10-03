@@ -121,10 +121,8 @@ pub(crate) fn render_status_bar(
                             .cursor_pointer()
                             .hover(|s| s.bg(rgba(t.ghost_hover)))
                             .on_click(|_, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(crate::actions::NextDiagnostic),
-                                    cx,
-                                );
+                                window
+                                    .dispatch_action(Box::new(crate::actions::NextDiagnostic), cx);
                             })
                             .child(
                                 div()

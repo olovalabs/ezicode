@@ -307,7 +307,10 @@ impl Render for Workspace {
                 })
                 .unwrap_or((0, 0));
             Some((errors, warnings))
-        } else if !self.diagnostics_by_path.is_empty() || self.git.is_some() || !self.tabs.is_empty() {
+        } else if !self.diagnostics_by_path.is_empty()
+            || self.git.is_some()
+            || !self.tabs.is_empty()
+        {
             let mut total_errors = 0;
             let mut total_warnings = 0;
             for diags in self.diagnostics_by_path.values() {

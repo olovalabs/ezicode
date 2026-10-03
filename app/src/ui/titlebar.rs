@@ -64,10 +64,7 @@ pub(crate) fn render_titlebar(title: &str, t: &Colors, theme_ix: usize) -> impl 
                                 .separator()
                                 .menu("Select All", Box::new(SelectAll))
                                 .separator()
-                                .menu(
-                                    "Go to Next Problem (F8)",
-                                    Box::new(NextDiagnostic),
-                                )
+                                .menu("Go to Next Problem (F8)", Box::new(NextDiagnostic))
                                 .menu(
                                     "Go to Previous Problem (Shift+F8)",
                                     Box::new(PrevDiagnostic),
